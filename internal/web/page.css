@@ -101,6 +101,7 @@ table { border-collapse: collapse; width: 100%; font-size: 13px; }
 th { text-align: left; font-weight: 500; color: var(--text-secondary); border-bottom: 1px solid var(--grid); padding: 6px 8px; }
 td { border-bottom: 1px solid var(--grid); padding: 7px 8px; vertical-align: top; }
 td.num, th.num { text-align: right; }
+td.tnum { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .status { display: inline-flex; align-items: center; gap: 6px; }
 .table-wrap { overflow-x: auto; }
 
@@ -126,6 +127,7 @@ details summary { cursor: pointer; color: var(--text-secondary); font-size: 13px
 
 .events { list-style: none; padding: 0; margin: 0; max-height: 360px; overflow-y: auto; }
 .events li { display: grid; grid-template-columns: 96px 1fr; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--grid); font-size: 13px; }
+.events li.empty-row { display: block; }
 .events .when { color: var(--text-muted); font-variant-numeric: tabular-nums; }
 
 form .fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px 16px; }
