@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lamplighter</title>
+<style>/*CSS*/</style>
+</head>
+<body>
+<div id="key-section" hidden>
+  <h2>需要管理密钥</h2>
+  <p class="secondary">在管理中心登录时勾选“记住密码”，此页面会直接使用该密钥；否则请在这里输入，密钥只保存在当前标签页。</p>
+  <form id="key-form">
+    <input id="key-input" type="password" autocomplete="off" placeholder="CPA 管理密钥">
+    <button class="primary" type="submit">确定</button>
+  </form>
+  <p id="key-error" class="error-text" hidden></p>
+</div>
+
+<main id="app" hidden>
+  <header>
+    <h1>Lamplighter<span class="sub">点灯人</span></h1>
+    <span id="state" class="badge"></span>
+    <span id="meta" class="meta"></span>
+    <div class="actions">
+      <button id="refresh-all" type="button">立即刷新全部</button>
+      <button id="test-bark" type="button">测试推送</button>
+    </div>
+  </header>
+
+  <div id="notices"></div>
+
+  <section>
+    <h2>额度</h2>
+    <div id="accounts" class="accounts"></div>
+  </section>
+
+  <section>
+    <h2>自动点火</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>额度组</th><th>下次点火</th><th>当前重置</th><th>最近成功</th><th>模型</th><th>状态</th><th></th></tr>
+        </thead>
+        <tbody id="targets"></tbody>
+      </table>
+    </div>
+    <p id="ignition-note" class="muted"></p>
+  </section>
+
+  <section>
+    <h2>额度变化</h2>
+    <div class="filters">
+      <div class="group" id="range-buttons">
+        <button type="button" class="chip" data-range="24h" aria-pressed="true">24 小时</button>
+        <button type="button" class="chip" data-range="7d" aria-pressed="false">7 天</button>
+        <button type="button" class="chip" data-range="30d" aria-pressed="false">30 天</button>
+      </div>
+      <select id="view-select" aria-label="显示范围"></select>
+    </div>
+    <div id="chart" class="chart-box"></div>
+    <div id="legend" class="legend"></div>
+    <details>
+      <summary>数据表</summary>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>系列</th><th class="num">最新</th><th class="num">最低</th><th class="num">最高</th><th class="num">样本</th></tr></thead>
+          <tbody id="chart-table"></tbody>
+        </table>
+      </div>
+    </details>
+  </section>
+
+  <section>
+    <h2>事件</h2>
+    <ul id="events" class="events"></ul>
+  </section>
+
+  <section>
+    <h2>设置</h2>
+    <form id="settings">
+      <fieldset>
+        <legend>通知</legend>
+        <div class="fields">
+          <label>Bark 推送地址<input name="bark_url" type="text" autocomplete="off" placeholder="https://api.day.app/device_key"></label>
+          <label>Bark 分组<input name="bark_group" type="text"></label>
+          <label>第一档阈值（剩余 %）<input name="notice_threshold" type="number" min="0" max="100" step="1"></label>
+          <label>第二档阈值（剩余 %）<input name="low_threshold" type="number" min="0" max="100" step="1"></label>
+          <label>第三档阈值（剩余 %）<input name="critical_threshold" type="number" min="0" max="100" step="1"></label>
+          <label>时区（UTC 偏移小时）<input name="timezone_offset_hours" type="number" min="-12" max="14" step="0.5"></label>
+          <label class="inline"><input name="notify_recovery" type="checkbox">额度恢复时通知</label>
+          <label class="inline"><input name="notify_reset_reminders" type="checkbox">重置前提醒（5 小时窗口前 1 小时，7 天窗口前 1 天）</label>
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>额度查询</legend>
+        <div class="fields">
+          <label>查询间隔（秒）<input name="poll_interval_seconds" type="number" min="60" step="60"></label>
+          <label>被动数据跳过窗口（秒）<input name="passive_skip_seconds" type="number" min="0" step="10"><span class="hint">整点前这么久内有被动数据时跳过主动查询，0 为不跳过</span></label>
+          <label>最多连续跳过（分钟）<input name="passive_skip_max_minutes" type="number" min="0" step="5"></label>
+          <label>请求超时（秒）<input name="request_timeout_seconds" type="number" min="5" max="120"></label>
+          <label>模型列表 API key<input name="models_api_key" type="password" autocomplete="off"><span class="hint">在 CPA 的 access.api-keys 中新建一个专用 key</span></label>
+          <label>CPA 地址<input name="cpa_base_url" type="text"></label>
+          <label>历史保留（天）<input name="history_retention_days" type="number" min="1" max="365"></label>
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>自动点火</legend>
+        <div class="fields">
+          <label class="inline"><input name="ignition.enabled" type="checkbox">启用自动点火</label>
+          <label>每日开始（时）<input name="ignition.start_hour" type="number" min="0" max="23"></label>
+          <label>每日结束（时）<input name="ignition.end_hour" type="number" min="0" max="23"></label>
+          <label>结束后宽限（分钟）<input name="ignition.end_grace_minutes" type="number" min="0"></label>
+          <label>重置后延迟（秒）<input name="ignition.grace_seconds" type="number" min="0"></label>
+          <label>失败重试间隔（秒）<input name="ignition.failure_retry_seconds" type="number" min="60"></label>
+          <label>临时错误上限（次）<input name="ignition.max_transient_failures" type="number" min="1" max="10"></label>
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>服务</legend>
+        <div class="provider"><strong>ChatGPT</strong><label class="inline"><input name="providers.codex.monitor" type="checkbox">监控</label><label class="inline"><input name="providers.codex.ignite" type="checkbox">点火</label><input name="providers.codex.model" type="text" placeholder="点火模型，留空自动选择"></div>
+        <div class="provider"><strong>Claude</strong><label class="inline"><input name="providers.claude.monitor" type="checkbox">监控</label><label class="inline"><input name="providers.claude.ignite" type="checkbox">点火</label><input name="providers.claude.model" type="text" placeholder="点火模型，留空自动选择"></div>
+        <div class="provider"><strong>Antigravity</strong><label class="inline"><input name="providers.antigravity.monitor" type="checkbox">监控</label><label class="inline"><input name="providers.antigravity.ignite" type="checkbox">点火</label><input name="providers.antigravity.groups" type="text" placeholder="点火额度组，逗号分隔，如 Gemini"></div>
+      </fieldset>
+      <fieldset>
+        <legend>Did Codex Reset</legend>
+        <div class="fields">
+          <label class="inline"><input name="codex_reset_updates.enabled" type="checkbox">转发重置信号</label>
+          <label class="inline"><input name="codex_reset_updates.notify_current_pending" type="checkbox">首次开启时通知当前待生效的排期</label>
+        </div>
+      </fieldset>
+      <div class="form-actions">
+        <button class="primary" type="submit">保存</button>
+        <span id="settings-note" class="muted">保存后写入 CPA 的 config.yaml，插件自动应用。</span>
+      </div>
+    </form>
+  </section>
+</main>
+<div id="toast" class="toast" hidden></div>
+<script>/*JS*/</script>
+</body>
+</html>
