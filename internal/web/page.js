@@ -282,9 +282,9 @@
       var next = parseTime(t.next_due), reset = parseTime(t.reset), last = parseTime(t.last_success);
       body.appendChild(el("tr", {}, [
         el("td", { text: t.label }),
-        el("td", { class: "num", text: ignition.enabled && next ? fmtDateTime(next) : "—" }),
-        el("td", { class: "num", text: reset ? fmtDateTime(reset) : "—" }),
-        el("td", { class: "num", text: last ? fmtDateTime(last) : "—" }),
+        el("td", { class: "tnum", text: ignition.enabled && next ? fmtDateTime(next) : "—" }),
+        el("td", { class: "tnum", text: reset ? fmtDateTime(reset) : "—" }),
+        el("td", { class: "tnum", text: last ? fmtDateTime(last) : "—" }),
         el("td", { text: t.last_model || "—" }),
         el("td", { title: st.title || "" }, [el("span", { class: "status" }, [
           el("span", { style: "color:" + st.color, text: st.icon }), document.createTextNode(st.text)
@@ -298,7 +298,7 @@
     var list = $("events");
     clear(list);
     if (!status.events.length) {
-      list.appendChild(el("li", {}, [el("span"), el("span", { class: "muted", text: "暂无事件" })]));
+      list.appendChild(el("li", { class: "empty-row muted", text: "暂无事件" }));
       return;
     }
     status.events.slice(0, 100).forEach(function (ev) {
