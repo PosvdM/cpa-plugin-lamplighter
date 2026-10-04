@@ -174,9 +174,14 @@ func (a *Alerts) buildChangeMessage(g Group, changes []change, now time.Time) Me
 			}
 			parts = append(parts, text)
 		}
-		prefix, level := "⚠️", LevelActive
+		// Yellow for the first threshold, red from the second one down; the
+		// page colors quota the same way. ⚠️ is kept for errors.
+		prefix, level := "🟡", LevelActive
+		if worst.to != SeverityNotice {
+			prefix = "🔴"
+		}
 		if worst.to == SeverityCritical || worst.to == SeverityExhausted {
-			prefix, level = "🔴", LevelTimeSensitive
+			level = LevelTimeSensitive
 		}
 		return Message{
 			Title: fmt.Sprintf("%s %s · %s", prefix, g.Label, strings.Join(parts, " / ")),
@@ -366,7 +371,7 @@ func (a *Alerts) ProcessGroup(ctx context.Context, st *store.State, g Group, now
 // CircuitMessage is sent once when ignition pauses until the next day.
 func CircuitMessage(label string, until time.Time, reason string, loc *time.Location) Message {
 	return Message{
-		Title: fmt.Sprintf("🛑 %s 点火已暂停", label),
+		Title: fmt.Sprintf("⚠️ %s 点火已暂停", label),
 		Body: fmt.Sprintf("连续或高风险错误触发保护，停止自动重试到 %s。\n%s",
 			until.In(loc).Format("01/02 15:04"), truncate(reason, 220)),
 		Level: LevelTimeSensitive,

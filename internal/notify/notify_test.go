@@ -61,7 +61,7 @@ func TestThresholdCrossingNotifiesWithResetHint(t *testing.T) {
 	if len(sender.sent) != 1 {
 		t.Fatalf("want one notification, got %+v", sender.sent)
 	}
-	if got := sender.sent[0].Title; got != "⚠️ ChatGPT#eg · 5h 26% | 05h" {
+	if got := sender.sent[0].Title; got != "🟡 ChatGPT#eg · 5h 26% | 05h" {
 		t.Fatalf("title %q", got)
 	}
 	if !strings.HasPrefix(sender.sent[0].Body, "5h：26% | 05h | ") {
@@ -81,6 +81,18 @@ func TestCriticalIsTimeSensitive(t *testing.T) {
 	a.ProcessGroup(context.Background(), st, group(80, 80, now), now)
 	a.ProcessGroup(context.Background(), st, group(8, 80, now), now)
 	if sender.sent[0].Level != LevelTimeSensitive || !strings.HasPrefix(sender.sent[0].Title, "🔴") {
+		t.Fatalf("got %+v", sender.sent[0])
+	}
+}
+
+func TestLowIsRedButNotTimeSensitive(t *testing.T) {
+	sender := &fakeSender{}
+	st := store.NewState()
+	now := time.Now()
+	a := alerts(config.Default(), sender)
+	a.ProcessGroup(context.Background(), st, group(80, 80, now), now)
+	a.ProcessGroup(context.Background(), st, group(18, 80, now), now)
+	if sender.sent[0].Level != LevelActive || !strings.HasPrefix(sender.sent[0].Title, "🔴") {
 		t.Fatalf("got %+v", sender.sent[0])
 	}
 }
