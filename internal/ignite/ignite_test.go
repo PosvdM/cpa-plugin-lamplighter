@@ -165,3 +165,43 @@ func TestBuildRequestUsesMinimalBodies(t *testing.T) {
 		}
 	}
 }
+
+// cooldownError is the error CPA returned at 22:00:01 on 2026-10-04, when the
+// credential was still cooling down 16 seconds after the 5-hour reset.
+func cooldownError() error {
+	return &host.Error{Code: "host_call_failed", Status: 429, Message: `{"error":{"code":"model_cooldown","last_upstream_error":"rate_limit_error: This request would exceed your account's rate limit. Please try again later.","message":"All credentials for model claude-sonnet-4-6 are cooling down via provider claude","model":"claude-sonnet-4-6","provider":"claude","reset_seconds":17,"reset_time":"16s"}}`}
+}
+
+func TestCooldownRetriesWhenItEnds(t *testing.T) {
+	ts := &store.TargetState{}
+	now := local(22, 0)
+	o := schedule().RecordFailure(ts, now, cooldownError())
+	if o.CircuitOpened || !o.Cooldown || o.RetryIn != 20*time.Second {
+		t.Fatalf("outcome %+v", o)
+	}
+	if ts.ConsecutiveFailures != 0 {
+		t.Fatalf("a cooldown must not count as a failure, got %d", ts.ConsecutiveFailures)
+	}
+	if held := schedule().HeldUntil(ts, now); !held.Equal(now.Add(20 * time.Second)) {
+		t.Fatalf("held until %v", held)
+	}
+}
+
+func TestRepeatedCooldownCountsAsFailure(t *testing.T) {
+	ts := &store.TargetState{}
+	now := local(22, 0)
+	schedule().RecordFailure(ts, now, cooldownError())
+	o := schedule().RecordFailure(ts, now.Add(20*time.Second), cooldownError())
+	if o.Cooldown || ts.ConsecutiveFailures != 1 || o.RetryIn != 5*time.Minute {
+		t.Fatalf("second cooldown %+v, failures %d", o, ts.ConsecutiveFailures)
+	}
+}
+
+func TestLongCooldownIsNotWaitedOut(t *testing.T) {
+	if _, ok := CooldownWait(errors.New(`model_cooldown "reset_seconds":3600`)); ok {
+		t.Fatal("an hour-long cooldown must use the normal retry")
+	}
+	if _, ok := CooldownWait(errors.New("connection reset")); ok {
+		t.Fatal("other errors are not cooldowns")
+	}
+}

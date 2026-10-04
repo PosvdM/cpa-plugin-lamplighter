@@ -214,10 +214,13 @@ func (e *Engine) igniteTarget(ctx context.Context, cfg config.Config, t target, 
 				}
 			}
 		} else {
-			minutes := int(outcome.RetryIn.Minutes())
+			retry := retryText(outcome.RetryIn)
+			if outcome.Cooldown {
+				retry = "CPA 冷却结束，" + retry
+			}
 			e.addEventDetail("warn", "ignite_failed", t.group.Key, t.group.Label,
-				fmt.Sprintf("%d 分钟后重试：%v", minutes, err),
-				fmt.Sprintf("%s 点火失败，%d 分钟后重试：%v", t.group.Label, minutes, err))
+				fmt.Sprintf("%s后重试：%v", retry, err),
+				fmt.Sprintf("%s 点火失败，%s后重试：%v", t.group.Label, retry, err))
 		}
 		return err
 	}
@@ -392,4 +395,13 @@ func (e *Engine) confirm(ctx context.Context, cfg config.Config, t target, start
 		}
 	}
 	return ignite.ErrNotConfirmed
+}
+
+// retryText formats a retry delay in seconds below one minute, in minutes
+// otherwise.
+func retryText(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%d 秒", int(d.Round(time.Second).Seconds()))
+	}
+	return fmt.Sprintf("%d 分钟", int(d.Round(time.Minute).Minutes()))
 }

@@ -78,6 +78,7 @@ A 5-hour window starts with the first request after a reset. If nobody uses the 
 
 - Authentication failures, rate limits (429), unavailable models, or a request that succeeded without starting the window pause ignition for that quota group until 07:00 the next day, with one Bark notification.
 - Network and server errors are retried after 5 and 15 minutes; a third failure also pauses until the next day.
+- When the quota ran out before the reset, CPA cools the account down until a dozen or so seconds after the reset. An ignition that hits this cooldown retries as soon as it ends and is not counted as a failure.
 
 ## Notification example
 
