@@ -283,7 +283,12 @@ func (e *Engine) Status() Status {
 				groups = append(groups, group)
 			}
 		}
-		sort.SliceStable(groups, func(i, j int) bool { return groups[i].Key < groups[j].Key })
+		sort.SliceStable(groups, func(i, j int) bool {
+			if ri, rj := groupRank(groups[i].SourceLabel), groupRank(groups[j].SourceLabel); ri != rj {
+				return ri < rj
+			}
+			return groups[i].Key < groups[j].Key
+		})
 		if now := e.now(); cred.CooldownUntil.After(now) {
 			account.CooldownUntil = cred.CooldownUntil
 			account.StaleCooldown = staleCooldown(cred, groups, now)
@@ -315,6 +320,19 @@ func (e *Engine) Status() Status {
 		status.Events = []Event{}
 	}
 	return status
+}
+
+// groupOrder lists quota groups in the order the page shows them, the same
+// as SERVICE_ORDER in internal/web/page.js. Other groups follow by key.
+var groupOrder = []string{"Claude", "ChatGPT", "Gemini", "Fable", "Claude / GPT"}
+
+func groupRank(sourceLabel string) int {
+	for i, label := range groupOrder {
+		if label == sourceLabel {
+			return i
+		}
+	}
+	return len(groupOrder)
 }
 
 func providerRank(provider string) int {
