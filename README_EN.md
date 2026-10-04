@@ -25,7 +25,7 @@ When a service has several accounts, notifications and the page tell them apart 
 
 ## Requirements
 
-- CPA v8.0.4 or later with plugins enabled (`plugins.enabled: true`). The plugin is built for Linux amd64/arm64, macOS amd64/arm64 and Windows amd64; the macOS and Windows builds are only built and tested in CI and have not been tried on a running CPA.
+- CPA v8.0.4 or later with plugins enabled (`plugins.enabled: true`). The plugin is built for Linux amd64/arm64, macOS amd64/arm64 and Windows amd64; the macOS builds are only built and tested in CI and have not been tried on a running CPA.
 - A CPA API key reserved for Lamplighter. The plugin reads the model list with it to pick ignition models.
 - An iPhone with Bark, if you want notifications.
 
