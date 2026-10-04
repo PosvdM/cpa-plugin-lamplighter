@@ -91,6 +91,7 @@ func newTestEngine(t *testing.T, h *fakeHost, c *clock) (*Engine, *fakeSender) {
 	cfg.CPABaseURL = models.URL
 	cfg.ModelsAPIKey = "k"
 	cfg.DataDir = t.TempDir()
+	cfg.Timezone = "Asia/Shanghai"
 	e := New(Options{Host: h, Version: "test", Now: c.now})
 	e.Configure(cfg, nil)
 	if err := e.openStores(cfg); err != nil {
