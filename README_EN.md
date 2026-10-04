@@ -175,7 +175,7 @@ plugins:
 
 ## Management page
 
-![Quota chart: Claude with two accounts expanded into one row each, and below it the total line with the range between accounts](./docs/images/chart.png)
+![Quota chart: the 5-hour quota over the last 12 hours, with the Claude curve below it marking resets and ignition results](./docs/images/chart.png)
 
 The page shows:
 

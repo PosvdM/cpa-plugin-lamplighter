@@ -175,7 +175,7 @@ plugins:
 
 ## 管理页面
 
-![额度变化图表：多账号的 Claude 展开为各账号，下方为合计曲线和账号间的范围](./docs/images/chart.png)
+![额度变化图表：最近 12 小时的 5 小时额度，下方为 Claude 的额度曲线，标出重置和点火结果](./docs/images/chart.png)
 
 页面包含：
 
