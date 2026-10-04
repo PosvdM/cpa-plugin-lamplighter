@@ -347,9 +347,10 @@ type HistoryResponse struct {
 	Events []Event   `json:"events"`
 }
 
-// historyRanges are the fixed spans the chart offers: hours for the 5-hour
-// window, days for the 7-day window. 26h and 36d are five windows plus one
-// unit, so five whole windows always fit.
+// historyRanges are the fixed spans the chart offers, in hours for the
+// 5-hour window and days for the 7-day window: one unit, half of a window
+// plus one, a window plus one, half a day or month (two whole windows), a
+// day or a month, and five windows plus one. See internal/web/page.js.
 var historyRanges = map[string]time.Duration{
 	"1h":  time.Hour,
 	"3h":  3 * time.Hour,
