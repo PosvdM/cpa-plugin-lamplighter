@@ -39,18 +39,41 @@
 
   function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
 
-  // Theme follows the Management Center setting stored in localStorage.
-  function applyTheme() {
-    var theme = "auto";
+  // The page runs in a same-origin iframe of the Management Center, so it
+  // reads the theme from the parent document: data-theme is "dark", "white"
+  // or absent for the default light theme. Opened on its own, it falls back
+  // to the theme the Management Center stored in localStorage.
+  function parentRoot() {
     try {
-      var raw = localStorage.getItem("cli-proxy-theme");
-      if (raw) {
-        var parsed = JSON.parse(raw);
-        theme = (parsed && parsed.state && parsed.state.theme) || parsed.theme || theme;
-      }
-    } catch (e) { /* use auto */ }
-    var dark = theme === "dark" || (theme === "auto" && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
-    document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+      if (window.parent !== window) return window.parent.document.documentElement;
+    } catch (e) { /* cross-origin */ }
+    return null;
+  }
+
+  function applyTheme() {
+    var theme = "light";
+    var root = parentRoot();
+    if (root) {
+      var value = root.getAttribute("data-theme");
+      if (value === "dark" || value === "white") theme = value;
+    } else {
+      var stored = "auto";
+      try {
+        var parsed = JSON.parse(localStorage.getItem("cli-proxy-theme") || "null");
+        stored = (parsed && parsed.state && parsed.state.theme) || (parsed && parsed.theme) || stored;
+      } catch (e) { /* use auto */ }
+      if (stored === "dark" || stored === "white") theme = stored;
+      if (stored === "auto" && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) theme = "dark";
+    }
+    if (theme === "light") document.documentElement.removeAttribute("data-theme");
+    else document.documentElement.setAttribute("data-theme", theme);
+  }
+
+  function watchParentTheme() {
+    var root = parentRoot();
+    if (!root || !window.MutationObserver) return;
+    new MutationObserver(function () { applyTheme(); renderChart(); })
+      .observe(root, { attributes: true, attributeFilter: ["data-theme"] });
   }
 
   // The Management Center keeps the key in localStorage, XOR-obfuscated with
@@ -160,16 +183,34 @@
     return fmtDuration(ms) + "前";
   }
 
-  function severityColor(remaining) {
-    var cfg = (status && status.config) || {};
-    if (remaining <= (cfg.critical_threshold || 10)) return "var(--critical)";
-    if (remaining <= (cfg.low_threshold || 20)) return "var(--serious)";
-    if (remaining <= (cfg.notice_threshold || 50)) return "var(--warning)";
-    return "var(--accent)";
+  // Bars use the same three tiers as the Management Center quota page.
+  function meterClass(remaining) {
+    if (remaining >= 70) return "fill-high";
+    if (remaining >= 30) return "fill-medium";
+    return "fill-low";
+  }
+
+  function fmtCountdown(ms) {
+    if (ms <= 0) return "已重置";
+    var minutes = Math.round(ms / 60000);
+    if (minutes < 60) return minutes + "m";
+    var hours = Math.floor(minutes / 60);
+    if (hours < 48) return hours + "h " + pad(minutes % 60) + "m";
+    return Math.floor(hours / 24) + "d " + (hours % 24) + "h";
+  }
+
+  function windowName(w) {
+    if (w.short === "5h") return "5 小时";
+    if (w.short === "7d") return "7 天";
+    return w.label;
   }
 
   function providerTitle(provider) {
     return { codex: "ChatGPT", claude: "Claude", antigravity: "Antigravity" }[provider] || provider;
+  }
+
+  function badge(kind, text) {
+    return el("span", { class: "badge badge-" + kind }, [el("span", { class: "badge-dot" }), document.createTextNode(text)]);
   }
 
   // ---- Status rendering ----
@@ -177,75 +218,94 @@
   function renderHeader() {
     var state = $("state");
     clear(state);
-    var color = "var(--good)", text = "运行中";
-    if (!status.enabled) { color = "var(--text-muted)"; text = "已停用"; }
-    else if (!status.running) { color = "var(--warning)"; text = "启动中"; }
-    state.appendChild(el("span", { class: "dot", style: "background:" + color }));
-    state.appendChild(document.createTextNode(text));
+    if (!status.enabled) state.appendChild(badge("muted", "已停用"));
+    else if (!status.running) state.appendChild(badge("warning", "启动中"));
+    else state.appendChild(badge("success", "运行中"));
     var parts = ["v" + status.version];
     var last = parseTime(status.last_poll), next = parseTime(status.next_poll);
-    if (last) parts.push("上次查询 " + fmtDateTime(last));
-    if (next) parts.push("下次 " + fmtDateTime(next));
+    if (last) parts.push("上次查询 " + fmtClock(last));
+    if (next) parts.push("下次 " + fmtClock(next));
     $("meta").textContent = parts.join(" · ");
   }
 
-  function notice(icon, color, text) {
-    return el("div", { class: "notice" }, [
-      el("span", { class: "icon", style: "color:" + color, text: icon }),
-      el("span", { text: text })
-    ]);
+  function notice(text) {
+    return el("div", { class: "notice" }, [el("span", { class: "notice-icon", text: "!" }), el("span", { text: text })]);
   }
 
   function renderNotices() {
     var box = $("notices");
     clear(box);
-    if (status.config_error) box.appendChild(notice("✕", "var(--critical)", "配置无法解析，仍在使用上一份配置：" + status.config_error));
-    if (status.lock_error) box.appendChild(notice("!", "var(--warning)", status.lock_error));
-    if (status.list_error) box.appendChild(notice("✕", "var(--critical)", status.list_error));
-    if (status.models_error) box.appendChild(notice("!", "var(--warning)", "模型列表不可用：" + status.models_error));
-    if (status.config && !status.config.bark_url) box.appendChild(notice("!", "var(--warning)", "未设置 Bark 推送地址，通知不会发送。"));
+    if (status.config_error) box.appendChild(notice("配置无法解析，仍在使用上一份配置：" + status.config_error));
+    if (status.lock_error) box.appendChild(notice(status.lock_error));
+    if (status.list_error) box.appendChild(notice(status.list_error));
+    if (status.models_error) box.appendChild(notice("模型列表不可用：" + status.models_error));
+    if (status.config && !status.config.bark_url) box.appendChild(notice("未设置 Bark 推送地址，通知不会发送。"));
     if (status.config && status.config.ignition && status.config.ignition.enabled && !status.config.models_api_key) {
-      box.appendChild(notice("!", "var(--warning)", "未设置模型列表 API key，自动点火无法选择模型。"));
+      box.appendChild(notice("未设置模型列表 API key，自动点火无法选择模型。"));
     }
+  }
+
+  function quotaRow(group, w, index) {
+    var remaining = Math.max(0, Math.min(100, w.remaining));
+    var reset = parseTime(w.reset);
+    var meta = [el("span", { class: "quota-percent", text: Math.round(remaining) + "%" })];
+    if (reset) {
+      var left = reset.getTime() - Date.now();
+      meta.push(el("span", { class: "quota-reset", text: fmtDateTime(reset) }));
+      meta.push(el("span", { class: "quota-countdown" + (left > 0 && left <= 3600000 ? " soon" : ""), text: fmtCountdown(left) }));
+    }
+    return el("div", { class: "quota-row" }, [
+      el("div", { class: "quota-row-head" }, [
+        el("span", { class: "quota-name", text: windowName(w) }),
+        el("span", { class: "quota-meta" }, meta)
+      ]),
+      el("div", { class: "quota-bar", role: "meter", "aria-valuemin": "0", "aria-valuemax": "100",
+        "aria-valuenow": String(Math.round(remaining)), "aria-label": group.label + " " + windowName(w) + " 剩余" }, [
+        el("span", { class: "quota-fill " + meterClass(remaining), style: "width:" + remaining + "%;--meter-index:" + index })
+      ])
+    ]);
+  }
+
+  function freshness(group) {
+    var latest = null, source = "";
+    (group.windows || []).forEach(function (w) {
+      var t = parseTime(w.observed_at);
+      if (t && (!latest || t > latest)) { latest = t; source = w.source; }
+    });
+    if (!latest) return null;
+    return el("div", { class: "group-foot" }, [
+      el("span", { class: "source source-" + source, text: source === "passive" ? "被动" : "主动" }),
+      el("span", { text: "更新于 " + fmtAgo(latest) })
+    ]);
   }
 
   function renderAccounts() {
     var box = $("accounts");
     clear(box);
     if (!status.accounts.length) {
-      box.appendChild(el("p", { class: "muted", text: status.running ? "没有可监控的 ChatGPT、Claude 或 Antigravity 凭证。" : "CPA 启动约 20 秒后开始第一次查询。" }));
+      box.appendChild(el("p", { class: "empty", text: status.running ? "没有可监控的 ChatGPT、Claude 或 Antigravity 凭证。" : "CPA 启动约 20 秒后开始第一次查询。" }));
       return;
     }
+    var meterIndex = 0;
     status.accounts.forEach(function (account) {
-      var card = el("div", { class: "account" });
-      var refresh = el("button", { type: "button", class: "chip", text: "刷新", onclick: function () {
+      var card = el("div", { class: "card account" });
+      var refresh = el("button", { type: "button", class: "btn btn-ghost btn-sm", text: "刷新", onclick: function () {
         runAction(refresh, API + "/refresh", { auth_index: account.auth_index }, "已刷新 " + account.title);
       } });
       card.appendChild(el("div", { class: "account-head" }, [
-        el("span", { class: "title", text: account.title }),
-        el("span", { class: "muted", text: account.email || account.name }),
+        el("span", { class: "type-badge type-" + account.provider, text: account.title }),
+        el("span", { class: "account-email", title: account.email || account.name, text: account.email || account.name }),
         refresh
       ]));
       (account.groups || []).forEach(function (group) {
+        var block = el("div", { class: "quota-group" });
         if (group.source_label && group.source_label !== providerTitle(account.provider)) {
-          card.appendChild(el("div", { class: "group-label", text: group.source_label }));
+          block.appendChild(el("div", { class: "group-title", text: group.source_label }));
         }
-        (group.windows || []).forEach(function (w) {
-          var remaining = Math.max(0, Math.min(100, w.remaining));
-          var reset = parseTime(w.reset);
-          var observed = parseTime(w.observed_at);
-          var meta = [];
-          if (reset) meta.push(el("span", { text: "重置 " + fmtDuration(reset.getTime() - Date.now()) + " · " + fmtDateTime(reset) }));
-          meta.push(el("span", { text: (w.source === "passive" ? "被动" : "主动") + (observed ? " · " + fmtAgo(observed) : "") }));
-          card.appendChild(el("div", { class: "window" }, [
-            el("span", { class: "label", text: w.short }),
-            el("div", { class: "meter", role: "meter", "aria-valuemin": "0", "aria-valuemax": "100", "aria-valuenow": String(Math.round(remaining)), "aria-label": group.label + " " + w.short + " 剩余" }, [
-              el("span", { style: "width:" + remaining + "%;background:" + severityColor(remaining) })
-            ]),
-            el("span", { class: "value", text: Math.round(remaining) + "%" }),
-            el("div", { class: "window-meta" }, meta)
-          ]));
-        });
+        (group.windows || []).forEach(function (w) { block.appendChild(quotaRow(group, w, meterIndex++)); });
+        var foot = freshness(group);
+        if (foot) block.appendChild(foot);
+        card.appendChild(block);
       });
       if (account.error) card.appendChild(el("div", { class: "error-text", text: account.error }));
       box.appendChild(card);
@@ -254,10 +314,10 @@
 
   function targetStatus(t) {
     var circuit = parseTime(t.circuit_until);
-    if (circuit) return { color: "var(--critical)", icon: "■", text: "已暂停至 " + fmtDateTime(circuit), title: t.circuit_reason };
-    if (t.consecutive_failures > 0) return { color: "var(--serious)", icon: "▲", text: "失败 " + t.consecutive_failures + " 次", title: t.last_error };
-    if (t.rolling) return { color: "var(--warning)", icon: "○", text: "窗口未启动" };
-    return { color: "var(--good)", icon: "●", text: "正常" };
+    if (circuit) return { kind: "failure", text: "暂停至 " + fmtDateTime(circuit), title: t.circuit_reason };
+    if (t.consecutive_failures > 0) return { kind: "warning", text: "失败 " + t.consecutive_failures + " 次", title: t.last_error };
+    if (t.rolling) return { kind: "muted", text: "窗口未开始" };
+    return { kind: "success", text: "正常" };
   }
 
   function renderTargets() {
@@ -270,26 +330,26 @@
         pad(Math.floor(endMinutes / 60) % 24) + ":" + pad(endMinutes % 60) + "。"
       : "自动点火已关闭。";
     if (!status.targets.length) {
-      body.appendChild(el("tr", {}, [el("td", { colspan: "7", class: "muted", text: "没有启用点火的额度组。" })]));
+      body.appendChild(el("tr", {}, [el("td", { colspan: "7", class: "empty", text: "没有启用点火的额度组。" })]));
       return;
     }
     status.targets.forEach(function (t) {
       var st = targetStatus(t);
-      var button = el("button", { type: "button", class: "chip", text: "立即点火", onclick: function () {
+      var button = el("button", { type: "button", class: "btn btn-secondary btn-sm", text: "立即点火", onclick: function () {
         if (!confirm("立即向 " + t.label + " 发送一次点火请求？这会开始一个新的 5 小时窗口。")) return;
         runAction(button, API + "/ignite", { target: t.key }, t.label + " 点火成功");
       } });
       var next = parseTime(t.next_due), reset = parseTime(t.reset), last = parseTime(t.last_success);
+      var statusCell = el("td", {}, [badge(st.kind, st.text)]);
+      if (st.title) statusCell.appendChild(el("div", { class: "cell-note", text: st.title }));
       body.appendChild(el("tr", {}, [
-        el("td", { text: t.label }),
-        el("td", { class: "tnum", text: ignition.enabled && next ? fmtDateTime(next) : "—" }),
-        el("td", { class: "tnum", text: reset ? fmtDateTime(reset) : "—" }),
-        el("td", { class: "tnum", text: last ? fmtDateTime(last) : "—" }),
-        el("td", { text: t.last_model || "—" }),
-        el("td", { title: st.title || "" }, [el("span", { class: "status" }, [
-          el("span", { style: "color:" + st.color, text: st.icon }), document.createTextNode(st.text)
-        ])]),
-        el("td", {}, [button])
+        el("td", { class: "strong", text: t.label }),
+        el("td", { class: "mono", text: ignition.enabled && next ? fmtDateTime(next) : "—" }),
+        el("td", { class: "mono", text: reset ? fmtDateTime(reset) : "—" }),
+        el("td", { class: "mono", text: last ? fmtDateTime(last) : "—" }),
+        el("td", { class: "mono", text: t.last_model || "—" }),
+        statusCell,
+        el("td", { class: "actions" }, [button])
       ]));
     });
   }
@@ -298,15 +358,15 @@
     var list = $("events");
     clear(list);
     if (!status.events.length) {
-      list.appendChild(el("li", { class: "empty-row muted", text: "暂无事件" }));
+      list.appendChild(el("li", { class: "empty", text: "暂无事件" }));
       return;
     }
     status.events.slice(0, 100).forEach(function (ev) {
-      var icon = ev.level === "error" ? "✕" : ev.level === "warn" ? "!" : "·";
-      var color = ev.level === "error" ? "var(--critical)" : ev.level === "warn" ? "var(--serious)" : "var(--text-muted)";
+      var kind = ev.level === "error" ? "failure" : ev.level === "warn" ? "warning" : "muted";
       list.appendChild(el("li", {}, [
-        el("span", { class: "when", text: fmtDateTime(parseTime(ev.time)) }),
-        el("span", {}, [el("span", { style: "color:" + color + ";margin-right:6px", text: icon }), document.createTextNode(ev.message)])
+        el("span", { class: "event-time", text: fmtDateTime(parseTime(ev.time)) }),
+        el("span", { class: "event-dot dot-" + kind }),
+        el("span", { class: "event-text", text: ev.message })
       ]));
     });
   }
@@ -711,6 +771,7 @@
   }
 
   applyTheme();
+  watchParentTheme();
   key = sessionStorage.getItem(KEY_STORE) || centerKey();
   if (key) start(); else askForKey("");
 })();

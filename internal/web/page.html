@@ -7,12 +7,12 @@
 <style>/*CSS*/</style>
 </head>
 <body>
-<div id="key-section" hidden>
-  <h2>需要管理密钥</h2>
+<div id="key-section" class="card" hidden>
+  <h2 class="card-title">需要管理密钥</h2>
   <p class="secondary">在管理中心登录时勾选“记住密码”，此页面会直接使用该密钥；否则请在这里输入，密钥只保存在当前标签页。</p>
   <form id="key-form">
     <input id="key-input" type="password" autocomplete="off" placeholder="CPA 管理密钥">
-    <button class="primary" type="submit">确定</button>
+    <button class="btn btn-primary" type="submit">确定</button>
   </form>
   <p id="key-error" class="error-text" hidden></p>
 </div>
@@ -20,23 +20,23 @@
 <main id="app" hidden>
   <header>
     <h1>Lamplighter<span class="sub">点灯人</span></h1>
-    <span id="state" class="badge"></span>
+    <span id="state" class="state"></span>
     <span id="meta" class="meta"></span>
     <div class="actions">
-      <button id="refresh-all" type="button">立即刷新全部</button>
-      <button id="test-bark" type="button">测试推送</button>
+      <button id="refresh-all" class="btn btn-secondary" type="button">立即刷新全部</button>
+      <button id="test-bark" class="btn btn-secondary" type="button">测试推送</button>
     </div>
   </header>
 
   <div id="notices"></div>
 
-  <section>
-    <h2>额度</h2>
+  <section class="block">
+    <h2 class="block-title">额度</h2>
     <div id="accounts" class="accounts"></div>
   </section>
 
-  <section>
-    <h2>自动点火</h2>
+  <section class="card">
+    <h2 class="card-title">自动点火</h2>
     <div class="table-wrap">
       <table>
         <thead>
@@ -48,13 +48,13 @@
     <p id="ignition-note" class="muted"></p>
   </section>
 
-  <section>
-    <h2>额度变化</h2>
+  <section class="card">
+    <h2 class="card-title">额度变化</h2>
     <div class="filters">
-      <div class="group" id="range-buttons">
-        <button type="button" class="chip" data-range="24h" aria-pressed="true">24 小时</button>
-        <button type="button" class="chip" data-range="7d" aria-pressed="false">7 天</button>
-        <button type="button" class="chip" data-range="30d" aria-pressed="false">30 天</button>
+      <div class="segmented" id="range-buttons">
+        <button type="button" class="seg" data-range="24h" aria-pressed="true">24 小时</button>
+        <button type="button" class="seg" data-range="7d" aria-pressed="false">7 天</button>
+        <button type="button" class="seg" data-range="30d" aria-pressed="false">30 天</button>
       </div>
       <select id="view-select" aria-label="显示范围"></select>
     </div>
@@ -71,13 +71,13 @@
     </details>
   </section>
 
-  <section>
-    <h2>事件</h2>
+  <section class="card">
+    <h2 class="card-title">事件</h2>
     <ul id="events" class="events"></ul>
   </section>
 
-  <section>
-    <h2>设置</h2>
+  <section class="card">
+    <h2 class="card-title">设置</h2>
     <form id="settings">
       <fieldset>
         <legend>通知</legend>
@@ -130,7 +130,7 @@
         </div>
       </fieldset>
       <div class="form-actions">
-        <button class="primary" type="submit">保存</button>
+        <button class="btn btn-primary" type="submit">保存</button>
         <span id="settings-note" class="muted">保存后写入 CPA 的 config.yaml，插件自动应用。</span>
       </div>
     </form>
