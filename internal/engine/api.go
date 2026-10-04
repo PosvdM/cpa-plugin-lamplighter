@@ -192,14 +192,18 @@ type GroupStatus struct {
 
 // AccountStatus is one credential on the status page.
 type AccountStatus struct {
-	AuthIndex   string        `json:"auth_index"`
-	Provider    string        `json:"provider"`
-	Title       string        `json:"title"`
-	Email       string        `json:"email,omitempty"`
-	Name        string        `json:"name"`
-	Unavailable bool          `json:"unavailable"`
-	Error       string        `json:"error,omitempty"`
-	Groups      []GroupStatus `json:"groups"`
+	AuthIndex   string `json:"auth_index"`
+	Provider    string `json:"provider"`
+	Title       string `json:"title"`
+	Email       string `json:"email,omitempty"`
+	Name        string `json:"name"`
+	Unavailable bool   `json:"unavailable"`
+	// CooldownUntil is when CPA ends its cooldown of the account.
+	CooldownUntil time.Time `json:"cooldown_until,omitempty"`
+	// StaleCooldown is true when the cooldown outlasts a recovered quota.
+	StaleCooldown bool          `json:"stale_cooldown,omitempty"`
+	Error         string        `json:"error,omitempty"`
+	Groups        []GroupStatus `json:"groups"`
 }
 
 // Status is the response of the status endpoint.
@@ -280,6 +284,10 @@ func (e *Engine) Status() Status {
 			}
 		}
 		sort.SliceStable(groups, func(i, j int) bool { return groups[i].Key < groups[j].Key })
+		if now := e.now(); cred.CooldownUntil.After(now) {
+			account.CooldownUntil = cred.CooldownUntil
+			account.StaleCooldown = staleCooldown(cred, groups, now)
+		}
 		for _, group := range groups {
 			gs := GroupStatus{Key: group.Key, Label: group.Label, SourceLabel: group.SourceLabel}
 			for _, w := range group.Windows {
@@ -337,6 +345,46 @@ type HistoryResponse struct {
 	Bucket int64     `json:"bucket_seconds"`
 	Series []Series  `json:"series"`
 	Events []Event   `json:"events"`
+}
+
+// historyRanges are the fixed spans the chart offers: hours for the 5-hour
+// window, days for the 7-day window.
+var historyRanges = map[string]time.Duration{
+	"1h":  time.Hour,
+	"3h":  3 * time.Hour,
+	"6h":  6 * time.Hour,
+	"12h": 12 * time.Hour,
+	"24h": 24 * time.Hour,
+	"26h": 26 * time.Hour,
+	"4d":  4 * 24 * time.Hour,
+	"8d":  8 * 24 * time.Hour,
+	"15d": 15 * 24 * time.Hour,
+	"36d": 36 * 24 * time.Hour,
+}
+
+// RangeSpan returns the span of a history range, 24 hours for an unknown
+// one. "1mo" reaches back to the same date of the previous month in loc, or
+// to its last day when that month is shorter, so it covers one monthly
+// billing period.
+func RangeSpan(name string, now time.Time, loc *time.Location) time.Duration {
+	if span, ok := historyRanges[name]; ok {
+		return span
+	}
+	if name == "1mo" {
+		local := now.In(loc)
+		year, month, day := local.Date()
+		if last := time.Date(year, month, 0, 0, 0, 0, 0, loc).Day(); day > last {
+			day = last
+		}
+		from := time.Date(year, month-1, day, local.Hour(), local.Minute(), local.Second(), local.Nanosecond(), loc)
+		return now.Sub(from)
+	}
+	return 24 * time.Hour
+}
+
+// HistoryRange returns the history for a named range, see RangeSpan.
+func (e *Engine) HistoryRange(name string) (HistoryResponse, error) {
+	return e.History(RangeSpan(name, e.now(), e.config().Location()))
 }
 
 // History returns quota samples and events for the last span. Long spans are

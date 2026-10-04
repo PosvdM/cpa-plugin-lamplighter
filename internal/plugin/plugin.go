@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -21,11 +20,10 @@ import (
 )
 
 const (
-	repository     = "https://github.com/PosvdM/cpa-plugin-lamplighter"
-	apiBase        = "/v0/management/" + config.PluginID
-	pagePath       = "/page"
-	stopTimeout    = 10 * time.Second
-	defaultHistory = 24 * time.Hour
+	repository  = "https://github.com/PosvdM/cpa-plugin-lamplighter"
+	apiBase     = "/v0/management/" + config.PluginID
+	pagePath    = "/page"
+	stopTimeout = 10 * time.Second
 )
 
 // Plugin handles the RPC methods of one loaded plugin instance.
@@ -243,8 +241,7 @@ func (p *Plugin) handleManagement(req pluginapi.ManagementRequest) pluginapi.Man
 	case "GET " + apiBase + "/status":
 		return jsonResponse(http.StatusOK, p.engine.Status())
 	case "GET " + apiBase + "/history":
-		span := parseRange(req.Query)
-		resp, err := p.engine.History(span)
+		resp, err := p.engine.HistoryRange(req.Query.Get("range"))
 		if err != nil {
 			return errorResponse(http.StatusInternalServerError, err)
 		}
@@ -270,25 +267,4 @@ func actionResponse(err error, p *Plugin) pluginapi.ManagementResponse {
 		return jsonResponse(http.StatusOK, map[string]any{"ok": false, "error": err.Error(), "status": p.engine.Status()})
 	}
 	return jsonResponse(http.StatusOK, map[string]any{"ok": true, "status": p.engine.Status()})
-}
-
-// historyRanges are the spans the chart offers: hours for the 5-hour
-// window, days for the 7-day window.
-var historyRanges = map[string]time.Duration{
-	"1h":  time.Hour,
-	"3h":  3 * time.Hour,
-	"6h":  6 * time.Hour,
-	"12h": 12 * time.Hour,
-	"24h": 24 * time.Hour,
-	"3d":  3 * 24 * time.Hour,
-	"8d":  8 * 24 * time.Hour,
-	"14d": 14 * 24 * time.Hour,
-	"35d": 35 * 24 * time.Hour,
-}
-
-func parseRange(query url.Values) time.Duration {
-	if span, ok := historyRanges[query.Get("range")]; ok {
-		return span
-	}
-	return defaultHistory
 }

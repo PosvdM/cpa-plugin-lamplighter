@@ -33,7 +33,7 @@ Management routes (require the CPA management key):
 | Method and path | Purpose |
 | --- | --- |
 | `GET /v0/management/lamplighter/status` | Status page data; secrets in the config only show whether they are set |
-| `GET /v0/management/lamplighter/history?range=1h\|3h\|6h\|12h\|24h\|3d\|8d\|14d\|35d` | Quota history and ignition events, `24h` by default |
+| `GET /v0/management/lamplighter/history?range=1h\|3h\|6h\|12h\|24h\|26h\|4d\|8d\|15d\|1mo\|36d` | Quota history and ignition events, `24h` by default. `1mo` runs from the same date of the previous month in the plugin's time zone, or its last day when that month is shorter, to now |
 | `POST /v0/management/lamplighter/refresh` | Query now; `{"auth_index": "..."}` limits it to one account |
 | `POST /v0/management/lamplighter/ignite` | Ignite now, `{"target": "<group key>"}` |
 | `POST /v0/management/lamplighter/test-bark` | Send a test notification |
@@ -54,7 +54,7 @@ Host callbacks in use:
 
 | Callback | Purpose |
 | --- | --- |
-| `host.auth.list` | Credential list with `auth_index`, runtime ID, email and disabled state |
+| `host.auth.list` | Credential list with `auth_index`, runtime ID, email, disabled state and the CPA cooldown (`unavailable`, `next_retry_after`) |
 | `host.auth.get` | Credential file JSON: access token, Codex account ID, Antigravity `project_id`, `proxy_url` |
 | `host.model.execute` | Ignition, with `auth_id` and `forced_provider` |
 | `host.http.operation_open` / `host.http.do` / `host.http.cancel` | Quota requests of credentials without their own proxy |
@@ -132,6 +132,8 @@ Skip rule (`shouldSkipActive`): a scheduled query is skipped when passive data a
 4. A future reset: `reset + grace_seconds`, or the next day's `start_hour` when that falls outside today's window.
 5. A past or unknown reset: now (subject to hold and retry times).
 
+While a window of the quota group other than the 5-hour one is used up (0.01% or less remaining) and before its reset, scheduled ignition skips the group: no attempt, no failure, no notification. The engine wakes at that window's reset, and the next query shows whether the quota is back. The ignition status names the blocking window (`blocked_window`, `blocked_until`). Manual ignition is not affected.
+
 **Rolling placeholder**: some services report an unstarted window with a reset "5 hours from now" that moves forward with every query. `ignite.Observe` detects it from two consecutive active observations: the reset is about 5 hours ahead (120-second tolerance), and it moved by about the elapsed time (2% of the elapsed time, between 3 and 10 seconds). Passive data comes from a real request, which itself starts the window, so a passive observation is never rolling. A fixed future reset clears the failure state.
 
 ### Request
@@ -179,6 +181,8 @@ If no check confirms, the result is `ErrNotConfirmed`.
 
 When a CPA local cooldown carries a `reset_seconds` of 10 minutes or less (`ignite.CooldownWait`), it is not counted as a failure, and the retry runs when the cooldown ends plus `grace_seconds`. After a 429, CPA cools a credential down until the upstream reset plus a dozen or so seconds, so when the quota ran out before the reset, an ignition 3 seconds after the reset hits that cooldown. A second cooldown in a row counts as a normal transient error, so a cooldown that keeps renewing cannot retry forever.
 
+**Stale CPA cooldowns**: after an account-level 429, CPA cools the credential down until the reset the provider reported, which can be days away when the 7-day quota is used up, and does not lift it when the quota comes back early, for example after a reset card. After each poll, `engine.checkCooldowns` checks every credential: when the CPA cooldown has more than 10 minutes left and a quota group with a 5-hour window shows, in data from the last 15 minutes, that no window is used up, the cooldown is stale. One notification is sent per cooldown end time (`cooldown_notices` in `state.json`) and a `cooldown_stale` event is recorded; accounts in the status API carry `cooldown_until` and `stale_cooldown`. The plugin does not clear the cooldown itself, because that needs the CPA management key and changes CPA's routing state.
+
 A pause sends one Bark notification (`circuit_notified_until_epoch` prevents repeats). A success or a fixed future reset clears the failure state.
 
 ## Notifications
@@ -202,7 +206,7 @@ The data directory defaults to `data/lamplighter` in the plugin directory. `main
 
 | File | Content |
 | --- | --- |
-| `state.json` | `groups`: notification baselines per window; `scheduler`: ignition state per group; `codex_reset_updates`: seen records. Written to a temporary file that replaces the old one |
+| `state.json` | `groups`: notification baselines per window; `scheduler`: ignition state per group; `codex_reset_updates`: seen records; `cooldown_notices`: stale cooldowns already notified. Written to a temporary file that replaces the old one |
 | `history/YYYY-MM-DD.jsonl` | Quota samples and events, one file per UTC day |
 | `instance.lock` | Instance lock |
 

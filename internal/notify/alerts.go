@@ -46,10 +46,14 @@ type Alerts struct {
 	OnError func(msg Message, err error)
 }
 
+// ExhaustedRemaining is the remaining percentage at or below which a window
+// counts as used up.
+const ExhaustedRemaining = 0.01
+
 // Severity classifies a remaining percentage with the configured thresholds.
 func (a *Alerts) Severity(remaining float64) string {
 	switch {
-	case remaining <= 0.01:
+	case remaining <= ExhaustedRemaining:
 		return SeverityExhausted
 	case remaining <= a.Cfg.CriticalThreshold:
 		return SeverityCritical
@@ -366,6 +370,18 @@ func (a *Alerts) ProcessGroup(ctx context.Context, st *store.State, g Group, now
 	}
 	groupState.Label = g.Label
 	groupState.LastSeen = now.Unix()
+}
+
+// CooldownMessage is sent once when CPA keeps an account in a cooldown
+// although its quota has recovered.
+func CooldownMessage(label string, until time.Time, loc *time.Location) Message {
+	return Message{
+		Title: fmt.Sprintf("⚠️ %s 额度已恢复，CPA 仍在冷却", label),
+		Body: fmt.Sprintf("CPA 把这个账号冷却到 %s，期间的请求和点火都会被拒绝。在 CPA 管理中心清除这个账号的冷却后恢复。",
+			until.In(loc).Format("01/02 15:04")),
+		Level: LevelTimeSensitive,
+		Label: label,
+	}
 }
 
 // CircuitMessage is sent once when ignition pauses until the next day.

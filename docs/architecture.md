@@ -33,7 +33,7 @@ Lamplighter 是用 Go 编写、以 `-buildmode=c-shared` 构建的 CPA 原生插
 | 方法和路径 | 作用 |
 | --- | --- |
 | `GET /v0/management/lamplighter/status` | 状态页数据，配置中的密钥只显示是否已设置 |
-| `GET /v0/management/lamplighter/history?range=1h\|3h\|6h\|12h\|24h\|3d\|8d\|14d\|35d` | 额度历史和点火事件，默认 `24h` |
+| `GET /v0/management/lamplighter/history?range=1h\|3h\|6h\|12h\|24h\|26h\|4d\|8d\|15d\|1mo\|36d` | 额度历史和点火事件，默认 `24h`。`1mo` 从插件时区上个月的同一日期（该月没有这一天时取最后一天）到现在 |
 | `POST /v0/management/lamplighter/refresh` | 立即主动查询，`{"auth_index": "..."}` 只查一个账号 |
 | `POST /v0/management/lamplighter/ignite` | 立即点火，`{"target": "<额度组 key>"}` |
 | `POST /v0/management/lamplighter/test-bark` | 发送测试通知 |
@@ -54,7 +54,7 @@ Lamplighter 是用 Go 编写、以 `-buildmode=c-shared` 构建的 CPA 原生插
 
 | 回调 | 用途 |
 | --- | --- |
-| `host.auth.list` | 凭证列表，含 `auth_index`、运行时 ID、邮箱、停用状态 |
+| `host.auth.list` | 凭证列表，含 `auth_index`、运行时 ID、邮箱、停用状态，以及 CPA 冷却状态（`unavailable`、`next_retry_after`） |
 | `host.auth.get` | 凭证文件 JSON，取 access token、Codex 账号 ID、Antigravity `project_id`、`proxy_url` |
 | `host.model.execute` | 点火，带 `auth_id` 和 `forced_provider` |
 | `host.http.operation_open` / `host.http.do` / `host.http.cancel` | 没有账号代理时的额度请求 |
@@ -132,6 +132,8 @@ CPA 在用量记录的 `ResponseHeaders` 中提供上游响应头：
 4. 重置时间在未来：`reset + grace_seconds`；不在当天时段内时等到第二天。
 5. 重置时间已过或未知：立即（受冷却和重试时间限制）。
 
+同一额度组中有 5 小时以外的窗口用完（剩余 ≤ 0.01%）且尚未到重置时间时，定时点火跳过这个额度组，不尝试、不计失败、不推送；引擎在该窗口的重置时间醒来，由下一次查询确认额度是否恢复。页面在点火状态中显示被哪个窗口挡住（`blocked_window`、`blocked_until`）。手动点火不受此限制。
+
 **滑动占位**：有些服务在窗口尚未开始时返回“当前时间加 5 小时”的重置时间，并且每次查询都向后移动。`ignite.Observe` 用连续两次主动观测判断：重置时间距当前约 5 小时（误差 120 秒），且两次观测间的移动量接近经过的时间（误差为经过时间的 2%，在 3 到 10 秒之间）。被动数据来自真实请求，请求本身会开始窗口，所以被动观测永远不是滑动占位。看到固定的未来重置时间会清空失败状态。
 
 ### 请求
@@ -179,6 +181,8 @@ CPA 没有按凭证列出模型的宿主回调，插件用 `models_api_key` 读�
 
 CPA 本地冷却带有 `reset_seconds` 且不超过 10 分钟时（`ignite.CooldownWait`），不计入失败次数，在冷却结束后再等 `grace_seconds` 重试。CPA 在 429 之后把凭证冷却到上游重置时间再加十几秒，额度在重置前用完时，重置后 3 秒的点火会撞上这段冷却。连续第二次冷却按普通临时错误计数，避免冷却不断续期时无限重试。
 
+**过期的 CPA 冷却**：CPA 收到账号级 429 后，把凭证冷却到上游报告的重置时间（7 天额度用完时可达数天），额度提前恢复（如重置卡）时不会自动解除。每轮查询后，`engine.checkCooldowns` 检查每个凭证：CPA 冷却还剩 10 分钟以上，且某个带 5 小时窗口的额度组在最近 15 分钟内的数据显示所有窗口都没有用完，就认为冷却已过期。每个冷却结束时间只推送一次（`state.json` 的 `cooldown_notices`），并记录 `cooldown_stale` 事件；状态接口的账号带 `cooldown_until` 和 `stale_cooldown`。插件不替用户清除冷却，因为那需要 CPA 管理密钥，并且会改变 CPA 的路由状态。
+
 暂停时推送一次 Bark（`circuit_notified_until_epoch` 防止重复），成功或看到固定的未来重置时间后清空失败状态。
 
 ## 通知
@@ -202,7 +206,7 @@ Did Codex Reset 每 `poll_seconds` 秒（最少 300 秒，对齐时间边界）�
 
 | 文件 | 内容 |
 | --- | --- |
-| `state.json` | `groups`：每个窗口的通知基线；`scheduler`：每个额度组的点火状态；`codex_reset_updates`：已见记录。写入临时文件后替换 |
+| `state.json` | `groups`：每个窗口的通知基线；`scheduler`：每个额度组的点火状态；`codex_reset_updates`：已见记录；`cooldown_notices`：已提醒的过期冷却。写入临时文件后替换 |
 | `history/YYYY-MM-DD.jsonl` | 按 UTC 日期分文件的额度样本和事件 |
 | `instance.lock` | 实例锁 |
 
