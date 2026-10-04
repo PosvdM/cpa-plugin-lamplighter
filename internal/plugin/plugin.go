@@ -276,10 +276,12 @@ func actionResponse(err error, p *Plugin) pluginapi.ManagementResponse {
 // window, days for the 7-day window.
 var historyRanges = map[string]time.Duration{
 	"1h":  time.Hour,
-	"2h":  2 * time.Hour,
-	"5h":  5 * time.Hour,
+	"3h":  3 * time.Hour,
+	"6h":  6 * time.Hour,
+	"12h": 12 * time.Hour,
 	"24h": 24 * time.Hour,
-	"7d":  7 * 24 * time.Hour,
+	"3d":  3 * 24 * time.Hour,
+	"8d":  8 * 24 * time.Hour,
 	"14d": 14 * 24 * time.Hour,
 	"35d": 35 * 24 * time.Hour,
 }

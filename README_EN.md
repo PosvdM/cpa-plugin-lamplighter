@@ -172,7 +172,7 @@ The page shows:
 
 - the quota windows of each account with reset times and data sources, with a refresh button per account;
 - the next ignition, last result and failure protection state of each quota group, with an "ignite now" button;
-- a quota chart for either the 5-hour quota, over the last 1, 2, 5 or 24 hours, or the 7-day quota, over the last 1, 7, 14 or 35 days. The top part has one colored band per service, colored like the quota bars, in the order Claude, ChatGPT, Gemini, Fable, Claude / GPT by default or by lowest remaining; a service with several accounts shows their total and expands into one row per account. The bottom part plots the selected row with its resets and ignition results;
+- a quota chart for either the 5-hour quota, over the last 1, 3, 6, 12 or 24 hours (6 by default), or the 7-day quota, over the last 1, 3, 8, 14 or 35 days (8 by default). The top part has one colored band per service, colored like the quota bars, in the order Claude, ChatGPT, Gemini, Fable, Claude / GPT by default or by lowest remaining; a service with several accounts shows their total and expands into one row per account. The bottom part plots the selected row with its resets and ignition results;
 - recent events in columns for time, type, quota group and detail;
 - the settings form, with a test notification button in the notification settings.
 
