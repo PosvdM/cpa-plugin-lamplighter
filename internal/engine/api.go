@@ -348,7 +348,8 @@ type HistoryResponse struct {
 }
 
 // historyRanges are the fixed spans the chart offers: hours for the 5-hour
-// window, days for the 7-day window.
+// window, days for the 7-day window. 26h and 36d are five windows plus one
+// unit, so five whole windows always fit.
 var historyRanges = map[string]time.Duration{
 	"1h":  time.Hour,
 	"3h":  3 * time.Hour,
