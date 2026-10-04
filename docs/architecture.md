@@ -8,7 +8,8 @@ Lamplighter 是用 Go 编写、以 `-buildmode=c-shared` 构建的 CPA 原生插
 
 | 路径 | 职责 |
 | --- | --- |
-| `main.go` | cgo 入口：导出 C ABI 函数，转发 RPC，实现宿主回调，计算默认数据目录 |
+| `main.go` | cgo 入口：导出 C ABI 函数，转发 RPC，实现宿主回调 |
+| `datadir_unix.go`、`datadir_windows.go` | 按平台计算默认数据目录 |
 | `internal/plugin` | 插件 RPC 方法：注册、重新配置、暂停、管理接口、`usage.handle` |
 | `internal/engine` | 后台循环：主动查询、被动数据、点火、通知、历史和状态页数据 |
 | `internal/host` | 宿主回调的 Go 封装，以及 `host.http.do` 的超时控制 |
@@ -39,6 +40,8 @@ Lamplighter 是用 Go 编写、以 `-buildmode=c-shared` 构建的 CPA 原生插
 | `POST /v0/management/lamplighter/test-bark` | 发送测试通知 |
 
 页面注册为资源 `GET /v0/resource/plugins/lamplighter/page`，菜单名为 `Lamplighter`。资源本身不需要认证，页面中的数据请求都带管理密钥。页面从管理中心保存在 `localStorage` 的 `cli-proxy-auth` 中读取密钥（管理中心用主机名和 User-Agent 做了可逆混淆），读不到时让用户输入并只保存在 `sessionStorage`。设置通过 CPA 的 `PATCH /v0/management/plugins/lamplighter/config` 保存，该接口只合并顶层键，所以页面提交 `ignition`、`providers`、`codex_reset_updates` 时发送完整对象。
+
+页面标题旁的图标从 GitHub 加载仓库中的 `assets/logo.png`，更换图标不需要发布新版本；加载失败时不显示。
 
 页面的视觉样式与管理中心一致：CSS 变量沿用管理中心 `src/styles/themes.scss` 的名称和取值（浅色、纯白、深色三套），额度条和图表按前两档提醒阈值着色（默认剩余高于 50% 绿色、高于 20% 黄色、其余红色），与通知标题的 🟡、🔴 一致，遥测数字使用等宽字体。页面与管理中心同源，主题直接读取父页面根元素的 `data-theme`，并监听其变化；单独打开时退回到管理中心保存在 `localStorage` 的 `cli-proxy-theme`。管理中心改了配色时，同步更新 `internal/web/page.css` 中的变量。
 
@@ -80,7 +83,7 @@ Lamplighter 是用 Go 编写、以 `-buildmode=c-shared` 构建的 CPA 原生插
 
 - `plugin.register` 和 `plugin.reconfigure` 解析配置并应用。无法解析的配置不生效，状态页显示错误，插件继续使用上一份配置。
 - 新版本动态库加载后，CPA 对旧实例调用 `plugin.quiesce`，但不会卸载它。插件收到 `plugin.quiesce` 或 `plugin.shutdown` 后停止后台循环且不再启动。
-- `instance.lock` 是数据目录中的 `flock` 文件锁，保证同一时间只有一个实例在查询、点火和推送。新实例拿不到锁时每 10 秒重试一次。
+- `instance.lock` 是数据目录中的独占文件锁（Unix 上用 `flock`，Windows 上以不共享的方式打开文件），保证同一时间只有一个实例在查询、点火和推送。新实例拿不到锁时每 10 秒重试一次。
 
 ## 额度获取
 
@@ -202,7 +205,7 @@ Did Codex Reset 每 `poll_seconds` 秒（最少 300 秒，对齐时间边界）�
 
 ## 数据
 
-数据目录默认是插件目录下的 `data/lamplighter`。`main.go` 用 `dladdr` 找到动态库路径；动态库位于 `<插件目录>/<goos>/<goarch>/` 时去掉这两层。
+数据目录默认是插件目录下的 `data/lamplighter`。Linux 和 macOS 上，`datadir_unix.go` 用 `dladdr` 找到动态库路径，动态库位于 `<插件目录>/<goos>/<goarch>/` 时去掉这两层。Windows 上 CPA 从临时目录加载 DLL 的副本，动态库路径不指向插件目录，所以 `datadir_windows.go` 从 CPA 的 `config.yaml` 读取 `plugins.dir`（默认 `plugins`，相对路径以 CPA 的工作目录为准）。
 
 | 文件 | 内容 |
 | --- | --- |

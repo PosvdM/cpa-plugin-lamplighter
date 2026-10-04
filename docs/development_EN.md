@@ -5,8 +5,8 @@
 ## Environment
 
 - Go 1.26, matching CPA v8.
-- Building the shared library needs cgo and a C compiler for the target. Linux builds run in `golang:1.26-bookworm`, which has the same glibc as the official CPA image (Debian 12).
-- Tests need no cgo. Everything under `internal/` is pure Go and can be tested on Windows, macOS or Linux; only `main.go` needs cgo.
+- Building the shared library needs cgo and a C compiler for the target. Linux builds run in `golang:1.26-bookworm`, which has the same glibc as the official CPA image (Debian 12); macOS builds use Xcode's clang and Windows builds MinGW-w64 gcc.
+- Tests need no cgo. Everything under `internal/` is pure Go and can be tested on Windows, macOS or Linux; only `main.go` and `datadir_*.go` in the root need cgo.
 
 ## Tests
 
@@ -16,7 +16,7 @@ go test ./internal/...
 node --check internal/web/page.js
 ```
 
-Tests use a fake host and local HTTP servers and never send real requests. CI also requires `gofmt -l .` to print nothing.
+Tests use a fake host and local HTTP servers and never send real requests. CI runs the tests on Linux, macOS and Windows, and on Linux also requires `gofmt -l .` to print nothing.
 
 Coverage:
 
@@ -26,7 +26,8 @@ Coverage:
 - candidate model order and model list reading;
 - quota alerts, reset reminders, the Bark request format and Did Codex Reset deduplication;
 - the engine: account suffixes, the passive skip rule, ignition confirmation, retry with the next model, pause notifications and history sampling;
-- plugin RPC: registration, management routes, the page, and that the status contains no secrets.
+- plugin RPC: registration, management routes, the page, and that the status contains no secrets;
+- the instance lock being exclusive, and reading the plugin directory from the CPA config.
 
 ## Building
 
@@ -43,13 +44,15 @@ The result is `dist/lamplighter-v0.1.0.so`. The `-v<version>` suffix lets CPA re
 Pushing a `v*` tag runs GitHub Actions (`.github/workflows/build.yml`):
 
 1. run the tests;
-2. build in a `golang:1.26-bookworm` container on `ubuntu-latest` (amd64) and `ubuntu-24.04-arm` (arm64);
-3. package `lamplighter_<version>_linux_<arch>.zip` with only `lamplighter-v<version>.so` at the root, the format the CPA plugin store expects;
-4. create a GitHub Release with the zips and `SHA256SUMS`.
+2. build five platforms with `scripts/ci-build.sh`: Linux amd64 and arm64 in a `golang:1.26-bookworm` container on `ubuntu-latest` and `ubuntu-24.04-arm`; macOS amd64 and arm64 both on `macos-latest` (arm64), with clang cross-compiling amd64; Windows amd64 on `windows-latest`;
+3. package each platform as `lamplighter_<version>_<os>_<arch>.zip` with only `lamplighter-v<version>.<so|dylib|dll>` at the root;
+4. create a GitHub Release with the five zips and `checksums.txt` in `sha256sum` format.
+
+The CPA plugin store installs from the latest release: it looks up the zip and `checksums.txt` by these names and checks the SHA-256 before installing. The store requires all five platforms in every release; a plugin missing any of them is not listed.
 
 The version comes from the tag (`v0.1.0` gives `0.1.0`) and is set with `-ldflags "-X main.version=..."`; the Management Center and the page show it.
 
-Pushes to `main` only build and upload workflow artifacts, versioned `0.0.0-dev.<first 7 characters of the commit>`.
+Pushes to `main` only build and upload workflow artifacts (the unpackaged libraries), versioned `0.0.0-dev.<first 7 characters of the commit>`.
 
 ## Conventions
 

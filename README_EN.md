@@ -1,8 +1,12 @@
+<p align="center"><img src="./assets/logo.png" alt="" width="128"></p>
+
 # Lamplighter
 
 [中文](./README.md)
 
 Lamplighter is a native plugin for [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) (CPA). It monitors the quota of ChatGPT (Codex), Claude and Antigravity accounts, sends alerts through [Bark](https://github.com/Finb/Bark), and sends one minimal request after each 5-hour quota window resets so that the next window starts right away.
+
+![Management page: quota per account and ignition plans](./docs/images/overview.png)
 
 ## Features
 
@@ -21,14 +25,14 @@ When a service has several accounts, notifications and the page tell them apart 
 
 ## Requirements
 
-- CPA v8.0.4 or later on Linux amd64 or arm64, with plugins enabled (`plugins.enabled: true`).
+- CPA v8.0.4 or later with plugins enabled (`plugins.enabled: true`). The plugin is built for Linux amd64/arm64, macOS amd64/arm64 and Windows amd64; the macOS and Windows builds are only built and tested in CI and have not been tried on a running CPA.
 - A CPA API key reserved for Lamplighter. The plugin reads the model list with it to pick ignition models.
 - An iPhone with Bark, if you want notifications.
 
 ## Installation
 
-1. Download the zip for your server from [Releases](https://github.com/PosvdM/cpa-plugin-lamplighter/releases): `linux_amd64` when `uname -m` prints `x86_64`, `linux_arm64` when it prints `aarch64`.
-2. Extract `lamplighter-v<version>.so` into the `linux/<arch>/` folder of the CPA plugin directory, for example `plugins/linux/arm64/`. In a Docker deployment the plugin directory is the host folder mounted at `/CLIProxyAPI/plugins`.
+1. Download the zip for the system CPA runs on from [Releases](https://github.com/PosvdM/cpa-plugin-lamplighter/releases): on Linux, `linux_amd64` when `uname -m` prints `x86_64` and `linux_arm64` when it prints `aarch64`; `darwin_arm64` for Apple silicon Macs, `darwin_amd64` for Intel Macs; `windows_amd64` for Windows.
+2. Extract the library (`lamplighter-v<version>.so` on Linux, `.dylib` on macOS, `.dll` on Windows) into the `<os>/<arch>/` folder of the CPA plugin directory, for example `plugins/linux/arm64/` or `plugins/windows/amd64/`. In a Docker deployment the plugin directory is the host folder mounted at `/CLIProxyAPI/plugins`.
 3. Add an API key to CPA's `config.yaml` and enable the plugin:
 
    ```yaml
@@ -48,7 +52,7 @@ When a service has several accounts, notifications and the page tell them apart 
 4. Restart CPA (`docker compose restart` in a Docker deployment). The plugin runs its first query about 20 seconds after CPA starts.
 5. Open **Lamplighter** in the Management Center sidebar. If you signed in to the Management Center with "remember password", the page uses that key; otherwise it asks for one.
 
-To upgrade, put the new `.so` in the same folder, delete the old one and restart CPA.
+To upgrade, put the new library in the same folder, delete the old one and restart CPA.
 
 The plugin keeps its state and quota history in `data/lamplighter/` under the plugin directory. In a Docker deployment that directory is on the host, so recreating the container keeps the data.
 
@@ -171,6 +175,8 @@ plugins:
 
 ## Management page
 
+![Quota chart: Claude with two accounts expanded into one row each, and below it the total line with the range between accounts](./docs/images/chart.png)
+
 The page shows:
 
 - the quota windows of each account with reset times and data sources, with a refresh button per account;
@@ -190,3 +196,7 @@ The page text is in Chinese.
 ## Development
 
 Plugin structure, data flow and design constraints are in [Architecture](./docs/architecture_EN.md); building, testing and releasing are in [Development](./docs/development_EN.md).
+
+## License
+
+[AGPL-3.0](./LICENSE). If you distribute a modified version, or let others use one over a network, you must publish its source code under the same license.

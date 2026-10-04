@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -26,6 +27,28 @@ func HostConfigPath(args []string, workDir string) string {
 		}
 	}
 	return filepath.Join(workDir, "config.yaml")
+}
+
+// PluginsDir returns plugins.dir from the CPA config, defaulting to "plugins"
+// and expanding a leading "~" to the home directory like CPA does.
+func PluginsDir(raw []byte) string {
+	var cfg struct {
+		Plugins struct {
+			Dir string `yaml:"dir"`
+		} `yaml:"plugins"`
+	}
+	_ = yaml.Unmarshal(raw, &cfg)
+	dir := strings.TrimSpace(cfg.Plugins.Dir)
+	if dir == "" {
+		return "plugins"
+	}
+	if rest, ok := strings.CutPrefix(dir, "~"); ok {
+		if home, err := os.UserHomeDir(); err == nil {
+			rest = strings.TrimLeft(rest, `/\`)
+			return filepath.Join(home, filepath.FromSlash(strings.ReplaceAll(rest, `\`, "/")))
+		}
+	}
+	return filepath.Clean(dir)
 }
 
 // PluginEnabled reports whether the CPA config enables plugins and this
