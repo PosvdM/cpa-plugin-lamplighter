@@ -82,13 +82,13 @@ A 5-hour window starts with the first request after a reset. If nobody uses the 
 ## Notification example
 
 ```text
-⚠️ Claude · 7d 48% | 03d
+🟡 Claude · 7d 48% | 03d
 
 5h：96% | 04h | 10/04 13:50
 7d：48% | 03d | 10/07 14:00
 ```
 
-Each body line shows the window, the remaining quota, the time until reset, and the reset time. The first time the plugin sees a quota window it only records the current level and sends nothing.
+Title icons: 🟡 remaining fell to the first threshold (50% by default), 🔴 to the second threshold (20% by default) or below, ✅ recovered, ⏰ reset reminder, ⚠️ an error such as ignition paused. Each body line shows the window, the remaining quota, the time until reset, and the reset time. The first time the plugin sees a quota window it only records the current level and sends nothing.
 
 ## Configuration
 

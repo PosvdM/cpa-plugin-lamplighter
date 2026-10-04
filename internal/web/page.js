@@ -192,12 +192,22 @@
     return fmtDuration(ms) + "前";
   }
 
-  // Bars use the same three tiers as the Management Center quota page.
-  function meterClass(remaining) {
-    if (remaining >= 70) return "fill-high";
-    if (remaining >= 30) return "fill-medium";
-    return "fill-low";
+  // Bars and the chart color quota by the first two notification
+  // thresholds, the same split as the 🟡 and 🔴 notifications.
+  function quotaThresholds() {
+    var cfg = status && status.config ? status.config : {};
+    var notice = Number(cfg.notice_threshold), low = Number(cfg.low_threshold);
+    return { notice: isFinite(notice) ? notice : 50, low: isFinite(low) ? low : 20 };
   }
+
+  function quotaLevel(remaining) {
+    var t = quotaThresholds();
+    if (remaining <= t.low) return "low";
+    if (remaining <= t.notice) return "medium";
+    return "high";
+  }
+
+  function meterClass(remaining) { return "fill-" + quotaLevel(remaining); }
 
   function fmtCountdown(ms) {
     if (ms <= 0) return "已重置";
@@ -470,9 +480,7 @@
   }
 
   function levelVar(remaining) {
-    if (remaining >= 70) return "--viz-success";
-    if (remaining >= 30) return "--quota-medium-color";
-    return "--viz-failure";
+    return { high: "--viz-success", medium: "--quota-medium-color", low: "--viz-failure" }[quotaLevel(remaining)];
   }
 
   function pct(v) { return v == null ? "—" : Math.round(v) + "%"; }
@@ -1064,6 +1072,10 @@
     head.hidden = false;
     renderDetail(findRow(rows, chartSelected), head, detail);
     renderChartTable(rows);
+    var t = quotaThresholds();
+    $("legend-high").textContent = "> " + t.notice + "%";
+    $("legend-medium").textContent = t.low + "–" + t.notice + "%";
+    $("legend-low").textContent = "≤ " + t.low + "%";
   }
 
   function renderRangeButtons() {
