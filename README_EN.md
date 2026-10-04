@@ -199,4 +199,4 @@ Plugin structure, data flow and design constraints are in [Architecture](./docs/
 
 ## License
 
-[AGPL-3.0](./LICENSE). If you distribute a modified version, or let others use one over a network, you must publish its source code under the same license.
+[GNU Affero General Public License](./LICENSE), version 3 or (at your option) any later version (`AGPL-3.0-or-later`). If you distribute a modified version, or let others use one over a network, you must publish its source code under the same license.
