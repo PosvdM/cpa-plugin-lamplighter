@@ -24,7 +24,6 @@
     <span id="meta" class="meta"></span>
     <div class="actions">
       <button id="refresh-all" class="btn btn-secondary" type="button">立即刷新全部</button>
-      <button id="test-bark" class="btn btn-secondary" type="button">测试推送</button>
     </div>
   </header>
 
@@ -96,9 +95,10 @@
     <form id="settings">
       <fieldset>
         <legend>通知</legend>
-        <div class="grid-3">
-          <label class="span-2">Bark 推送地址<input name="bark_url" type="text" autocomplete="off" placeholder="https://api.day.app/device_key"></label>
+        <div class="bark-row">
+          <label>Bark 推送地址<input name="bark_url" type="text" autocomplete="off" placeholder="https://api.day.app/device_key"></label>
           <label>Bark 分组<input name="bark_group" type="text"></label>
+          <button id="test-bark" class="btn btn-secondary" type="button" title="按已保存的设置发送，修改地址后先保存">测试推送</button>
         </div>
         <div class="field">
           <span class="field-label">提醒阈值</span>
