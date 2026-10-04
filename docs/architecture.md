@@ -33,7 +33,7 @@ Lamplighter 是用 Go 编写、以 `-buildmode=c-shared` 构建的 CPA 原生插
 | 方法和路径 | 作用 |
 | --- | --- |
 | `GET /v0/management/lamplighter/status` | 状态页数据，配置中的密钥只显示是否已设置 |
-| `GET /v0/management/lamplighter/history?range=24h\|7d\|30d` | 额度历史和点火事件 |
+| `GET /v0/management/lamplighter/history?range=1h\|2h\|5h\|24h\|7d\|14d\|35d` | 额度历史和点火事件，默认 `24h` |
 | `POST /v0/management/lamplighter/refresh` | 立即主动查询，`{"auth_index": "..."}` 只查一个账号 |
 | `POST /v0/management/lamplighter/ignite` | 立即点火，`{"target": "<额度组 key>"}` |
 | `POST /v0/management/lamplighter/test-bark` | 发送测试通知 |
@@ -41,6 +41,13 @@ Lamplighter 是用 Go 编写、以 `-buildmode=c-shared` 构建的 CPA 原生插
 页面注册为资源 `GET /v0/resource/plugins/lamplighter/page`，菜单名为 `Lamplighter`。资源本身不需要认证，页面中的数据请求都带管理密钥。页面从管理中心保存在 `localStorage` 的 `cli-proxy-auth` 中读取密钥（管理中心用主机名和 User-Agent 做了可逆混淆），读不到时让用户输入并只保存在 `sessionStorage`。设置通过 CPA 的 `PATCH /v0/management/plugins/lamplighter/config` 保存，该接口只合并顶层键，所以页面提交 `ignition`、`providers`、`codex_reset_updates` 时发送完整对象。
 
 页面的视觉样式与管理中心一致：CSS 变量沿用管理中心 `src/styles/themes.scss` 的名称和取值（浅色、纯白、深色三套），额度条按管理中心额度页的规则着色（剩余 ≥70% 绿色、≥30% 黄色、其余红色），遥测数字使用等宽字体。页面与管理中心同源，主题直接读取父页面根元素的 `data-theme`，并监听其变化；单独打开时退回到管理中心保存在 `localStorage` 的 `cli-proxy-theme`。管理中心改了配色时，同步更新 `internal/web/page.css` 中的变量。
+
+额度变化图表的数据处理都在页面中完成：
+
+- **缺数据**：相邻样本间隔超过 3.5 个查询间隔（或接口的分段长度）时视为缺数据，画成斜线纹理，不延续前一个值。
+- **多账号合计**：同一服务、同一 `source_label` 的多个账号合成一行，取各账号剩余百分比的平均值。各账号套餐相同时，这等于总额度的剩余比例；接口只提供百分比，无法按额度大小加权。详情图同时画出各账号的最低到最高范围。
+- **重置**：相邻样本的剩余上升 5 个百分点及以上视为重置。曲线在重置处断开，新的一段从重置后的值开始，图上标出重置时间；相隔一个样本的两次上升算一次重置。单个账号重置只让合计上升一部分，上升不足 5 个百分点时合计曲线不断开。
+- **平滑**：曲线使用单调三次插值（Fritsch-Carlson），不会越过样本值。额度按整数百分比上报，所以变化不超过 2 个百分点的台阶按连续下降连线；平台之后是更大的下降时，曲线先保持水平，再在下降处弯折。
 
 使用的宿主回调：
 
@@ -196,7 +203,7 @@ Did Codex Reset 每 `poll_seconds` 秒（最少 300 秒，对齐时间边界）�
 | `history/YYYY-MM-DD.jsonl` | 按 UTC 日期分文件的额度样本和事件 |
 | `instance.lock` | 实例锁 |
 
-历史记录每行一个 JSON：样本为 `{"k":"s","t":秒,"g":额度组,"w":窗口,"r":剩余,"x":重置,"s":"active|passive"}`，事件为 `{"k":"e","t":秒,"g":额度组,"e":类型,"v":级别,"m":文本}`。主动样本每次都写；被动样本只在数值或重置时间变化时写，同一窗口每分钟最多一次，期间的新值暂存在 `pendingSamp`，满一分钟后写入。历史接口在 7 天和 30 天范围内分别按 5 分钟和 30 分钟取每段最后一个样本。
+历史记录每行一个 JSON：样本为 `{"k":"s","t":秒,"g":额度组,"w":窗口,"r":剩余,"x":重置,"s":"active|passive"}`，事件为 `{"k":"e","t":秒,"g":额度组,"e":类型,"v":级别,"m":文本}`。主动样本每次都写；被动样本只在数值或重置时间变化时写，同一窗口每分钟最多一次，期间的新值暂存在 `pendingSamp`，满一分钟后写入。历史接口对超过 2 天的范围按 5 分钟、超过 8 天的范围按 30 分钟取每段最后一个样本。每个系列带有 `label`（含账号后缀，例如 `ChatGPT#rk`）和 `source_label`（不含后缀），页面按服务和 `source_label` 合并同一额度的多个账号。
 
 额度组 key 为 `<服务>:<auth_index>:<分组>`，例如 `codex:3:codex:main`、`claude:3:claude:seven-day-fable`、`antigravity:4:antigravity:gemini-models`。它同时是点火目标 ID。
 

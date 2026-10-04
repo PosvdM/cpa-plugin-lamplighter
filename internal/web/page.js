@@ -5,13 +5,15 @@
   var CONFIG_API = "/v0/management/plugins/lamplighter/config";
   var KEY_STORE = "lamplighter-management-key";
   var PROVIDERS = ["codex", "claude", "antigravity"];
-  var SERIES_VARS = ["--series-1", "--series-2", "--series-3", "--series-4", "--series-5", "--series-6", "--series-7", "--series-8"];
 
   var key = "";
   var status = null;
   var rawConfig = {};
-  var range = "24h";
-  var view = "all:5h";
+  var chartWindow = "5h";
+  var range = "5h";
+  var chartSort = "low";
+  var chartExpanded = {};
+  var chartSelected = null;
   var history = null;
   var refreshTimer = null;
 
@@ -416,27 +418,12 @@
     more.textContent = eventsExpanded ? "收起" : "显示更多（共 " + Math.min(status.events.length, 100) + " 条）";
   }
 
-  function renderViewOptions() {
-    var select = $("view-select");
-    var current = view;
-    clear(select);
-    select.appendChild(el("option", { value: "all:5h", text: "全部账号 · 5 小时" }));
-    select.appendChild(el("option", { value: "all:7d", text: "全部账号 · 7 天" }));
-    status.accounts.forEach(function (account) {
-      select.appendChild(el("option", { value: "account:" + account.auth_index, text: account.title + (account.email ? "（" + account.email + "）" : "") }));
-    });
-    var exists = Array.prototype.some.call(select.options, function (o) { return o.value === current; });
-    view = exists ? current : "all:5h";
-    select.value = view;
-  }
-
   function renderStatus() {
     renderHeader();
     renderNotices();
     renderAccounts();
     renderTargets();
     renderEvents();
-    renderViewOptions();
   }
 
   function loadStatus() {
@@ -459,51 +446,41 @@
 
   // ---- Chart ----
 
-  // Colors follow the entity: every group or window keeps its slot no matter
-  // which view or range is shown.
-  function colorSlot(entity, entities) {
-    var index = entities.indexOf(entity);
-    return SERIES_VARS[(index < 0 ? 0 : index) % SERIES_VARS.length];
-  }
+  // Time ranges follow the quota window: a 5-hour quota is read over hours,
+  // a 7-day quota over days. Keys are the history endpoint's range values.
+  var RANGES = {
+    "5h": [["1h", "1 小时"], ["2h", "2 小时"], ["5h", "5 小时"], ["24h", "24 小时"]],
+    "7d": [["24h", "1 天"], ["7d", "7 天"], ["14d", "14 天"], ["35d", "35 天"]]
+  };
+  var DEFAULT_RANGE = { "5h": "5h", "7d": "7d" };
+  var LANE = 22, LANE_GAP = 6, AXIS_H = 22, EVENT_H = 24;
+  // A rise of this many points between two samples is a reset.
+  var RESET_JUMP = 5;
+  // Quotas report whole percents; steps this small are a steady decline.
+  var QUANTUM = 2;
+
+  var chartView = null;
+  var hoverSource = "";
+  var hoverListeners = [];
 
   function cssVar(name) {
     return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   }
 
+  function levelVar(remaining) {
+    if (remaining >= 70) return "--viz-success";
+    if (remaining >= 30) return "--quota-medium-color";
+    return "--viz-failure";
+  }
+
+  function pct(v) { return v == null ? "—" : Math.round(v) + "%"; }
+
+  function unixDate(t) { return new Date(t * 1000); }
+
   function windowKind(series) {
     if (series.window === "five-hour" || series.window_label === "5h") return "5h";
     if (series.window === "seven-day") return "7d";
     return series.window_label || series.window;
-  }
-
-  function currentSeries() {
-    if (!history) return [];
-    var all = history.series.filter(function (s) { return s.points && s.points.length; });
-    if (view.indexOf("all:") === 0) {
-      var kind = view.slice(4);
-      var groups = [];
-      status.accounts.forEach(function (a) { (a.groups || []).forEach(function (g) { groups.push(g.key); }); });
-      all.forEach(function (s) { if (groups.indexOf(s.group) < 0) groups.push(s.group); });
-      return all.filter(function (s) { return windowKind(s) === kind; })
-        .sort(function (a, b) { return groups.indexOf(a.group) - groups.indexOf(b.group); })
-        .map(function (s) {
-          return { name: s.label, color: colorSlot(s.group, groups), points: s.points, group: s.group };
-        });
-    }
-    var authIndex = view.slice(8);
-    var account = status.accounts.filter(function (a) { return a.auth_index === authIndex; })[0];
-    var windows = [];
-    if (account) {
-      (account.groups || []).forEach(function (g) { (g.windows || []).forEach(function (w) { windows.push(g.key + "|" + w.id); }); });
-    }
-    return all.filter(function (s) { return s.auth_index === authIndex || (account && windows.indexOf(s.group + "|" + s.window) >= 0); })
-      .map(function (s) {
-        var id = s.group + "|" + s.window;
-        if (windows.indexOf(id) < 0) windows.push(id);
-        var name = windowName({ short: s.window_label, label: s.window_label });
-        if (s.label && account && s.label !== account.title) name = s.label + " · " + name;
-        return { name: name, color: colorSlot(id, windows), points: s.points, group: s.group };
-      });
   }
 
   function valueAt(points, t) {
@@ -515,6 +492,125 @@
     return value;
   }
 
+  // Samples further apart than a few poll intervals leave a gap, which is
+  // drawn as missing data rather than as a held value.
+  function gapLimit() {
+    var poll = status && status.config ? Number(status.config.poll_interval_seconds) || 300 : 300;
+    return Math.max(history.bucket_seconds || 0, poll) * 3.5;
+  }
+
+  // Pooled remaining of several accounts: the mean percentage, which is the
+  // share of the total quota left when the accounts have the same plan. Each
+  // point also carries the lowest and highest account for the range band.
+  function pooled(rows, limit) {
+    var times = [];
+    rows.forEach(function (r) { r.points.forEach(function (p) { times.push(p[0]); }); });
+    times.sort(function (a, b) { return a - b; });
+    var out = [];
+    times.forEach(function (t, i) {
+      if (i && t === times[i - 1]) return;
+      var sum = 0, n = 0, lo = 101, hi = -1;
+      rows.forEach(function (r) {
+        var p = valueAt(r.points, t);
+        if (!p || t - p[0] > limit) return;
+        sum += p[1]; n++; lo = Math.min(lo, p[1]); hi = Math.max(hi, p[1]);
+      });
+      if (n) out.push([t, sum / n, 0, lo, hi]);
+    });
+    return out;
+  }
+
+  // One row per quota group label. A label with several accounts becomes a
+  // pooled row that expands into one row per account.
+  function chartRows() {
+    var info = {};
+    status.accounts.forEach(function (a) {
+      (a.groups || []).forEach(function (g) {
+        (g.windows || []).forEach(function (w) {
+          var reset = parseTime(w.reset);
+          info[g.key + "|" + w.id] = { email: a.email || a.name, reset: reset ? reset.getTime() / 1000 : null };
+        });
+      });
+    });
+    var limit = gapLimit();
+    var byLabel = {}, order = [];
+    history.series.forEach(function (s) {
+      if (!s.points || !s.points.length || windowKind(s) !== chartWindow) return;
+      var meta = info[s.group + "|" + s.window] || {};
+      var id = s.provider + "|" + (s.source_label || s.label);
+      if (!byLabel[id]) { byLabel[id] = []; order.push(id); }
+      byLabel[id].push({ id: s.group + "|" + s.window, name: s.label, sub: meta.email || s.auth_index || "", group: s.group,
+        points: s.points, reset: meta.reset, last: s.points[s.points.length - 1][1] });
+    });
+    var rows = order.map(function (id, index) {
+      var kids = byLabel[id];
+      if (kids.length === 1) { kids[0].order = index; return kids[0]; }
+      var resets = kids.map(function (k) { return k.reset; }).filter(Boolean);
+      var source = history.series.filter(function (s) { return s.group === kids[0].group; })[0];
+      return { id: "group:" + id, name: (source && source.source_label) || kids[0].name, children: kids, points: pooled(kids, limit), order: index,
+        last: kids.reduce(function (sum, k) { return sum + k.last; }, 0) / kids.length,
+        reset: resets.length ? Math.min.apply(null, resets) : null, groups: kids.map(function (k) { return k.group; }) };
+    });
+    var lowFirst = chartSort === "low";
+    rows.sort(function (a, b) { return lowFirst ? (a.last - b.last) || (a.order - b.order) : a.order - b.order; });
+    rows.forEach(function (r) {
+      if (r.children && lowFirst) r.children.sort(function (a, b) { return a.last - b.last; });
+    });
+    return rows;
+  }
+
+  function findRow(rows, id) {
+    var hit = null;
+    rows.forEach(function (r) {
+      if (r.id === id) hit = r;
+      (r.children || []).forEach(function (c) { if (c.id === id) hit = c; });
+    });
+    return hit;
+  }
+
+  function geometry(width) {
+    var from = new Date(history.from).getTime() / 1000;
+    var to = new Date(history.to).getTime() / 1000;
+    var labelW = width < 640 ? 120 : 190, rightW = width < 640 ? 112 : 136;
+    var plotW = width - labelW - rightW;
+    return { from: from, to: to, width: width, labelW: labelW, rightW: rightW, plotW: plotW,
+      x: function (t) { return labelW + (t - from) / (to - from) * plotW; },
+      t: function (px) { return from + (px - labelW) / plotW * (to - from); } };
+  }
+
+  function chartTicks(g) {
+    var span = g.to - g.from;
+    var step = span <= 3600 ? 600 : span <= 7200 ? 900 : span <= 6 * 3600 ? 3600 : span <= 2 * 86400 ? 4 * 3600 : span <= 8 * 86400 ? 86400 : span <= 15 * 86400 ? 2 * 86400 : 5 * 86400;
+    var offset = offsetSeconds(), list = [];
+    for (var t = Math.ceil((g.from + offset) / step) * step - offset; t <= g.to; t += step) list.push(t);
+    return { list: list, label: function (t) { return span <= 2 * 86400 ? fmtClock(unixDate(t)) : fmtDay(unixDate(t)); } };
+  }
+
+  // Contiguous stretches of samples; each ends at its last sample plus one
+  // gap limit, or at "now" when that is sooner.
+  function runs(points, limit, end) {
+    var out = [], cur = [];
+    points.forEach(function (p) {
+      if (cur.length && p[0] - cur[cur.length - 1][0] > limit) { out.push(cur); cur = []; }
+      cur.push(p);
+    });
+    if (cur.length) out.push(cur);
+    return out.map(function (r, i) {
+      var last = r[r.length - 1][0];
+      var stop = i === out.length - 1 ? Math.min(end, last + limit) : last + Math.min(limit, 300);
+      return { pts: r, start: r[0][0], end: Math.max(stop, last) };
+    });
+  }
+
+  function hatchPattern(root) {
+    var defs = svg("defs", {});
+    var pattern = svg("pattern", { id: "chart-hatch", width: 6, height: 6, patternUnits: "userSpaceOnUse", patternTransform: "rotate(45)" });
+    pattern.appendChild(svg("rect", { width: 2, height: 6, fill: cssVar("--chart-hatch") }));
+    defs.appendChild(pattern);
+    root.appendChild(defs);
+    return defs;
+  }
+
   var SVG_NS = "http://www.w3.org/2000/svg";
   function svg(tag, attrs) {
     var node = document.createElementNS(SVG_NS, tag);
@@ -522,168 +618,433 @@
     return node;
   }
 
-  // Small multiples: one row per series on a shared time axis, so lines never
-  // overlap. Each row is labeled with its series and current value, which
-  // also makes a legend unnecessary.
-  function renderChart() {
-    var box = $("chart");
-    box.classList.remove("loading");
-    clear(box);
-    var legend = $("legend");
-    clear(legend);
-    var table = $("chart-table");
-    clear(table);
-    var series = currentSeries();
-    if (!history || !series.length) {
-      box.appendChild(el("div", { class: "empty", text: history ? "这个范围内还没有额度数据。" : "加载中…" }));
-      return;
+  function svgText(attrs, text) {
+    var node = svg("text", attrs);
+    node.textContent = text;
+    return node;
+  }
+
+  // A band of solid color per quota level. Samples merge while the level
+  // stays the same, and edges snap to whole pixels so neighbours leave no seam.
+  function drawBand(root, g, points, y0, limit) {
+    var cursor = g.from;
+    function hatch(a, b) {
+      if (g.x(b) - g.x(a) > 1) root.appendChild(svg("rect", { x: g.x(a), y: y0, width: g.x(b) - g.x(a), height: LANE, fill: "url(#chart-hatch)" }));
     }
+    runs(points, limit, g.to).forEach(function (run) {
+      if (run.start > cursor + limit) hatch(cursor, run.start);
+      cursor = run.end;
+      var segments = [];
+      run.pts.forEach(function (p, i) {
+        var end = i + 1 < run.pts.length ? run.pts[i + 1][0] : run.end;
+        var level = levelVar(p[1]), last = segments[segments.length - 1];
+        if (last && last.level === level) last.end = end;
+        else segments.push({ start: Math.max(g.from, p[0]), end: end, level: level });
+      });
+      segments.forEach(function (seg) {
+        var x0 = Math.round(g.x(seg.start)), x1 = Math.max(x0 + 1, Math.round(g.x(seg.end)));
+        root.appendChild(svg("rect", { x: x0, y: y0, width: x1 - x0, height: LANE, fill: cssVar(seg.level), "fill-opacity": 0.8, "shape-rendering": "crispEdges" }));
+      });
+    });
+    if (cursor < g.to - limit) hatch(cursor, g.to);
+  }
 
-    var width = Math.max(320, box.clientWidth || 800);
-    var labelW = width < 560 ? 104 : 168;
-    var rowH = 58, rowGap = 14, axisH = 24, top = 4;
-    var margin = { left: labelW, right: 12 };
-    var plotW = width - margin.left - margin.right;
-    var height = top + series.length * (rowH + rowGap) - rowGap + axisH;
+  function ignitionEvents() {
     var from = new Date(history.from).getTime() / 1000;
-    var to = new Date(history.to).getTime() / 1000;
-    function x(t) { return margin.left + (t - from) / (to - from) * plotW; }
-    function rowTop(i) { return top + i * (rowH + rowGap); }
-    function y(i, v) { return rowTop(i) + (1 - v / 100) * rowH; }
+    return (history.events || []).map(function (ev) {
+      return { t: new Date(ev.time).getTime() / 1000, failed: ev.kind === "ignite_failed" || ev.kind === "ignite_paused", message: ev.message, group: ev.group };
+    }).filter(function (ev) { return ev.t >= from; });
+  }
 
-    var root = svg("svg", { viewBox: "0 0 " + width + " " + height, role: "img", "aria-label": "各额度窗口剩余百分比随时间变化" });
-    var span = to - from;
-    var step = span <= 2 * 86400 ? 4 * 3600 : span <= 8 * 86400 ? 86400 : 5 * 86400;
-    var offset = offsetSeconds();
-    var ticks = [];
-    for (var tk = Math.ceil((from + offset) / step) * step - offset; tk <= to; tk += step) ticks.push(tk);
+  function placeTip(tip, box, g, t, top) {
+    var scale = box.clientWidth / g.width, left = g.x(t) * scale + 14;
+    if (left + 280 > box.clientWidth) left = g.x(t) * scale - 294;
+    tip.style.left = Math.max(0, left) + "px";
+    tip.style.top = top + "px";
+  }
 
-    var eventsByGroup = {};
-    (history.events || []).forEach(function (ev) {
-      var et = new Date(ev.time).getTime() / 1000;
-      if (et < from || et > to || !ev.group) return;
-      (eventsByGroup[ev.group] = eventsByGroup[ev.group] || []).push({ t: et, failed: ev.kind === "ignite_failed" || ev.kind === "ignite_paused" });
+  function tipRow(tip, text, value, strong) {
+    tip.appendChild(el("div", { class: "row" + (strong ? " strong" : "") }, [
+      el("span", { class: "key", style: "background:" + (value != null ? cssVar(levelVar(value)) : "transparent") }),
+      el("span", { class: "name", text: text }),
+      el("span", { class: "value", text: value != null ? pct(value) : "无数据" })
+    ]));
+  }
+
+  // Overview: one band per row on a shared time axis, the ignition lane
+  // below, and a crosshair shared with the detail chart.
+  function renderOverview(rows, box) {
+    var g = chartView = geometry(Math.max(480, box.clientWidth || 800));
+    var limit = gapLimit();
+    var flat = [];
+    rows.forEach(function (r) {
+      flat.push({ row: r, depth: 0 });
+      if (r.children && chartExpanded[r.id]) r.children.forEach(function (c) { flat.push({ row: c, depth: 1 }); });
+    });
+    var height = AXIS_H + flat.length * (LANE + LANE_GAP) + EVENT_H + 6;
+    var root = svg("svg", { viewBox: "0 0 " + g.width + " " + height, role: "img", "aria-label": "各额度剩余百分比总览" });
+    hatchPattern(root);
+    var ticks = chartTicks(g);
+    ticks.list.forEach(function (t) {
+      root.appendChild(svgText({ x: g.x(t), y: 13, "text-anchor": "middle", "font-size": 11, fill: cssVar("--text-tertiary") }, ticks.label(t)));
+      root.appendChild(svg("line", { x1: g.x(t), x2: g.x(t), y1: AXIS_H - 4, y2: height - 4, stroke: cssVar("--border-color"), "stroke-dasharray": "2 4" }));
+    });
+    var rowY = {};
+    flat.forEach(function (f, i) {
+      var r = f.row, y0 = AXIS_H + i * (LANE + LANE_GAP);
+      rowY[r.id] = y0;
+      var selected = chartSelected === r.id;
+      if (selected) root.appendChild(svg("rect", { x: 0, y: y0 - 3, width: g.width, height: LANE + 6, rx: 6, fill: cssVar("--chart-select") }));
+      var lx = 4 + f.depth * 18;
+      if (r.children) root.appendChild(svgText({ x: lx, y: y0 + 15, "font-size": 10, fill: cssVar("--text-tertiary") }, chartExpanded[r.id] ? "▾" : "▸"));
+      var nameX = lx + (r.children ? 14 : 0);
+      var name = f.depth ? r.sub : r.name;
+      var maxChars = Math.floor((g.labelW - nameX - (r.children ? 30 : 8)) / 7);
+      if (name.length > maxChars) name = name.slice(0, Math.max(1, maxChars - 1)) + "…";
+      root.appendChild(svgText({ x: nameX, y: y0 + 15, "font-size": f.depth ? 12 : 13, "font-weight": f.depth ? 400 : 600,
+        fill: cssVar(f.depth ? "--text-secondary" : "--text-primary"), "class": "row-name" }, name));
+      if (r.children) root.appendChild(svgText({ x: nameX + name.length * 8 + 8, y: y0 + 15, "font-size": 11, fill: cssVar("--text-tertiary") }, "×" + r.children.length));
+      root.appendChild(svg("rect", { x: g.labelW, y: y0, width: g.plotW, height: LANE, rx: 4, fill: cssVar("--chart-lane") }));
+      drawBand(root, g, r.points, y0, limit);
+      var rx = g.width - g.rightW + 14;
+      root.appendChild(svg("rect", { x: rx, y: y0 + 7, width: 8, height: 8, rx: 2, fill: cssVar(levelVar(r.last)) }));
+      root.appendChild(svgText({ x: rx + 14, y: y0 + 15, "font-size": 13, "font-weight": 650, fill: cssVar("--text-primary") }, pct(r.last)));
+      if (r.reset) root.appendChild(svgText({ x: g.width - 2, y: y0 + 15, "font-size": 11, "text-anchor": "end", fill: cssVar("--text-tertiary") },
+        "↻" + fmtCountdown(r.reset * 1000 - Date.now())));
+      var hit = svg("rect", { x: 0, y: y0 - 3, width: g.width, height: LANE + 6, fill: "transparent", style: "cursor:pointer" });
+      hit.addEventListener("click", function () {
+        if (r.children && chartSelected === r.id) chartExpanded[r.id] = !chartExpanded[r.id];
+        chartSelected = r.id;
+        renderChart();
+      });
+      hit.addEventListener("pointermove", function (e) { hoverAt(e, root, r.id, "overview"); });
+      root.appendChild(hit);
     });
 
-    series.forEach(function (s, i) {
-      var color = cssVar(s.color);
-      var base = rowTop(i) + rowH;
-      // Row frame: 0% baseline, 50% and 100% hairlines, time gridlines.
-      [0, 50, 100].forEach(function (v) {
-        root.appendChild(svg("line", { x1: margin.left, x2: margin.left + plotW, y1: y(i, v), y2: y(i, v),
-          stroke: cssVar(v === 0 ? "--axis" : "--grid"), "stroke-width": 1 }));
-      });
-      ticks.forEach(function (tk) {
-        root.appendChild(svg("line", { x1: x(tk), x2: x(tk), y1: rowTop(i), y2: base, stroke: cssVar("--grid"), "stroke-width": 1 }));
-      });
-      // Row label and current value.
-      var last = s.points[s.points.length - 1];
-      var name = svg("text", { x: 0, y: rowTop(i) + 16, "font-size": 12.5, fill: cssVar("--text-secondary"), "class": "row-name" });
-      name.textContent = s.name;
-      root.appendChild(name);
-      var value = svg("text", { x: 0, y: rowTop(i) + 40, "font-size": 18, "font-weight": 650, fill: cssVar("--text-primary"), "class": "row-value" });
-      value.textContent = Math.round(last[1]) + "%";
-      root.appendChild(value);
-      var scale = svg("text", { x: margin.left - 6, y: rowTop(i) + 9, "font-size": 10, "text-anchor": "end", fill: cssVar("--text-muted") });
-      scale.textContent = "100";
-      root.appendChild(scale);
-      // Area wash and step line: a value holds until the next sample.
-      var d = "";
-      s.points.forEach(function (p, j) {
-        var px = x(p[0]), py = y(i, p[1]);
-        d += j === 0 ? "M" + px + " " + py : "H" + px + "V" + py;
-      });
-      var endX = x(last[0]);
-      root.appendChild(svg("path", { d: d + "V" + base + "H" + x(s.points[0][0]) + "Z", fill: color, "fill-opacity": 0.1, stroke: "none" }));
-      root.appendChild(svg("path", { d: d, fill: "none", stroke: color, "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }));
-      root.appendChild(svg("circle", { cx: endX, cy: y(i, last[1]), r: 4, fill: color, stroke: cssVar("--surface"), "stroke-width": 2 }));
-      // Ignition marks of this group on the row baseline.
-      (eventsByGroup[s.group] || []).forEach(function (ev) {
-        root.appendChild(svg("line", { x1: x(ev.t), x2: x(ev.t), y1: base - 6, y2: base,
-          stroke: cssVar(ev.failed ? "--critical" : "--text-muted"), "stroke-width": 2, "stroke-linecap": "round" }));
-      });
+    // Ignitions at the same moment merge into one mark with a count.
+    var ey = AXIS_H + flat.length * (LANE + LANE_GAP) + 4, cy = ey + 9;
+    root.appendChild(svgText({ x: 4, y: ey + 13, "font-size": 12, fill: cssVar("--text-tertiary"), "class": "row-name" }, "点火"));
+    root.appendChild(svg("line", { x1: g.labelW, x2: g.labelW + g.plotW, y1: cy, y2: cy, stroke: cssVar("--border-color") }));
+    var events = ignitionEvents(), clusters = [];
+    events.slice().sort(function (a, b) { return a.t - b.t; }).forEach(function (ev) {
+      var last = clusters[clusters.length - 1];
+      if (last && g.x(ev.t) - g.x(last.t) < 26) { last.n++; last.failed = last.failed || ev.failed; }
+      else clusters.push({ t: ev.t, n: 1, failed: ev.failed });
     });
-    ticks.forEach(function (tk) {
-      var label = svg("text", { x: x(tk), y: height - 6, "text-anchor": "middle", "font-size": 11, fill: cssVar("--text-muted") });
-      label.textContent = span <= 2 * 86400 ? fmtClock(new Date(tk * 1000)) : fmtDay(new Date(tk * 1000));
-      root.appendChild(label);
+    clusters.forEach(function (c) {
+      var x = g.x(c.t);
+      if (c.n > 1) root.appendChild(svgText({ x: x + 6, y: cy + 4, "font-size": 10, fill: cssVar("--text-tertiary") }, "×" + c.n));
+      if (c.failed) root.appendChild(svg("path", { d: "M" + (x - 4) + " " + (cy - 4) + "L" + (x + 4) + " " + (cy + 4) + "M" + (x + 4) + " " + (cy - 4) + "L" + (x - 4) + " " + (cy + 4),
+        stroke: cssVar("--viz-failure"), "stroke-width": 2.2, "stroke-linecap": "round" }));
+      else root.appendChild(svg("circle", { cx: x, cy: cy, r: 3.5, fill: cssVar("--viz-success"), stroke: cssVar("--bg-primary"), "stroke-width": 1.5 }));
     });
+    var failed = events.filter(function (ev) { return ev.failed; }).length;
+    root.appendChild(svgText({ x: g.width - 2, y: ey + 13, "font-size": 11, "text-anchor": "end", fill: cssVar(failed ? "--viz-failure" : "--text-tertiary") },
+      (events.length - failed) + " 成功" + (failed ? " · " + failed + " 失败" : "")));
+    var eventHit = svg("rect", { x: g.labelW, y: ey - 2, width: g.plotW, height: 22, fill: "transparent" });
+    eventHit.addEventListener("pointermove", function (e) { hoverAt(e, root, null, "overview"); });
+    root.appendChild(eventHit);
 
-    var plotBottom = height - axisH;
-    var cross = svg("line", { y1: top, y2: plotBottom, stroke: cssVar("--axis"), "stroke-width": 1, visibility: "hidden" });
+    var cross = svg("line", { y1: AXIS_H - 4, y2: height - 4, stroke: cssVar("--text-tertiary"), "stroke-width": 1, visibility: "hidden", "pointer-events": "none" });
     root.appendChild(cross);
-    var overlay = svg("rect", { x: margin.left, y: top, width: plotW, height: plotBottom - top, fill: "transparent", tabindex: "0",
-      "aria-label": "按左右方向键查看各时刻的数值" });
-    root.appendChild(overlay);
+    root.addEventListener("pointerleave", function () { setHover(null); });
     box.appendChild(root);
     var tip = el("div", { class: "tooltip", hidden: true });
     box.appendChild(tip);
 
-    var times = [];
-    series.forEach(function (s) { s.points.forEach(function (p) { times.push(p[0]); }); });
-    times.sort(function (a, b) { return a - b; });
-    times = times.filter(function (t, i) { return i === 0 || t !== times[i - 1]; });
-    var cursor = -1;
-
-    function show(index) {
-      if (index < 0 || index >= times.length) return;
-      cursor = index;
-      var t = times[index];
-      var px = x(t);
-      cross.setAttribute("x1", px);
-      cross.setAttribute("x2", px);
-      cross.setAttribute("visibility", "visible");
+    hoverListeners.push(function (t, rowId) {
+      if (t == null) { cross.setAttribute("visibility", "hidden"); tip.hidden = true; return; }
+      cross.setAttribute("x1", g.x(t)); cross.setAttribute("x2", g.x(t)); cross.setAttribute("visibility", "visible");
+      if (hoverSource !== "overview") { tip.hidden = true; return; }
       clear(tip);
-      tip.appendChild(el("div", { class: "time", text: fmtDateTime(new Date(t * 1000)) }));
-      series.forEach(function (s) {
-        var p = valueAt(s.points, t);
-        if (!p) return;
-        tip.appendChild(el("div", { class: "row" }, [
-          el("span", { class: "key", style: "background:" + cssVar(s.color) }),
-          el("strong", { text: Math.round(p[1]) + "%" }),
-          el("span", { text: s.name }),
-          el("span", { class: "src", text: p[2] === 1 ? "被动" : "主动" })
-        ]));
+      tip.appendChild(el("div", { class: "time", text: fmtDateTime(unixDate(t)) }));
+      function at(row) {
+        var p = valueAt(row.points, t);
+        return p && t - p[0] <= limit ? p[1] : null;
+      }
+      flat.forEach(function (f) {
+        var r = f.row;
+        if (f.depth) { tipRow(tip, "　" + r.sub, at(r), r.id === rowId); return; }
+        tipRow(tip, r.name + (r.children ? " 合计" : ""), at(r), r.id === rowId);
+        if (r.children && !chartExpanded[r.id]) {
+          r.children.slice(0, 5).forEach(function (c) { tipRow(tip, "　" + c.sub, at(c), false); });
+          if (r.children.length > 5) tip.appendChild(el("div", { class: "row muted", text: "　… 另 " + (r.children.length - 5) + " 个账号" }));
+        }
       });
-      var near = Math.max(300, (to - from) / plotW * 6);
-      (history.events || []).forEach(function (ev) {
-        var et = new Date(ev.time).getTime() / 1000;
-        if (Math.abs(et - t) <= near) tip.appendChild(el("div", { class: "row muted", text: ev.message }));
+      var near = (g.to - g.from) / g.plotW * 8;
+      events.forEach(function (ev) {
+        if (Math.abs(ev.t - t) <= near) tip.appendChild(el("div", { class: "note" + (ev.failed ? " failed" : ""), text: fmtClock(unixDate(ev.t)) + " " + ev.message }));
       });
       tip.hidden = false;
-      var scale = box.clientWidth / width;
-      var left = px * scale + 12;
-      if (left + 240 > box.clientWidth) left = px * scale - 252;
-      tip.style.left = Math.max(0, left) + "px";
-      tip.style.top = "0px";
+      var scale = box.clientWidth / g.width;
+      placeTip(tip, box, g, t, ((rowY[rowId] != null ? rowY[rowId] : ey) + 28) * scale);
+    });
+  }
+
+  // Monotone cubic (Fritsch-Carlson): smooth, but never overshoots the
+  // samples, so a quota that only falls is never drawn rising.
+  function monotonePath(xy) {
+    var n = xy.length;
+    if (n < 3) return xy.map(function (p, i) { return (i ? "L" : "M") + p[0] + " " + p[1]; }).join("");
+    var dx = [], m = [], tg = [], i;
+    for (i = 0; i < n - 1; i++) { dx[i] = xy[i + 1][0] - xy[i][0]; m[i] = dx[i] ? (xy[i + 1][1] - xy[i][1]) / dx[i] : 0; }
+    tg[0] = m[0]; tg[n - 1] = m[n - 2];
+    for (i = 1; i < n - 1; i++) tg[i] = m[i - 1] * m[i] <= 0 ? 0 : (m[i - 1] + m[i]) / 2;
+    for (i = 0; i < n - 1; i++) {
+      if (!m[i]) { tg[i] = tg[i + 1] = 0; continue; }
+      var a = tg[i] / m[i], b = tg[i + 1] / m[i], h = a * a + b * b;
+      if (h > 9) { var k = 3 / Math.sqrt(h); tg[i] = k * a * m[i]; tg[i + 1] = k * b * m[i]; }
     }
-    function hide() { cross.setAttribute("visibility", "hidden"); tip.hidden = true; }
-    function nearest(clientX) {
-      var rect = root.getBoundingClientRect();
-      var t = from + ((clientX - rect.left) / rect.width * width - margin.left) / plotW * (to - from);
-      var best = 0;
-      for (var i = 1; i < times.length; i++) if (Math.abs(times[i] - t) < Math.abs(times[best] - t)) best = i;
-      return best;
+    var d = "M" + xy[0][0] + " " + xy[0][1];
+    for (i = 0; i < n - 1; i++) {
+      var third = dx[i] / 3;
+      d += "C" + (xy[i][0] + third) + " " + (xy[i][1] + tg[i] * third) + " " + (xy[i + 1][0] - third) + " " +
+        (xy[i + 1][1] - tg[i + 1] * third) + " " + xy[i + 1][0] + " " + xy[i + 1][1];
     }
-    overlay.addEventListener("pointermove", function (e) { show(nearest(e.clientX)); });
-    overlay.addEventListener("pointerleave", hide);
-    overlay.addEventListener("blur", hide);
-    overlay.addEventListener("focus", function () { show(cursor < 0 ? times.length - 1 : cursor); });
-    overlay.addEventListener("keydown", function (e) {
-      if (e.key === "ArrowLeft") { show(Math.max(0, cursor - 1)); e.preventDefault(); }
-      if (e.key === "ArrowRight") { show(Math.min(times.length - 1, cursor + 1)); e.preventDefault(); }
+    return d;
+  }
+
+  // Keep the first sample of every value, and the last sample of a plateau
+  // only when a real drop follows it: 62, 61, 60 is a steady decline, while
+  // 100 held for an hour and then 80 is a burst of use.
+  function curvePoints(pts, key) {
+    return pts.filter(function (p, i) {
+      if (i === 0 || i === pts.length - 1 || p[key] !== pts[i - 1][key]) return true;
+      return Math.abs(pts[i + 1][key] - p[key]) > QUANTUM;
+    });
+  }
+
+  // Split samples where any of the keys rises by a reset. Resets one sample
+  // apart (two accounts, or a reset seen late) count as one.
+  function splitAtResets(pts, keys) {
+    var parts = [[pts[0]]], resets = [];
+    for (var i = 1; i < pts.length; i++) {
+      var up = keys.some(function (k) { return pts[i][k] - pts[i - 1][k] >= RESET_JUMP; });
+      if (up && parts.length > 1 && parts[parts.length - 1].length === 1) {
+        parts[parts.length - 1] = [];
+        resets[resets.length - 1] = pts[i][0];
+      } else if (up) {
+        parts.push([]);
+        resets.push(pts[i][0]);
+      }
+      parts[parts.length - 1].push(pts[i]);
+    }
+    return { parts: parts, resets: resets };
+  }
+
+  // Detail: the selected row as a smoothed line that breaks at resets. A
+  // pooled row adds a band from its lowest to its highest account.
+  function renderDetail(row, head, box) {
+    var g = chartView, limit = gapLimit();
+    var group = !!row.children;
+    var lowest = Math.min.apply(null, row.points.map(function (p) { return group ? p[3] : p[1]; }));
+    head.appendChild(el("span", { class: "detail-name", text: row.name + " · " + (chartWindow === "5h" ? "5 小时额度" : "7 天额度") }));
+    head.appendChild(el("span", { class: "muted", text: group ? row.children.length + " 个账号合计，阴影为账号间的最低到最高" : row.sub }));
+    [[group ? "合计" : "当前", pct(row.last)], [group ? "单账号最低" : "最低", pct(lowest)],
+      ["距重置", row.reset ? fmtCountdown(row.reset * 1000 - Date.now()) : "—"]].forEach(function (stat) {
+      head.appendChild(el("span", { class: "detail-stat" }, [document.createTextNode(stat[0]), el("strong", { text: stat[1] })]));
     });
 
-    legend.textContent = "每行一个额度窗口，纵轴 0–100%。底部刻线为点火，红色为点火失败；悬停查看各时刻数值和数据来源。";
-    series.forEach(function (s) {
-      var values = s.points.map(function (p) { return p[1]; });
-      table.appendChild(el("tr", {}, [
-        el("td", { text: s.name }),
-        el("td", { class: "num", text: Math.round(values[values.length - 1]) + "%" }),
-        el("td", { class: "num", text: Math.round(Math.min.apply(null, values)) + "%" }),
-        el("td", { class: "num", text: Math.round(Math.max.apply(null, values)) + "%" }),
-        el("td", { class: "num", text: String(values.length) })
-      ]));
+    var H = 206, top = 22, bottom = 24, plotH = H - top - bottom;
+    function y(v) { return top + (1 - v / 100) * plotH; }
+    var root = svg("svg", { viewBox: "0 0 " + g.width + " " + H, role: "img", "aria-label": row.name + " 剩余百分比" });
+    var defs = hatchPattern(root);
+    var fade = svg("linearGradient", { id: "chart-fade", x1: 0, x2: 0, y1: 0, y2: 1 });
+    fade.appendChild(svg("stop", { offset: "0%", "stop-color": cssVar("--text-secondary"), "stop-opacity": 0.18 }));
+    fade.appendChild(svg("stop", { offset: "100%", "stop-color": cssVar("--text-secondary"), "stop-opacity": 0 }));
+    defs.appendChild(fade);
+    [0, 50, 100].forEach(function (v) {
+      root.appendChild(svg("line", { x1: g.labelW, x2: g.labelW + g.plotW, y1: y(v), y2: y(v), stroke: cssVar(v ? "--border-color" : "--border-primary"), "stroke-dasharray": v ? "2 4" : "none" }));
+      root.appendChild(svgText({ x: g.labelW - 8, y: y(v) + 4, "text-anchor": "end", "font-size": 11, fill: cssVar("--text-tertiary") }, v + "%"));
+    });
+    var low = status.config ? Number(status.config.low_threshold) : 0;
+    if (low > 0 && low < 100) {
+      root.appendChild(svg("line", { x1: g.labelW, x2: g.labelW + g.plotW, y1: y(low), y2: y(low), stroke: cssVar("--viz-failure"), "stroke-opacity": 0.5, "stroke-dasharray": "4 4" }));
+      root.appendChild(svgText({ x: g.labelW - 8, y: y(low) + 4, "text-anchor": "end", "font-size": 11, fill: cssVar("--viz-failure") }, low + "%"));
+    }
+    var ticks = chartTicks(g);
+    ticks.list.forEach(function (t) {
+      root.appendChild(svg("line", { x1: g.x(t), x2: g.x(t), y1: top, y2: top + plotH, stroke: cssVar("--border-color"), "stroke-dasharray": "2 4" }));
+      root.appendChild(svgText({ x: g.x(t), y: H - 6, "text-anchor": "middle", "font-size": 11, fill: cssVar("--text-tertiary") }, ticks.label(t)));
+    });
+
+    var stretches = runs(row.points, limit, g.to), cursor = g.from;
+    stretches.forEach(function (run) {
+      if (run.start > cursor + limit) root.appendChild(svg("rect", { x: g.x(cursor), y: top, width: g.x(run.start) - g.x(cursor), height: plotH, fill: "url(#chart-hatch)" }));
+      cursor = run.end;
+    });
+    if (cursor < g.to - limit) root.appendChild(svg("rect", { x: g.x(cursor), y: top, width: g.x(g.to) - g.x(cursor), height: plotH, fill: "url(#chart-hatch)" }));
+    if (stretches.length && stretches[0].start > g.from + limit) {
+      root.appendChild(svgText({ x: (g.x(g.from) + g.x(stretches[0].start)) / 2, y: top + plotH / 2 + 4, "text-anchor": "middle", "font-size": 12,
+        fill: cssVar("--text-tertiary"), "class": "row-name" }, "无数据"));
+    }
+
+    var resets = [];
+    stretches.forEach(function (run) {
+      // Hold the last value to the end of the stretch so the line reaches it.
+      var pts = run.pts.slice(), tail = pts[pts.length - 1];
+      if (run.end > tail[0]) pts.push([run.end].concat(tail.slice(1)));
+      // One account resetting raises a pooled total by its share; the total
+      // line breaks only when that share is a visible jump.
+      var split = splitAtResets(pts, [1]);
+      resets = resets.concat(split.resets);
+      if (group) splitAtResets(pts, [3, 4]).parts.forEach(function (part) {
+        if (part.length < 2) return;
+        var upper = curvePoints(part, 4).map(function (p) { return [g.x(p[0]), y(p[4])]; });
+        var lower = curvePoints(part, 3).map(function (p) { return [g.x(p[0]), y(p[3])]; }).reverse();
+        root.appendChild(svg("path", { d: monotonePath(upper) + monotonePath(lower).replace(/^M/, "L") + "Z", fill: cssVar("--text-secondary"), "fill-opacity": 0.13 }));
+      });
+      // Each piece starts at its reset sample, so the return to full is a
+      // break in the line rather than a slope that never happened.
+      split.parts.forEach(function (part) {
+        var xy = curvePoints(part, 1).map(function (p) { return [g.x(p[0]), y(p[1])]; });
+        if (xy.length === 1) xy.push([xy[0][0] + 1, xy[0][1]]);
+        var d = monotonePath(xy);
+        if (!group) root.appendChild(svg("path", { d: d + "L" + xy[xy.length - 1][0] + " " + y(0) + "L" + xy[0][0] + " " + y(0) + "Z", fill: "url(#chart-fade)" }));
+        root.appendChild(svg("path", { d: d, fill: "none", stroke: cssVar("--text-primary"), "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }));
+      });
+    });
+    var lastLabel = -99;
+    resets.forEach(function (t) {
+      var x = g.x(t);
+      root.appendChild(svg("line", { x1: x, x2: x, y1: top - 4, y2: top + plotH, stroke: cssVar("--text-tertiary"), "stroke-opacity": 0.7, "stroke-dasharray": "3 3" }));
+      if (x - lastLabel > 52) {
+        root.appendChild(svgText({ x: x, y: top - 8, "text-anchor": "middle", "font-size": 11, fill: cssVar("--text-tertiary") }, "↻ " + fmtClock(unixDate(t))));
+        lastLabel = x;
+      }
+    });
+    var groups = group ? row.groups : [row.group];
+    ignitionEvents().forEach(function (ev) {
+      if (groups.indexOf(ev.group) < 0) return;
+      var x = g.x(ev.t), base = top + plotH;
+      if (ev.failed) root.appendChild(svg("path", { d: "M" + (x - 4) + " " + (base - 8) + "L" + (x + 4) + " " + base + "M" + (x + 4) + " " + (base - 8) + "L" + (x - 4) + " " + base,
+        stroke: cssVar("--viz-failure"), "stroke-width": 2.2, "stroke-linecap": "round" }));
+      else root.appendChild(svg("path", { d: "M" + x + " " + (base - 7) + "L" + (x + 4) + " " + base + "L" + (x - 4) + " " + base + "Z", fill: cssVar("--viz-success") }));
+    });
+    var last = row.points[row.points.length - 1];
+    var lastRun = stretches[stretches.length - 1];
+    if (last && lastRun.end >= g.to - limit) {
+      root.appendChild(svg("circle", { cx: g.x(lastRun.end), cy: y(last[1]), r: 4, fill: cssVar("--text-primary"), stroke: cssVar("--bg-primary"), "stroke-width": 2 }));
+    }
+
+    var cross = svg("line", { y1: top, y2: top + plotH, stroke: cssVar("--text-tertiary"), visibility: "hidden", "pointer-events": "none" });
+    root.appendChild(cross);
+    var dot = svg("circle", { r: 4, fill: cssVar("--text-primary"), stroke: cssVar("--bg-primary"), "stroke-width": 2, visibility: "hidden", "pointer-events": "none" });
+    root.appendChild(dot);
+    var hit = svg("rect", { x: g.labelW, y: top, width: g.plotW, height: plotH, fill: "transparent", tabindex: "0",
+      "aria-label": "按左右方向键查看各时刻的数值" });
+    hit.addEventListener("pointermove", function (e) { hoverAt(e, root, row.id, "detail"); });
+    root.appendChild(hit);
+    root.addEventListener("pointerleave", function () { setHover(null); });
+    box.appendChild(root);
+    var tip = el("div", { class: "tooltip", hidden: true });
+    box.appendChild(tip);
+
+    // Keyboard: step through this row's samples.
+    var keyIndex = -1;
+    function showSample(i) {
+      if (i < 0 || i >= row.points.length) return;
+      keyIndex = i;
+      hoverSource = "detail";
+      setHover(row.points[i][0], row.id);
+    }
+    hit.addEventListener("focus", function () { showSample(keyIndex < 0 ? row.points.length - 1 : keyIndex); });
+    hit.addEventListener("blur", function () { setHover(null); });
+    hit.addEventListener("keydown", function (e) {
+      if (e.key === "ArrowLeft") { showSample(Math.max(0, keyIndex - 1)); e.preventDefault(); }
+      if (e.key === "ArrowRight") { showSample(Math.min(row.points.length - 1, keyIndex + 1)); e.preventDefault(); }
+    });
+
+    hoverListeners.push(function (t) {
+      if (t == null) { cross.setAttribute("visibility", "hidden"); dot.setAttribute("visibility", "hidden"); tip.hidden = true; return; }
+      cross.setAttribute("x1", g.x(t)); cross.setAttribute("x2", g.x(t)); cross.setAttribute("visibility", "visible");
+      var p = valueAt(row.points, t);
+      if (p && t - p[0] > limit) p = null;
+      if (p) { dot.setAttribute("cx", g.x(p[0])); dot.setAttribute("cy", y(p[1])); dot.setAttribute("visibility", "visible"); }
+      else dot.setAttribute("visibility", "hidden");
+      if (hoverSource !== "detail") { tip.hidden = true; return; }
+      clear(tip);
+      tip.appendChild(el("div", { class: "time", text: fmtDateTime(unixDate(t)) }));
+      if (group) {
+        tipRow(tip, "合计", p ? p[1] : null, true);
+        row.children.slice(0, 6).forEach(function (c) {
+          var q = valueAt(c.points, t);
+          tipRow(tip, "　" + c.sub, q && t - q[0] <= limit ? q[1] : null, false);
+        });
+        if (row.children.length > 6) tip.appendChild(el("div", { class: "row muted", text: "　… 另 " + (row.children.length - 6) + " 个账号" }));
+      } else {
+        tipRow(tip, row.name + (p ? (p[2] === 1 ? "（被动）" : "（主动）") : ""), p ? p[1] : null, true);
+      }
+      var near = (g.to - g.from) / g.plotW * 8;
+      resets.forEach(function (r) { if (Math.abs(r - t) <= near) tip.appendChild(el("div", { class: "note", text: fmtClock(unixDate(r)) + " 额度重置" })); });
+      tip.hidden = false;
+      placeTip(tip, box, g, t, 6);
+    });
+  }
+
+  function hoverAt(e, root, rowId, source) {
+    var rect = root.getBoundingClientRect();
+    var t = chartView.t((e.clientX - rect.left) / rect.width * chartView.width);
+    if (t < chartView.from || t > chartView.to) { setHover(null); return; }
+    hoverSource = source;
+    setHover(t, rowId);
+  }
+
+  function setHover(t, rowId) {
+    hoverListeners.forEach(function (fn) { fn(t, rowId); });
+  }
+
+  function renderChartTable(rows) {
+    var table = $("chart-table");
+    clear(table);
+    rows.forEach(function (r) {
+      (r.children || [r]).forEach(function (c) {
+        var values = c.points.map(function (p) { return p[1]; });
+        table.appendChild(el("tr", {}, [
+          el("td", { text: c.name }),
+          el("td", { text: c.sub }),
+          el("td", { class: "num", text: pct(c.last) }),
+          el("td", { class: "num", text: pct(Math.min.apply(null, values)) }),
+          el("td", { class: "num", text: pct(Math.max.apply(null, values)) }),
+          el("td", { class: "num", text: String(values.length) }),
+          el("td", { class: "num", text: c.reset ? fmtCountdown(c.reset * 1000 - Date.now()) : "—" })
+        ]));
+      });
+    });
+  }
+
+  function renderChart() {
+    var overview = $("chart"), head = $("chart-detail-head"), detail = $("chart-detail");
+    overview.classList.remove("loading");
+    clear(overview); clear(head); clear(detail);
+    clear($("chart-table"));
+    hoverListeners = [];
+    head.hidden = true;
+    if (!history || !status) {
+      overview.appendChild(el("div", { class: "empty", text: "加载中…" }));
+      return;
+    }
+    var rows = chartRows();
+    if (!rows.length) {
+      overview.appendChild(el("div", { class: "empty", text: "这个范围内还没有额度数据。" }));
+      return;
+    }
+    if (!findRow(rows, chartSelected)) chartSelected = rows[0].id;
+    renderOverview(rows, overview);
+    head.hidden = false;
+    renderDetail(findRow(rows, chartSelected), head, detail);
+    renderChartTable(rows);
+  }
+
+  function renderRangeButtons() {
+    var box = $("range-buttons");
+    clear(box);
+    RANGES[chartWindow].forEach(function (r) {
+      box.appendChild(el("button", { type: "button", class: "seg", "aria-pressed": r[0] === range ? "true" : "false", text: r[1], onclick: function () {
+        range = r[0];
+        renderRangeButtons();
+        loadHistory();
+      } }));
     });
   }
 
@@ -835,16 +1196,24 @@
   });
   $("settings").addEventListener("submit", saveSettings);
   $("events-more").addEventListener("click", function () { eventsExpanded = !eventsExpanded; renderEvents(); });
-  Array.prototype.forEach.call(document.querySelectorAll("#range-buttons button"), function (button) {
-    button.addEventListener("click", function () {
-      range = button.getAttribute("data-range");
-      Array.prototype.forEach.call(document.querySelectorAll("#range-buttons button"), function (b) {
-        b.setAttribute("aria-pressed", b === button ? "true" : "false");
+  function bindSegmented(id, onPick) {
+    Array.prototype.forEach.call($(id).querySelectorAll("button"), function (button) {
+      button.addEventListener("click", function () {
+        Array.prototype.forEach.call($(id).querySelectorAll("button"), function (b) {
+          b.setAttribute("aria-pressed", b === button ? "true" : "false");
+        });
+        onPick(button.getAttribute("data-value"));
       });
-      loadHistory();
     });
+  }
+  bindSegmented("window-buttons", function (value) {
+    chartWindow = value;
+    range = DEFAULT_RANGE[value];
+    renderRangeButtons();
+    loadHistory();
   });
-  $("view-select").addEventListener("change", function (e) { view = e.target.value; renderChart(); });
+  bindSegmented("sort-buttons", function (value) { chartSort = value; renderChart(); });
+  renderRangeButtons();
   window.addEventListener("resize", function () { if (history) renderChart(); });
   window.addEventListener("storage", function (e) { if (e.key === "cli-proxy-theme") { applyTheme(); renderChart(); } });
   if (window.matchMedia) {
