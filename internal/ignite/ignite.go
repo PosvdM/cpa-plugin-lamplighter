@@ -10,6 +10,8 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -189,11 +191,57 @@ type FailureOutcome struct {
 	NotifyCircuit bool
 	Until         time.Time
 	RetryIn       time.Duration
+	// Cooldown is true when the retry waits for a CPA cooldown and the
+	// failure was not counted.
+	Cooldown bool
+}
+
+// maxCooldownWait bounds the CPA cooldown that defers a retry. A longer
+// cooldown means the quota is still exhausted, which the normal retry and
+// failure protection handle.
+const maxCooldownWait = 10 * time.Minute
+
+var resetSecondsPattern = regexp.MustCompile(`"reset_seconds"\s*:\s*(\d+)`)
+
+// CooldownWait returns how long CPA keeps the credential in its local
+// cooldown, from the reset_seconds of a model_cooldown error. CPA cools a
+// credential down after a 429 until the provider's reset plus a margin, so
+// an ignition at reset plus grace can arrive a few seconds too early.
+func CooldownWait(err error) (time.Duration, bool) {
+	if err == nil {
+		return 0, false
+	}
+	text := err.Error()
+	if !strings.Contains(text, "model_cooldown") && !strings.Contains(text, "are cooling down") {
+		return 0, false
+	}
+	match := resetSecondsPattern.FindStringSubmatch(text)
+	if match == nil {
+		return 0, false
+	}
+	seconds, convErr := strconv.Atoi(match[1])
+	if convErr != nil || seconds <= 0 {
+		return 0, false
+	}
+	wait := time.Duration(seconds) * time.Second
+	return wait, wait <= maxCooldownWait
 }
 
 // RecordFailure updates the failure state. Hard errors and the last allowed
 // transient error pause the target until the next daily start.
+//
+// A short CPA cooldown is waited out instead: the retry runs when the
+// cooldown ends plus the grace period, and the failure is not counted. Only
+// the first of consecutive cooldowns gets this, so a cooldown that keeps
+// renewing still reaches the failure protection.
 func (s Schedule) RecordFailure(ts *store.TargetState, now time.Time, err error) FailureOutcome {
+	if wait, ok := CooldownWait(err); ok && !s.recentCooldown(ts, now) {
+		delay := wait + time.Duration(s.Cfg.GraceSeconds)*time.Second
+		ts.LastError = truncate(errorText(err), 500)
+		ts.LastFailureEpoch = epoch(now)
+		ts.RetryAtEpoch = epoch(now.Add(delay))
+		return FailureOutcome{RetryIn: delay, Cooldown: true}
+	}
 	ts.ConsecutiveFailures++
 	ts.LastError = truncate(errorText(err), 500)
 	ts.LastFailureEpoch = epoch(now)
@@ -213,6 +261,16 @@ func (s Schedule) RecordFailure(ts *store.TargetState, now time.Time, err error)
 	}
 	ts.RetryAtEpoch = epoch(now.Add(delay))
 	return FailureOutcome{RetryIn: delay}
+}
+
+// recentCooldown reports whether the previous failure, shortly before now,
+// was already a CPA cooldown.
+func (s Schedule) recentCooldown(ts *store.TargetState, now time.Time) bool {
+	if ts.LastFailureEpoch == 0 || now.Sub(epochTime(ts.LastFailureEpoch)) > 2*maxCooldownWait {
+		return false
+	}
+	_, ok := CooldownWait(errors.New(ts.LastError))
+	return ok
 }
 
 func errorText(err error) string {

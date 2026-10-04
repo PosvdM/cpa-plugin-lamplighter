@@ -177,6 +177,8 @@ If no check confirms, the result is `ErrNotConfirmed`.
 | High risk | `ErrNotConfirmed`, `ErrNoModel`, HTTP 400/401/403/404/409/422/429, `not found`, `unsupported` and similar | Pause until the next `start_hour` |
 | Transient | CPA local cooldown (`are cooling down`), `auth_unavailable`, anything else | Retry after `failure_retry_seconds × multiplier^(n-1)`; pause until the next day at failure `max_transient_failures` |
 
+When a CPA local cooldown carries a `reset_seconds` of 10 minutes or less (`ignite.CooldownWait`), it is not counted as a failure, and the retry runs when the cooldown ends plus `grace_seconds`. After a 429, CPA cools a credential down until the upstream reset plus a dozen or so seconds, so when the quota ran out before the reset, an ignition 3 seconds after the reset hits that cooldown. A second cooldown in a row counts as a normal transient error, so a cooldown that keeps renewing cannot retry forever.
+
 A pause sends one Bark notification (`circuit_notified_until_epoch` prevents repeats). A success or a fixed future reset clears the failure state.
 
 ## Notifications
