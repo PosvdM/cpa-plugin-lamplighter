@@ -8,6 +8,10 @@ Lamplighter is a native plugin for [CLIProxyAPI](https://github.com/router-for-m
 
 ![Management page: quota per account and ignition plans](./docs/images/overview.png)
 
+![Quota chart: the 5-hour quota over the last 12 hours, with the Claude curve below it marking resets and ignition results](./docs/images/chart.png)
+
+![Quota chart: Claude with two accounts expanded into one row each, and below it the total line with the range between accounts](./docs/images/chart-accounts.png)
+
 ## Features
 
 - **Quota monitoring**: queries quota on a schedule and also reads the quota that upstream providers return while CPA serves real requests.
@@ -174,8 +178,6 @@ plugins:
 ```
 
 ## Management page
-
-![Quota chart: the 5-hour quota over the last 12 hours, with the Claude curve below it marking resets and ignition results](./docs/images/chart.png)
 
 The page shows:
 
