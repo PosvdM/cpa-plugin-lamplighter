@@ -166,6 +166,29 @@ func TestPollBuildsAccountsWithSuffixes(t *testing.T) {
 	}
 }
 
+func TestStatusOrdersGroupsLikeThePage(t *testing.T) {
+	c := &clock{t: time.Date(2026, 10, 4, 10, 0, 0, 0, shanghai)}
+	h := standardHost(c)
+	base := h.http
+	h.http = func(req pluginapi.HTTPRequest) pluginapi.HTTPResponse {
+		if !strings.Contains(req.URL, "retrieveUserQuotaSummary") {
+			return base(req)
+		}
+		reset := c.t.Add(3 * time.Hour).UTC().Format(time.RFC3339)
+		return pluginapi.HTTPResponse{StatusCode: 200, Body: []byte(`{"groups":[{"displayName":"Claude and GPT Models","buckets":[{"window":"5h","remainingFraction":1,"resetTime":"` + reset + `"}]},{"displayName":"Gemini Models","buckets":[{"window":"5h","remainingFraction":0.5,"resetTime":"` + reset + `"}]}]}`)}
+	}
+	e, _ := newTestEngine(t, h, c)
+	e.poll(context.Background(), e.config(), c.t, "", false)
+
+	var labels []string
+	for _, group := range e.Status().Accounts[3].Groups {
+		labels = append(labels, group.SourceLabel)
+	}
+	if strings.Join(labels, ",") != "Gemini,Claude / GPT" {
+		t.Fatalf("antigravity groups %v", labels)
+	}
+}
+
 func TestPassiveDataSkipsActiveQueryNearTheSlot(t *testing.T) {
 	c := &clock{t: time.Date(2026, 10, 4, 10, 0, 0, 0, shanghai)}
 	h := standardHost(c)

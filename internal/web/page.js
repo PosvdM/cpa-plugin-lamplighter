@@ -480,7 +480,9 @@
   };
   // The default ranges are the shortest that cover one whole window.
   var DEFAULT_RANGE = { "5h": "6h", "7d": "8d" };
-  // Default row order by quota name; other quotas follow in API order.
+  // Default row order by quota name; other quotas follow in API order. The
+  // status API orders the quota groups of an account the same way (groupOrder
+  // in internal/engine/api.go).
   var SERVICE_ORDER = ["Claude", "ChatGPT", "Gemini", "Fable", "Claude / GPT"];
   var LANE = 22, LANE_GAP = 6, AXIS_H = 22, EVENT_H = 24;
   // A rise of this many points between two samples is a reset.
