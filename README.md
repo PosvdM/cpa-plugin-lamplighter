@@ -25,7 +25,7 @@ Lamplighter（点灯人）是 [CLIProxyAPI](https://github.com/router-for-me/CLI
 
 ## 要求
 
-- CPA v8.0.4 或更新版本，并开启插件（`plugins.enabled: true`）。插件提供 Linux amd64/arm64、macOS amd64/arm64 和 Windows amd64 版本；macOS 和 Windows 版本只在 CI 中构建和测试，还没有在实际运行的 CPA 上验证。
+- CPA v8.0.4 或更新版本，并开启插件（`plugins.enabled: true`）。插件提供 Linux amd64/arm64、macOS amd64/arm64 和 Windows amd64 版本；macOS 版本只在 CI 中构建和测试，还没有在实际运行的 CPA 上验证。
 - 一个专门给 Lamplighter 用的 CPA API key。插件用它读取模型列表来选择点火模型。
 - 需要通知时，一台装有 Bark 的 iPhone。
 
