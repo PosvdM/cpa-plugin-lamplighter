@@ -57,7 +57,7 @@ sh scripts/build.sh 0.1.0
 - 修改额度请求的地址或请求头时，对照 CPA 管理中心的 `src/utils/quota/constants.ts`，并更新 [架构文档](./architecture.md) 中的表格。
 - 修改轮询、跳过规则、点火时间或失败保护时，同步更新测试、README 和架构文档。
 - 后台循环中新增的 goroutine 必须有 `recover`，网络请求必须有超时。
-- 修改页面时保持 HTML、CSS、JS 分文件；文字插入 DOM 时使用 `textContent`。图表颜色按实体固定分配，不随筛选变化。
+- 修改页面时保持 HTML、CSS、JS 分文件；文字插入 DOM 时使用 `textContent`。图表颜色只表示剩余额度的高低，使用与额度条相同的三档变量。
 - 用户可见的行为、配置和限制写进 README（中英文同步），实现细节写进 `docs/`。
 
 ## 真实环境验证

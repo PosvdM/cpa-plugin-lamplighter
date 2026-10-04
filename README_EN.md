@@ -112,7 +112,7 @@ All settings live under `plugins.configs.lamplighter` in `config.yaml`, and can 
 | `passive_skip_max_minutes` | `30` | Longest run of skipped queries for one account |
 | `models_api_key` | empty | CPA API key for reading the model list; without it ignition cannot pick a model |
 | `cpa_base_url` | `http://127.0.0.1:8317` | Address the plugin uses to reach CPA; change it when CPA uses another port or TLS |
-| `history_retention_days` | `30` | Days of quota history to keep |
+| `history_retention_days` | `70` | Days of quota history to keep |
 | `data_dir` | `data/lamplighter` in the plugin directory | State and history directory |
 
 Ignition settings live under `ignition`:
@@ -172,7 +172,7 @@ The page shows:
 
 - the quota windows of each account with reset times and data sources, with a refresh button per account;
 - the next ignition, last result and failure protection state of each quota group, with an "ignite now" button;
-- a quota chart with one row per quota window on a shared time axis, for the last 24 hours, 7 days or 30 days, either for the 5-hour or 7-day windows of all accounts or for all windows of one account;
+- a quota chart for either the 5-hour quota, over the last 1, 2, 5 or 24 hours, or the 7-day quota, over the last 1, 7, 14 or 35 days. The top part has one colored band per service, colored like the quota bars and sorted by lowest remaining or by service; a service with several accounts shows their total and expands into one row per account. The bottom part plots the selected row with its resets and ignition results;
 - recent events in columns for time, type, quota group and detail;
 - the settings form and a test notification button.
 

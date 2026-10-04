@@ -324,6 +324,7 @@ type Series struct {
 	Window      string       `json:"window"`
 	WindowLabel string       `json:"window_label"`
 	Label       string       `json:"label"`
+	SourceLabel string       `json:"source_label"` // label without the account suffix
 	Provider    string       `json:"provider"`
 	AuthIndex   string       `json:"auth_index"`
 	Points      [][3]float64 `json:"points"` // [unix seconds, remaining, 1 for passive]
@@ -345,7 +346,7 @@ func (e *Engine) History(span time.Duration) (HistoryResponse, error) {
 	dataDir := e.dataDir
 	labels := map[string]GroupView{}
 	for key, group := range e.groups {
-		labels[key] = GroupView{Key: key, Provider: group.Provider, AuthIndex: group.AuthIndex, Label: group.Label, Windows: group.Windows}
+		labels[key] = GroupView{Key: key, Provider: group.Provider, AuthIndex: group.AuthIndex, SourceLabel: group.SourceLabel, Label: group.Label, Windows: group.Windows}
 	}
 	e.mu.Unlock()
 	now := e.now().UTC()
@@ -382,6 +383,7 @@ func (e *Engine) History(span time.Duration) (HistoryResponse, error) {
 			s = &Series{Group: record.Group, Window: record.Window, WindowLabel: record.Window}
 			if group, ok := labels[record.Group]; ok {
 				s.Label = group.Label
+				s.SourceLabel = group.SourceLabel
 				s.Provider = group.Provider
 				s.AuthIndex = group.AuthIndex
 				for _, w := range group.Windows {
@@ -391,6 +393,7 @@ func (e *Engine) History(span time.Duration) (HistoryResponse, error) {
 				}
 			} else {
 				s.Label = record.Group
+				s.SourceLabel = record.Group
 			}
 			series[key] = s
 			order = append(order, key)

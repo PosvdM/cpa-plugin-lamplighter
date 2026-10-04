@@ -272,12 +272,21 @@ func actionResponse(err error, p *Plugin) pluginapi.ManagementResponse {
 	return jsonResponse(http.StatusOK, map[string]any{"ok": true, "status": p.engine.Status()})
 }
 
+// historyRanges are the spans the chart offers: hours for the 5-hour
+// window, days for the 7-day window.
+var historyRanges = map[string]time.Duration{
+	"1h":  time.Hour,
+	"2h":  2 * time.Hour,
+	"5h":  5 * time.Hour,
+	"24h": 24 * time.Hour,
+	"7d":  7 * 24 * time.Hour,
+	"14d": 14 * 24 * time.Hour,
+	"35d": 35 * 24 * time.Hour,
+}
+
 func parseRange(query url.Values) time.Duration {
-	switch query.Get("range") {
-	case "7d":
-		return 7 * 24 * time.Hour
-	case "30d":
-		return 30 * 24 * time.Hour
+	if span, ok := historyRanges[query.Get("range")]; ok {
+		return span
 	}
 	return defaultHistory
 }

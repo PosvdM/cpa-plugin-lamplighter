@@ -33,7 +33,7 @@ Management routes (require the CPA management key):
 | Method and path | Purpose |
 | --- | --- |
 | `GET /v0/management/lamplighter/status` | Status page data; secrets in the config only show whether they are set |
-| `GET /v0/management/lamplighter/history?range=24h\|7d\|30d` | Quota history and ignition events |
+| `GET /v0/management/lamplighter/history?range=1h\|2h\|5h\|24h\|7d\|14d\|35d` | Quota history and ignition events, `24h` by default |
 | `POST /v0/management/lamplighter/refresh` | Query now; `{"auth_index": "..."}` limits it to one account |
 | `POST /v0/management/lamplighter/ignite` | Ignite now, `{"target": "<group key>"}` |
 | `POST /v0/management/lamplighter/test-bark` | Send a test notification |
@@ -41,6 +41,13 @@ Management routes (require the CPA management key):
 The page is the resource `GET /v0/resource/plugins/lamplighter/page` with the menu label `Lamplighter`. The resource itself needs no authentication; its data requests carry the management key. The page reads the key from `cli-proxy-auth` in `localStorage`, where the Management Center stores it with a reversible obfuscation derived from the host and user agent; otherwise it asks for the key and keeps it in `sessionStorage` only. Settings are saved through CPA's `PATCH /v0/management/plugins/lamplighter/config`, which merges top-level keys only, so the page sends `ignition`, `providers` and `codex_reset_updates` as complete objects.
 
 The page looks like the Management Center: its CSS variables reuse the names and values of the Management Center's `src/styles/themes.scss` (light, white and dark themes), quota bars follow the Management Center quota page (green at 70% or more remaining, amber at 30% or more, red below), and telemetry numbers use a monospace font. The page is same-origin with the Management Center, so it reads `data-theme` from the parent page's root element and watches it for changes; opened on its own, it falls back to `cli-proxy-theme` that the Management Center stores in `localStorage`. When the Management Center changes its colors, update the variables in `internal/web/page.css`.
+
+The page does all data handling for the quota chart:
+
+- **Missing data**: when two samples are more than 3.5 poll intervals (or history buckets) apart, the gap is drawn with diagonal hatching instead of holding the previous value.
+- **Pooled accounts**: accounts with the same service and `source_label` share one row showing the mean of their remaining percentages. With equal plans this is the share of the total quota left; the API only reports percentages, so the mean cannot be weighted by quota size. The detail chart also shows the range from the lowest to the highest account.
+- **Resets**: a rise of 5 points or more between two samples is a reset. The line breaks there, the next piece starts at the value after the reset, and the reset time is labeled; two rises one sample apart count as one reset. One account resetting raises the pooled total by only its share, so the pooled line does not break when the rise is under 5 points.
+- **Smoothing**: lines use monotone cubic interpolation (Fritsch-Carlson), which never passes beyond a sample. Quotas report whole percents, so steps of 2 points or less are joined as a steady decline; a plateau followed by a larger drop stays flat and then bends at the drop.
 
 Host callbacks in use:
 
@@ -196,7 +203,7 @@ The data directory defaults to `data/lamplighter` in the plugin directory. `main
 | `history/YYYY-MM-DD.jsonl` | Quota samples and events, one file per UTC day |
 | `instance.lock` | Instance lock |
 
-Each history line is one JSON object. A sample is `{"k":"s","t":seconds,"g":group,"w":window,"r":remaining,"x":reset,"s":"active|passive"}`, an event is `{"k":"e","t":seconds,"g":group,"e":type,"v":level,"m":text}`. Active samples are always written. Passive samples are written only when the value or reset changes, at most once per minute per window; a newer value inside that minute waits in `pendingSamp`. The history API keeps the last sample per 5-minute bucket for 7 days and per 30-minute bucket for 30 days.
+Each history line is one JSON object. A sample is `{"k":"s","t":seconds,"g":group,"w":window,"r":remaining,"x":reset,"s":"active|passive"}`, an event is `{"k":"e","t":seconds,"g":group,"e":type,"v":level,"m":text}`. Active samples are always written. Passive samples are written only when the value or reset changes, at most once per minute per window; a newer value inside that minute waits in `pendingSamp`. The history API keeps the last sample per 5-minute bucket for ranges over 2 days and per 30-minute bucket for ranges over 8 days. Each series has a `label` with the account suffix, such as `ChatGPT#rk`, and a `source_label` without it; the page merges the accounts of one quota by service and `source_label`.
 
 Group keys are `<service>:<auth_index>:<group>`, for example `codex:3:codex:main`, `claude:3:claude:seven-day-fable` and `antigravity:4:antigravity:gemini-models`. The group key is also the ignition target ID.
 

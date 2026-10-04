@@ -3,6 +3,7 @@ package plugin
 import (
 	"context"
 	"encoding/json"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -119,4 +120,20 @@ func TestUnknownMethodAndUsage(t *testing.T) {
 	}
 	record, _ := json.Marshal(pluginapi.UsageRecord{Provider: "claude", AuthIndex: "1"})
 	result(t, p.Handle("usage.handle", record))
+}
+
+func TestParseRange(t *testing.T) {
+	cases := map[string]time.Duration{
+		"1h":  time.Hour,
+		"5h":  5 * time.Hour,
+		"14d": 14 * 24 * time.Hour,
+		"35d": 35 * 24 * time.Hour,
+		"":    defaultHistory,
+		"30d": defaultHistory,
+	}
+	for value, want := range cases {
+		if got := parseRange(url.Values{"range": {value}}); got != want {
+			t.Errorf("range %q: got %v, want %v", value, got, want)
+		}
+	}
 }

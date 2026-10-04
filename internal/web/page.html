@@ -51,20 +51,34 @@
   <section class="card">
     <h2 class="card-title">额度变化</h2>
     <div class="filters">
-      <div class="segmented" id="range-buttons">
-        <button type="button" class="seg" data-range="24h" aria-pressed="true">24 小时</button>
-        <button type="button" class="seg" data-range="7d" aria-pressed="false">7 天</button>
-        <button type="button" class="seg" data-range="30d" aria-pressed="false">30 天</button>
+      <div class="segmented" id="window-buttons" role="group" aria-label="额度窗口">
+        <button type="button" class="seg" data-value="5h" aria-pressed="true">5 小时额度</button>
+        <button type="button" class="seg" data-value="7d" aria-pressed="false">7 天额度</button>
       </div>
-      <select id="view-select" aria-label="显示范围"></select>
+      <div class="segmented" id="range-buttons" role="group" aria-label="时间范围"></div>
+      <div class="segmented" id="sort-buttons" role="group" aria-label="排序">
+        <button type="button" class="seg" data-value="low" aria-pressed="true">最低优先</button>
+        <button type="button" class="seg" data-value="name" aria-pressed="false">按服务</button>
+      </div>
     </div>
     <div id="chart" class="chart-box"></div>
-    <p id="legend" class="legend"></p>
+    <div id="chart-detail-head" class="detail-head" hidden></div>
+    <div id="chart-detail" class="chart-box"></div>
+    <p class="legend">
+      <span><i class="swatch fill-high"></i>≥70%</span>
+      <span><i class="swatch fill-medium"></i>30–70%</span>
+      <span><i class="swatch fill-low"></i>&lt;30%</span>
+      <span><i class="swatch hatch"></i>无数据</span>
+      <span>● 点火成功，×n 为同一时刻的多个目标</span>
+      <span>✕ 含点火失败</span>
+      <span>↻ 重置</span>
+      <span class="muted">多账号的服务显示合计额度，点击行查看详情，再点一次展开各账号</span>
+    </p>
     <details>
       <summary>数据表</summary>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>系列</th><th class="num">最新</th><th class="num">最低</th><th class="num">最高</th><th class="num">样本</th></tr></thead>
+          <thead><tr><th>额度</th><th>账号</th><th class="num">最新</th><th class="num">最低</th><th class="num">最高</th><th class="num">样本</th><th class="num">距重置</th></tr></thead>
           <tbody id="chart-table"></tbody>
         </table>
       </div>
