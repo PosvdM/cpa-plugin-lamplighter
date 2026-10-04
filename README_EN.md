@@ -68,6 +68,7 @@ Claude and Codex quotas have 1% precision, whether queried or read passively. An
 
 A 5-hour window starts with the first request after a reset. If nobody uses the account after a reset, no window runs. Lamplighter sends a request right after each reset so that the windows follow each other:
 
+- Times use the plugin time zone, which follows the CPA server by default.
 - The first ignition each day is at `07:00`; after that, 3 seconds after each reset, until `22:30`. A reset later than that waits for 07:00 the next day.
 - The request asks the model to reply `OK`, declares no tools and allows at most 4 output tokens.
 - Models are picked automatically: the newest Luna for ChatGPT, the newest Haiku for Claude, and the newest Flash for Antigravity's Gemini group. They can also be set in the config.
@@ -103,7 +104,8 @@ All settings live under `plugins.configs.lamplighter` in `config.yaml`, and can 
 | `critical_threshold` | `10` | Third alert level |
 | `notify_recovery` | `false` | Notify when quota recovers |
 | `notify_reset_reminders` | `false` | Remind 1 hour before any window resets and 1 day before a 7-day window resets |
-| `timezone_offset_hours` | `8` | UTC offset for displayed times and the ignition window |
+| `timezone` | empty | Time zone for displayed times and the ignition window, such as `Asia/Shanghai`; empty follows the CPA server (set by `TZ` in the official Docker image) |
+| `timezone_offset_hours` | empty | Fixed UTC offset such as `8`; used only when `timezone` is empty |
 | `poll_interval_seconds` | `300` | Active query interval, at least 60 |
 | `request_timeout_seconds` | `20` | Timeout of one upstream request |
 | `passive_skip_seconds` | `60` | Skip the query when passive data arrived this many seconds before it; `0` never skips |
@@ -170,8 +172,9 @@ The page shows:
 
 - the quota windows of each account with reset times and data sources, with a refresh button per account;
 - the next ignition, last result and failure protection state of each quota group, with an "ignite now" button;
-- a quota chart for the last 24 hours, 7 days or 30 days, either for the 5-hour or 7-day windows of all accounts or for all windows of one account;
-- recent events, the settings form and a test notification button.
+- a quota chart with one row per quota window on a shared time axis, for the last 24 hours, 7 days or 30 days, either for the 5-hour or 7-day windows of all accounts or for all windows of one account;
+- recent events in columns for time, type, quota group and detail;
+- the settings form and a test notification button.
 
 The page text is in Chinese.
 

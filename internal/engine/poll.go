@@ -449,7 +449,7 @@ func (e *Engine) pollResetFeed(ctx context.Context, cfg config.Config) {
 	}
 	sent := notify.ProcessResetRecords(ctx, e.state, records, cfg.CodexResetUpdates.NotifyCurrentPending, sender, cfg.Location(), e.now())
 	if sent > 0 {
-		e.addEvent("info", "codex_reset", "", fmt.Sprintf("Did Codex Reset：已发送 %d 条通知", sent))
+		e.addEventDetail("info", "codex_reset", "", "Did Codex Reset", fmt.Sprintf("已发送 %d 条通知", sent), fmt.Sprintf("Did Codex Reset：已发送 %d 条通知", sent))
 	}
 	e.dirty = true
 }

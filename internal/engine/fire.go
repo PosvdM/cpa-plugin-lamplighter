@@ -201,19 +201,23 @@ func (e *Engine) igniteTarget(ctx context.Context, cfg config.Config, t target, 
 		outcome := schedule.RecordFailure(ts, now, err)
 		e.dirty = true
 		if outcome.CircuitOpened {
-			e.addEvent("error", "ignite_paused", t.group.Key, fmt.Sprintf("%s 点火失败，暂停到 %s：%v",
-				t.group.Label, outcome.Until.In(cfg.Location()).Format("01/02 15:04"), err))
+			until := outcome.Until.In(cfg.Location()).Format("01/02 15:04")
+			e.addEventDetail("error", "ignite_paused", t.group.Key, t.group.Label,
+				fmt.Sprintf("暂停到 %s：%v", until, err),
+				fmt.Sprintf("%s 点火失败，暂停到 %s：%v", t.group.Label, until, err))
 			if outcome.NotifyCircuit && e.alerts != nil && e.alerts.Sender != nil {
 				msg := notify.CircuitMessage(t.group.Label, outcome.Until, err.Error(), cfg.Location())
 				if sendErr := e.alerts.Sender.Send(ctx, msg); sendErr != nil {
-					e.addEvent("warn", "notify_failed", t.group.Key, fmt.Sprintf("%s：%v", msg.Title, sendErr))
+					e.addEventDetail("warn", "notify_failed", t.group.Key, t.group.Label, fmt.Sprintf("暂停通知发送失败：%v", sendErr), fmt.Sprintf("%s 暂停通知发送失败：%v", t.group.Label, sendErr))
 				} else {
-					e.addEvent("info", "notify", t.group.Key, msg.Title)
+					e.addEventDetail("info", "notify", t.group.Key, t.group.Label, msg.Title, msg.Title)
 				}
 			}
 		} else {
-			e.addEvent("warn", "ignite_failed", t.group.Key, fmt.Sprintf("%s 点火失败，%d 分钟后重试：%v",
-				t.group.Label, int(outcome.RetryIn.Minutes()), err))
+			minutes := int(outcome.RetryIn.Minutes())
+			e.addEventDetail("warn", "ignite_failed", t.group.Key, t.group.Label,
+				fmt.Sprintf("%d 分钟后重试：%v", minutes, err),
+				fmt.Sprintf("%s 点火失败，%d 分钟后重试：%v", t.group.Label, minutes, err))
 		}
 		return err
 	}
@@ -229,7 +233,9 @@ func (e *Engine) igniteTarget(ctx context.Context, cfg config.Config, t target, 
 	if manual {
 		kind = "ignite_manual"
 	}
-	e.addEvent("info", kind, t.group.Key, fmt.Sprintf("%s 点火成功（%s），下次重置 %s", t.group.Label, model, resetText))
+	e.addEventDetail("info", kind, t.group.Key, t.group.Label,
+		fmt.Sprintf("%s · 下次重置 %s", model, resetText),
+		fmt.Sprintf("%s 点火成功（%s），下次重置 %s", t.group.Label, model, resetText))
 	return nil
 }
 

@@ -23,18 +23,29 @@ type Event struct {
 	Kind    string    `json:"kind"`
 	Group   string    `json:"group,omitempty"`
 	Message string    `json:"message"`
+	// Label and Detail split Message into the quota group and the rest,
+	// so the page can show events in columns.
+	Label  string `json:"label,omitempty"`
+	Detail string `json:"detail,omitempty"`
 }
 
 func (e *Engine) addEvent(level, kind, group, message string) {
+	e.addEventDetail(level, kind, group, "", message, message)
+}
+
+// addEventDetail records an event. message is the full text for the CPA log;
+// label and detail are the quota group and a short description for the page,
+// which shows the event type separately.
+func (e *Engine) addEventDetail(level, kind, group, label, detail, message string) {
 	now := e.now()
 	e.mu.Lock()
-	e.events = append(e.events, Event{Time: now, Level: level, Kind: kind, Group: group, Message: message})
+	e.events = append(e.events, Event{Time: now, Level: level, Kind: kind, Group: group, Message: message, Label: label, Detail: detail})
 	if len(e.events) > maxEvents {
 		e.events = e.events[len(e.events)-maxEvents:]
 	}
 	e.mu.Unlock()
 	if e.history != nil {
-		e.history.Append(store.Record{Kind: "e", Time: now.Unix(), Group: group, Event: kind, Level: level, Message: message})
+		e.history.Append(store.Record{Kind: "e", Time: now.Unix(), Group: group, Event: kind, Level: level, Message: message, Label: label, Detail: detail})
 	}
 	e.logf(level, "%s", message)
 }
@@ -56,6 +67,8 @@ func (e *Engine) loadRecentEvents() {
 			Kind:    record.Event,
 			Group:   record.Group,
 			Message: record.Message,
+			Label:   record.Label,
+			Detail:  record.Detail,
 		})
 	}
 	if len(events) > maxEvents {
@@ -191,21 +204,24 @@ type AccountStatus struct {
 
 // Status is the response of the status endpoint.
 type Status struct {
-	Version     string          `json:"version"`
-	Running     bool            `json:"running"`
-	Enabled     bool            `json:"enabled"`
-	ConfigError string          `json:"config_error,omitempty"`
-	LockError   string          `json:"lock_error,omitempty"`
-	ModelsError string          `json:"models_error,omitempty"`
-	ListError   string          `json:"list_error,omitempty"`
-	DataDir     string          `json:"data_dir"`
-	Now         time.Time       `json:"now"`
-	LastPoll    time.Time       `json:"last_poll,omitempty"`
-	NextPoll    time.Time       `json:"next_poll,omitempty"`
-	Config      config.Config   `json:"config"`
-	Accounts    []AccountStatus `json:"accounts"`
-	Targets     []TargetView    `json:"targets"`
-	Events      []Event         `json:"events"`
+	Version     string `json:"version"`
+	Running     bool   `json:"running"`
+	Enabled     bool   `json:"enabled"`
+	ConfigError string `json:"config_error,omitempty"`
+	LockError   string `json:"lock_error,omitempty"`
+	ModelsError string `json:"models_error,omitempty"`
+	ListError   string `json:"list_error,omitempty"`
+	DataDir     string `json:"data_dir"`
+	// Timezone and UTCOffset describe the effective display time zone.
+	Timezone  string          `json:"timezone"`
+	UTCOffset int             `json:"utc_offset_seconds"`
+	Now       time.Time       `json:"now"`
+	LastPoll  time.Time       `json:"last_poll,omitempty"`
+	NextPoll  time.Time       `json:"next_poll,omitempty"`
+	Config    config.Config   `json:"config"`
+	Accounts  []AccountStatus `json:"accounts"`
+	Targets   []TargetView    `json:"targets"`
+	Events    []Event         `json:"events"`
 }
 
 // Status returns a snapshot for the management page. Secrets are removed
@@ -229,12 +245,14 @@ func (e *Engine) Status() Status {
 		ModelsError: e.modelsErr,
 		ListError:   e.pollErrs[""],
 		DataDir:     e.dataDir,
+		Timezone:    e.cfg.Location().String(),
 		Now:         e.now().UTC(),
 		LastPoll:    e.lastPoll,
 		NextPoll:    e.nextPoll,
 		Config:      cfg,
 		Targets:     append([]TargetView{}, e.targets...),
 	}
+	_, status.UTCOffset = e.now().In(e.cfg.Location()).Zone()
 	creds := make([]*Cred, 0, len(e.creds))
 	for _, cred := range e.creds {
 		creds = append(creds, cred)
@@ -353,7 +371,7 @@ func (e *Engine) History(span time.Duration) (HistoryResponse, error) {
 			if record.Event == "ignite" || record.Event == "ignite_manual" || record.Event == "ignite_failed" || record.Event == "ignite_paused" {
 				resp.Events = append(resp.Events, Event{
 					Time: time.Unix(record.Time, 0).UTC(), Level: record.Level, Kind: record.Event,
-					Group: record.Group, Message: record.Message,
+					Group: record.Group, Message: record.Message, Label: record.Label, Detail: record.Detail,
 				})
 			}
 			continue

@@ -26,6 +26,9 @@ type Message struct {
 	Body    string
 	Level   string
 	JumpURL string
+	// Label is the quota group the message is about, for the event log.
+	// It is not sent to Bark.
+	Label string
 }
 
 // Sender delivers a message and reports whether Bark accepted it.

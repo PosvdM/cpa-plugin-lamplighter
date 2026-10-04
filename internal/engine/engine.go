@@ -354,10 +354,10 @@ func (e *Engine) applyRuntimeConfig(cfg config.Config) {
 			Client:    &http.Client{Timeout: cfg.RequestTimeout()},
 		},
 		OnSent: func(msg notify.Message) {
-			e.addEvent("info", "notify", "", msg.Title)
+			e.addEventDetail("info", "notify", "", msg.Label, msg.Title, msg.Title)
 		},
 		OnError: func(msg notify.Message, err error) {
-			e.addEvent("warn", "notify_failed", "", fmt.Sprintf("%s：%v", msg.Title, err))
+			e.addEventDetail("warn", "notify_failed", "", msg.Label, fmt.Sprintf("%s：%v", msg.Title, err), fmt.Sprintf("推送失败 %s：%v", msg.Title, err))
 		},
 	}
 }
@@ -495,7 +495,7 @@ func sameRuntimeConfig(a, b config.Config) bool {
 		a.RequestTimeoutSeconds == b.RequestTimeoutSeconds && a.NoticeThreshold == b.NoticeThreshold &&
 		a.LowThreshold == b.LowThreshold && a.CriticalThreshold == b.CriticalThreshold &&
 		a.NotifyRecovery == b.NotifyRecovery && a.NotifyResetReminders == b.NotifyResetReminders &&
-		a.TimezoneOffsetHours == b.TimezoneOffsetHours && a.PollIntervalSeconds == b.PollIntervalSeconds
+		a.Location().String() == b.Location().String() && a.PollIntervalSeconds == b.PollIntervalSeconds
 }
 
 // waitWithUsage sleeps for d while applying passive updates as they arrive.

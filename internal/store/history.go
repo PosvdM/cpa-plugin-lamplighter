@@ -23,6 +23,8 @@ type Record struct {
 	Event     string  `json:"e,omitempty"` // event type, events only
 	Level     string  `json:"v,omitempty"` // "info", "warn" or "error", events only
 	Message   string  `json:"m,omitempty"` // event text, events only
+	Label     string  `json:"l,omitempty"` // quota group or source label, events only
+	Detail    string  `json:"d,omitempty"` // event text without the label, events only
 }
 
 // History stores records in one JSON Lines file per UTC day under Dir.

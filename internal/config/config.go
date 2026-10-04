@@ -2,6 +2,9 @@
 package config
 
 import (
+	// Embedded so that timezone works without tzdata in the container.
+	_ "time/tzdata"
+
 	"fmt"
 	"strings"
 	"time"
@@ -54,7 +57,11 @@ type Config struct {
 	CriticalThreshold    float64 `yaml:"critical_threshold" json:"critical_threshold"`
 	NotifyRecovery       bool    `yaml:"notify_recovery" json:"notify_recovery"`
 	NotifyResetReminders bool    `yaml:"notify_reset_reminders" json:"notify_reset_reminders"`
-	TimezoneOffsetHours  float64 `yaml:"timezone_offset_hours" json:"timezone_offset_hours"`
+	// Timezone is an IANA name such as Asia/Shanghai. When both Timezone and
+	// TimezoneOffsetHours are empty, the plugin uses the time zone of the CPA
+	// process.
+	Timezone            string   `yaml:"timezone" json:"timezone"`
+	TimezoneOffsetHours *float64 `yaml:"timezone_offset_hours,omitempty" json:"timezone_offset_hours,omitempty"`
 
 	PollIntervalSeconds   int `yaml:"poll_interval_seconds" json:"poll_interval_seconds"`
 	RequestTimeoutSeconds int `yaml:"request_timeout_seconds" json:"request_timeout_seconds"`
@@ -103,7 +110,6 @@ func Default() Config {
 		CriticalThreshold:     10,
 		NotifyRecovery:        false,
 		NotifyResetReminders:  false,
-		TimezoneOffsetHours:   8,
 		PollIntervalSeconds:   300,
 		RequestTimeoutSeconds: 20,
 		PassiveSkipSeconds:    60,
@@ -183,8 +189,9 @@ func (c *Config) normalize() {
 	}
 	c.ModelsAPIKey = strings.TrimSpace(c.ModelsAPIKey)
 	c.DataDir = strings.TrimSpace(c.DataDir)
-	if c.TimezoneOffsetHours < -14 || c.TimezoneOffsetHours > 14 {
-		c.TimezoneOffsetHours = 8
+	c.Timezone = strings.TrimSpace(c.Timezone)
+	if c.TimezoneOffsetHours != nil && (*c.TimezoneOffsetHours < -14 || *c.TimezoneOffsetHours > 14) {
+		c.TimezoneOffsetHours = nil
 	}
 	c.PollIntervalSeconds = clamp(c.PollIntervalSeconds, 60, 0)
 	c.RequestTimeoutSeconds = clamp(c.RequestTimeoutSeconds, 5, 120)
@@ -206,10 +213,20 @@ func (c *Config) normalize() {
 	}
 }
 
-// Location returns the fixed time zone used for display and the ignition window.
+// Location returns the time zone used for display and the ignition window:
+// timezone when set, then timezone_offset_hours, then the time zone of the
+// CPA process (the official Docker image sets it from TZ).
 func (c Config) Location() *time.Location {
-	seconds := int(c.TimezoneOffsetHours * 3600)
-	return time.FixedZone(fmt.Sprintf("UTC%+g", c.TimezoneOffsetHours), seconds)
+	if c.Timezone != "" {
+		if loc, err := time.LoadLocation(c.Timezone); err == nil {
+			return loc
+		}
+	}
+	if c.TimezoneOffsetHours != nil {
+		hours := *c.TimezoneOffsetHours
+		return time.FixedZone(fmt.Sprintf("UTC%+g", hours), int(hours*3600))
+	}
+	return time.Local
 }
 
 // Provider returns the settings for provider, falling back to its defaults.

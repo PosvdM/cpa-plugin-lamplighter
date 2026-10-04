@@ -134,10 +134,10 @@
     toastTimer = setTimeout(function () { node.hidden = true; }, 5000);
   }
 
-  // Times are shown in the plugin's configured time zone, like notifications.
-  function offsetHours() {
-    var value = status && status.config ? Number(status.config.timezone_offset_hours) : 8;
-    return isFinite(value) ? value : 8;
+  // Times are shown in the plugin's time zone, like notifications.
+  function offsetSeconds() {
+    var value = status ? Number(status.utc_offset_seconds) : NaN;
+    return isFinite(value) ? value : -new Date().getTimezoneOffset() * 60;
   }
 
   function parseTime(value) {
@@ -149,7 +149,7 @@
 
   function pad(n) { return (n < 10 ? "0" : "") + n; }
 
-  function shifted(t) { return new Date(t.getTime() + offsetHours() * 3600 * 1000); }
+  function shifted(t) { return new Date(t.getTime() + offsetSeconds() * 1000); }
 
   function fmtDateTime(t) {
     if (!t) return "—";
@@ -354,21 +354,59 @@
     });
   }
 
+  var EVENT_TYPES = {
+    ignite: ["success", "点火成功"],
+    ignite_manual: ["success", "手动点火"],
+    ignite_failed: ["warning", "点火失败"],
+    ignite_paused: ["failure", "点火暂停"],
+    notify: ["muted", "已推送"],
+    notify_failed: ["warning", "推送失败"],
+    codex_reset: ["muted", "重置信号"],
+    error: ["failure", "错误"]
+  };
+  var EVENTS_COLLAPSED = 12;
+  var eventsExpanded = false;
+
+  function groupLabel(key) {
+    var label = "";
+    (status.accounts || []).forEach(function (a) {
+      (a.groups || []).forEach(function (g) { if (g.key === key) label = g.label; });
+    });
+    return label;
+  }
+
+  // Events written before label and detail existed only have a message that
+  // starts with the group label.
+  function eventParts(ev) {
+    var label = ev.label || (ev.group ? groupLabel(ev.group) : "");
+    var detail = ev.detail || ev.message || "";
+    if (!ev.detail && label && detail.indexOf(label + " ") === 0) detail = detail.slice(label.length + 1);
+    if (!ev.detail) detail = detail.replace(/^点火成功（(.+?)），下次重置 /, "$1 · 下次重置 ");
+    return { label: label || "—", detail: detail };
+  }
+
   function renderEvents() {
     var list = $("events");
     clear(list);
+    var more = $("events-more");
     if (!status.events.length) {
-      list.appendChild(el("li", { class: "empty", text: "暂无事件" }));
+      list.appendChild(el("p", { class: "empty", text: "暂无事件" }));
+      more.hidden = true;
       return;
     }
-    status.events.slice(0, 100).forEach(function (ev) {
-      var kind = ev.level === "error" ? "failure" : ev.level === "warn" ? "warning" : "muted";
-      list.appendChild(el("li", {}, [
-        el("span", { class: "event-time", text: fmtDateTime(parseTime(ev.time)) }),
-        el("span", { class: "event-dot dot-" + kind }),
-        el("span", { class: "event-text", text: ev.message })
+    var events = eventsExpanded ? status.events.slice(0, 100) : status.events.slice(0, EVENTS_COLLAPSED);
+    events.forEach(function (ev) {
+      var type = EVENT_TYPES[ev.kind] || [ev.level === "error" ? "failure" : ev.level === "warn" ? "warning" : "muted", ev.kind];
+      var parts = eventParts(ev);
+      list.appendChild(el("div", { class: "event-row", role: "row" }, [
+        el("span", { class: "event-time", role: "cell", text: fmtDateTime(parseTime(ev.time)) }),
+        el("span", { class: "event-type", role: "cell" }, [badge(type[0], type[1])]),
+        el("span", { class: "event-label", role: "cell", text: parts.label }),
+        el("span", { class: "event-detail", role: "cell", title: parts.detail, text: parts.detail })
       ]));
     });
+    more.hidden = status.events.length <= EVENTS_COLLAPSED;
+    more.textContent = eventsExpanded ? "收起" : "显示更多（共 " + Math.min(status.events.length, 100) + " 条）";
   }
 
   function renderViewOptions() {
@@ -439,9 +477,11 @@
       var groups = [];
       status.accounts.forEach(function (a) { (a.groups || []).forEach(function (g) { groups.push(g.key); }); });
       all.forEach(function (s) { if (groups.indexOf(s.group) < 0) groups.push(s.group); });
-      return all.filter(function (s) { return windowKind(s) === kind; }).map(function (s) {
-        return { name: s.label, color: colorSlot(s.group, groups), points: s.points, group: s.group };
-      });
+      return all.filter(function (s) { return windowKind(s) === kind; })
+        .sort(function (a, b) { return groups.indexOf(a.group) - groups.indexOf(b.group); })
+        .map(function (s) {
+          return { name: s.label, color: colorSlot(s.group, groups), points: s.points, group: s.group };
+        });
     }
     var authIndex = view.slice(8);
     var account = status.accounts.filter(function (a) { return a.auth_index === authIndex; })[0];
@@ -453,8 +493,8 @@
       .map(function (s) {
         var id = s.group + "|" + s.window;
         if (windows.indexOf(id) < 0) windows.push(id);
-        var name = s.window_label;
-        if (s.label && account && s.label !== account.title) name = s.label + " · " + s.window_label;
+        var name = windowName({ short: s.window_label, label: s.window_label });
+        if (s.label && account && s.label !== account.title) name = s.label + " · " + name;
         return { name: name, color: colorSlot(id, windows), points: s.points, group: s.group };
       });
   }
@@ -475,6 +515,9 @@
     return node;
   }
 
+  // Small multiples: one row per series on a shared time axis, so lines never
+  // overlap. Each row is labeled with its series and current value, which
+  // also makes a legend unnecessary.
   function renderChart() {
     var box = $("chart");
     box.classList.remove("loading");
@@ -490,76 +533,80 @@
     }
 
     var width = Math.max(320, box.clientWidth || 800);
-    var height = 280;
-    var directLabels = series.length <= 4;
-    var margin = { top: 12, right: directLabels ? 96 : 16, bottom: 28, left: 44 };
+    var labelW = width < 560 ? 104 : 168;
+    var rowH = 58, rowGap = 14, axisH = 24, top = 4;
+    var margin = { left: labelW, right: 12 };
     var plotW = width - margin.left - margin.right;
-    var plotH = height - margin.top - margin.bottom;
+    var height = top + series.length * (rowH + rowGap) - rowGap + axisH;
     var from = new Date(history.from).getTime() / 1000;
     var to = new Date(history.to).getTime() / 1000;
     function x(t) { return margin.left + (t - from) / (to - from) * plotW; }
-    function y(v) { return margin.top + (1 - v / 100) * plotH; }
+    function rowTop(i) { return top + i * (rowH + rowGap); }
+    function y(i, v) { return rowTop(i) + (1 - v / 100) * rowH; }
 
-    var root = svg("svg", { viewBox: "0 0 " + width + " " + height, role: "img", "aria-label": "额度剩余百分比随时间变化" });
-    // Gridlines and y ticks.
-    [0, 25, 50, 75, 100].forEach(function (v) {
-      root.appendChild(svg("line", { x1: margin.left, x2: margin.left + plotW, y1: y(v), y2: y(v), stroke: v === 0 ? cssVar("--axis") : cssVar("--grid"), "stroke-width": 1 }));
-      var label = svg("text", { x: margin.left - 8, y: y(v) + 4, "text-anchor": "end", "font-size": 11, fill: cssVar("--text-muted") });
-      label.textContent = v + "%";
-      root.appendChild(label);
-    });
-    // X ticks.
+    var root = svg("svg", { viewBox: "0 0 " + width + " " + height, role: "img", "aria-label": "各额度窗口剩余百分比随时间变化" });
     var span = to - from;
     var step = span <= 2 * 86400 ? 4 * 3600 : span <= 8 * 86400 ? 86400 : 5 * 86400;
-    var offset = offsetHours() * 3600;
-    for (var t = Math.ceil((from + offset) / step) * step - offset; t <= to; t += step) {
-      var tickLabel = svg("text", { x: x(t), y: height - 8, "text-anchor": "middle", "font-size": 11, fill: cssVar("--text-muted") });
-      tickLabel.textContent = span <= 2 * 86400 ? fmtClock(new Date(t * 1000)) : fmtDay(new Date(t * 1000));
-      root.appendChild(tickLabel);
-    }
-    // Ignition events along the baseline.
+    var offset = offsetSeconds();
+    var ticks = [];
+    for (var tk = Math.ceil((from + offset) / step) * step - offset; tk <= to; tk += step) ticks.push(tk);
+
+    var eventsByGroup = {};
     (history.events || []).forEach(function (ev) {
       var et = new Date(ev.time).getTime() / 1000;
-      if (et < from || et > to) return;
-      var failed = ev.kind === "ignite_failed" || ev.kind === "ignite_paused";
-      root.appendChild(svg("line", { x1: x(et), x2: x(et), y1: y(0) - 6, y2: y(0), stroke: failed ? cssVar("--critical") : cssVar("--text-muted"), "stroke-width": 2, "stroke-linecap": "round" }));
+      if (et < from || et > to || !ev.group) return;
+      (eventsByGroup[ev.group] = eventsByGroup[ev.group] || []).push({ t: et, failed: ev.kind === "ignite_failed" || ev.kind === "ignite_paused" });
     });
-    // Lines: values hold until the next sample, so the path is a step.
-    var ends = [];
-    series.forEach(function (s) {
+
+    series.forEach(function (s, i) {
       var color = cssVar(s.color);
-      var d = "";
-      s.points.forEach(function (p, i) {
-        var px = x(p[0]), py = y(p[1]);
-        d += i === 0 ? "M" + px + " " + py : "H" + px + "V" + py;
+      var base = rowTop(i) + rowH;
+      // Row frame: 0% baseline, 50% and 100% hairlines, time gridlines.
+      [0, 50, 100].forEach(function (v) {
+        root.appendChild(svg("line", { x1: margin.left, x2: margin.left + plotW, y1: y(i, v), y2: y(i, v),
+          stroke: cssVar(v === 0 ? "--axis" : "--grid"), "stroke-width": 1 }));
       });
-      root.appendChild(svg("path", { d: d, fill: "none", stroke: color, "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }));
-      if (range === "24h") {
-        s.points.forEach(function (p) {
-          if (p[2] !== 1) return;
-          root.appendChild(svg("circle", { cx: x(p[0]), cy: y(p[1]), r: 4, fill: color, stroke: cssVar("--surface"), "stroke-width": 2 }));
-        });
-      }
+      ticks.forEach(function (tk) {
+        root.appendChild(svg("line", { x1: x(tk), x2: x(tk), y1: rowTop(i), y2: base, stroke: cssVar("--grid"), "stroke-width": 1 }));
+      });
+      // Row label and current value.
       var last = s.points[s.points.length - 1];
-      root.appendChild(svg("circle", { cx: x(last[0]), cy: y(last[1]), r: 4, fill: color, stroke: cssVar("--surface"), "stroke-width": 2 }));
-      ends.push({ x: x(last[0]), y: y(last[1]), name: s.name, value: last[1] });
+      var name = svg("text", { x: 0, y: rowTop(i) + 16, "font-size": 12.5, fill: cssVar("--text-secondary"), "class": "row-name" });
+      name.textContent = s.name;
+      root.appendChild(name);
+      var value = svg("text", { x: 0, y: rowTop(i) + 40, "font-size": 18, "font-weight": 650, fill: cssVar("--text-primary"), "class": "row-value" });
+      value.textContent = Math.round(last[1]) + "%";
+      root.appendChild(value);
+      var scale = svg("text", { x: margin.left - 6, y: rowTop(i) + 9, "font-size": 10, "text-anchor": "end", fill: cssVar("--text-muted") });
+      scale.textContent = "100";
+      root.appendChild(scale);
+      // Area wash and step line: a value holds until the next sample.
+      var d = "";
+      s.points.forEach(function (p, j) {
+        var px = x(p[0]), py = y(i, p[1]);
+        d += j === 0 ? "M" + px + " " + py : "H" + px + "V" + py;
+      });
+      var endX = x(last[0]);
+      root.appendChild(svg("path", { d: d + "V" + base + "H" + x(s.points[0][0]) + "Z", fill: color, "fill-opacity": 0.1, stroke: "none" }));
+      root.appendChild(svg("path", { d: d, fill: "none", stroke: color, "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }));
+      root.appendChild(svg("circle", { cx: endX, cy: y(i, last[1]), r: 4, fill: color, stroke: cssVar("--surface"), "stroke-width": 2 }));
+      // Ignition marks of this group on the row baseline.
+      (eventsByGroup[s.group] || []).forEach(function (ev) {
+        root.appendChild(svg("line", { x1: x(ev.t), x2: x(ev.t), y1: base - 6, y2: base,
+          stroke: cssVar(ev.failed ? "--critical" : "--text-muted"), "stroke-width": 2, "stroke-linecap": "round" }));
+      });
     });
-    // Direct end labels, only when they do not collide.
-    if (directLabels) {
-      var sorted = ends.slice().sort(function (a, b) { return a.y - b.y; });
-      var collide = sorted.some(function (e, i) { return i > 0 && e.y - sorted[i - 1].y < 14; });
-      if (!collide) {
-        ends.forEach(function (e) {
-          var label = svg("text", { x: margin.left + plotW + 8, y: e.y + 4, "font-size": 11, fill: cssVar("--text-secondary") });
-          label.textContent = e.name + " " + Math.round(e.value) + "%";
-          root.appendChild(label);
-        });
-      }
-    }
-    // Crosshair and tooltip.
-    var cross = svg("line", { y1: margin.top, y2: margin.top + plotH, stroke: cssVar("--axis"), "stroke-width": 1, visibility: "hidden" });
+    ticks.forEach(function (tk) {
+      var label = svg("text", { x: x(tk), y: height - 6, "text-anchor": "middle", "font-size": 11, fill: cssVar("--text-muted") });
+      label.textContent = span <= 2 * 86400 ? fmtClock(new Date(tk * 1000)) : fmtDay(new Date(tk * 1000));
+      root.appendChild(label);
+    });
+
+    var plotBottom = height - axisH;
+    var cross = svg("line", { y1: top, y2: plotBottom, stroke: cssVar("--axis"), "stroke-width": 1, visibility: "hidden" });
     root.appendChild(cross);
-    var overlay = svg("rect", { x: margin.left, y: margin.top, width: plotW, height: plotH, fill: "transparent", tabindex: "0", "aria-label": "按左右方向键查看各时刻的数值" });
+    var overlay = svg("rect", { x: margin.left, y: top, width: plotW, height: plotBottom - top, fill: "transparent", tabindex: "0",
+      "aria-label": "按左右方向键查看各时刻的数值" });
     root.appendChild(overlay);
     box.appendChild(root);
     var tip = el("div", { class: "tooltip", hidden: true });
@@ -591,18 +638,17 @@
           el("span", { class: "src", text: p[2] === 1 ? "被动" : "主动" })
         ]));
       });
+      var near = Math.max(300, (to - from) / plotW * 6);
       (history.events || []).forEach(function (ev) {
         var et = new Date(ev.time).getTime() / 1000;
-        if (Math.abs(et - t) <= Math.max(300, (to - from) / plotW * 6)) {
-          tip.appendChild(el("div", { class: "row muted", text: ev.message }));
-        }
+        if (Math.abs(et - t) <= near) tip.appendChild(el("div", { class: "row muted", text: ev.message }));
       });
       tip.hidden = false;
       var scale = box.clientWidth / width;
       var left = px * scale + 12;
-      if (left + 220 > box.clientWidth) left = px * scale - 232;
+      if (left + 240 > box.clientWidth) left = px * scale - 252;
       tip.style.left = Math.max(0, left) + "px";
-      tip.style.top = (margin.top * scale) + "px";
+      tip.style.top = "0px";
     }
     function hide() { cross.setAttribute("visibility", "hidden"); tip.hidden = true; }
     function nearest(clientX) {
@@ -621,14 +667,7 @@
       if (e.key === "ArrowRight") { show(Math.min(times.length - 1, cursor + 1)); e.preventDefault(); }
     });
 
-    // Legend, always present for two or more series.
-    if (series.length > 1) {
-      series.forEach(function (s) {
-        legend.appendChild(el("span", {}, [el("span", { class: "key", style: "background:" + cssVar(s.color) }), document.createTextNode(s.name)]));
-      });
-    }
-    legend.appendChild(el("span", { class: "muted", text: (range === "24h" ? "圆点为被动数据；" : "") + "底部刻线为点火，红色为点火失败" }));
-    // Table view.
+    legend.textContent = "每行一个额度窗口，纵轴 0–100%。底部刻线为点火，红色为点火失败；悬停查看各时刻数值和数据来源。";
     series.forEach(function (s) {
       var values = s.points.map(function (p) { return p[1]; });
       table.appendChild(el("tr", {}, [
@@ -668,8 +707,39 @@
     target[parts[parts.length - 1]] = value;
   }
 
+  // Antigravity quota groups offered as checkboxes: the groups seen on the
+  // accounts plus any configured ones, in a stable order.
+  function antigravityGroups(selected) {
+    var names = ["Gemini", "Claude / GPT"];
+    (status.accounts || []).forEach(function (a) {
+      if (a.provider !== "antigravity") return;
+      (a.groups || []).forEach(function (g) { if (names.indexOf(g.source_label) < 0) names.push(g.source_label); });
+    });
+    (selected || []).forEach(function (name) { if (names.indexOf(name) < 0) names.push(name); });
+    return names;
+  }
+
+  function renderGroupChecks(selected) {
+    var box = $("ag-groups");
+    clear(box);
+    antigravityGroups(selected).forEach(function (name) {
+      var input = el("input", { type: "checkbox", "data-ag-group": name });
+      input.checked = (selected || []).some(function (s) { return s.toLowerCase() === name.toLowerCase(); });
+      box.appendChild(el("label", { class: "inline" }, [input, document.createTextNode(name)]));
+    });
+  }
+
+  function timezoneText() {
+    var offset = offsetSeconds() / 3600;
+    var name = status && status.timezone && status.timezone !== "Local" ? status.timezone : "";
+    var sign = offset >= 0 ? "+" : "-";
+    var utc = "UTC" + sign + Math.abs(offset);
+    var source = rawConfig.timezone || rawConfig.timezone_offset_hours !== undefined ? "配置中指定" : "跟随 CPA 服务器";
+    return "通知和页面中的时间使用 " + (name ? name + "（" + utc + "）" : utc) + "，" + source + "。";
+  }
+
   // Effective values come from the status config (defaults applied); saved
-  // values come from the raw plugin config.
+  // secrets come from the raw plugin config.
   function fillSettings() {
     var form = $("settings");
     var effective = JSON.parse(JSON.stringify(status.config || {}));
@@ -679,9 +749,10 @@
       if (!input.name) return;
       var value = getPath(effective, input.name);
       if (input.type === "checkbox") input.checked = !!value;
-      else if (input.name === "providers.antigravity.groups") input.value = (value || []).join(", ");
       else input.value = value === undefined || value === null ? "" : value;
     });
+    renderGroupChecks(getPath(effective, "providers.antigravity.groups"));
+    $("timezone-note").textContent = timezoneText();
   }
 
   function saveSettings(event) {
@@ -700,11 +771,14 @@
       else if (input.type === "number") {
         if (input.value === "") return;
         value = Number(input.value);
-      } else if (input.name === "providers.antigravity.groups") {
-        value = input.value.split(",").map(function (s) { return s.trim(); }).filter(Boolean);
       } else value = input.value.trim();
       setPath(patch, input.name, value);
     });
+    patch.providers.antigravity.groups = Array.prototype.filter.call(
+      document.querySelectorAll("[data-ag-group]"), function (input) { return input.checked; }
+    ).map(function (input) { return input.getAttribute("data-ag-group"); });
+    // A fixed offset from older versions is removed so the time zone follows CPA.
+    if (rawConfig.timezone_offset_hours !== undefined) patch.timezone_offset_hours = null;
     var button = form.querySelector("button[type=submit]");
     button.disabled = true;
     api("PATCH", CONFIG_API, patch).then(function () {
@@ -753,6 +827,7 @@
     runAction(e.currentTarget, API + "/test-bark", {}, "测试通知已发送");
   });
   $("settings").addEventListener("submit", saveSettings);
+  $("events-more").addEventListener("click", function () { eventsExpanded = !eventsExpanded; renderEvents(); });
   Array.prototype.forEach.call(document.querySelectorAll("#range-buttons button"), function (button) {
     button.addEventListener("click", function () {
       range = button.getAttribute("data-range");
