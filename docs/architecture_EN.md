@@ -33,7 +33,7 @@ Management routes (require the CPA management key):
 | Method and path | Purpose |
 | --- | --- |
 | `GET /v0/management/lamplighter/status` | Status page data; secrets in the config only show whether they are set |
-| `GET /v0/management/lamplighter/history?range=1h\|2h\|5h\|24h\|7d\|14d\|35d` | Quota history and ignition events, `24h` by default |
+| `GET /v0/management/lamplighter/history?range=1h\|3h\|6h\|12h\|24h\|3d\|8d\|14d\|35d` | Quota history and ignition events, `24h` by default |
 | `POST /v0/management/lamplighter/refresh` | Query now; `{"auth_index": "..."}` limits it to one account |
 | `POST /v0/management/lamplighter/ignite` | Ignite now, `{"target": "<group key>"}` |
 | `POST /v0/management/lamplighter/test-bark` | Send a test notification |

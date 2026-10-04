@@ -125,7 +125,9 @@ func TestUnknownMethodAndUsage(t *testing.T) {
 func TestParseRange(t *testing.T) {
 	cases := map[string]time.Duration{
 		"1h":  time.Hour,
-		"5h":  5 * time.Hour,
+		"6h":  6 * time.Hour,
+		"8d":  8 * 24 * time.Hour,
+		"5h":  defaultHistory,
 		"14d": 14 * 24 * time.Hour,
 		"35d": 35 * 24 * time.Hour,
 		"":    defaultHistory,

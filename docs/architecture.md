@@ -33,7 +33,7 @@ Lamplighter 是用 Go 编写、以 `-buildmode=c-shared` 构建的 CPA 原生插
 | 方法和路径 | 作用 |
 | --- | --- |
 | `GET /v0/management/lamplighter/status` | 状态页数据，配置中的密钥只显示是否已设置 |
-| `GET /v0/management/lamplighter/history?range=1h\|2h\|5h\|24h\|7d\|14d\|35d` | 额度历史和点火事件，默认 `24h` |
+| `GET /v0/management/lamplighter/history?range=1h\|3h\|6h\|12h\|24h\|3d\|8d\|14d\|35d` | 额度历史和点火事件，默认 `24h` |
 | `POST /v0/management/lamplighter/refresh` | 立即主动查询，`{"auth_index": "..."}` 只查一个账号 |
 | `POST /v0/management/lamplighter/ignite` | 立即点火，`{"target": "<额度组 key>"}` |
 | `POST /v0/management/lamplighter/test-bark` | 发送测试通知 |

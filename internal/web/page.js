@@ -10,7 +10,7 @@
   var status = null;
   var rawConfig = {};
   var chartWindow = "5h";
-  var range = "5h";
+  var range = "6h";
   var chartSort = "default";
   var chartExpanded = {};
   var chartSelected = null;
@@ -459,10 +459,11 @@
   // Time ranges follow the quota window: a 5-hour quota is read over hours,
   // a 7-day quota over days. Keys are the history endpoint's range values.
   var RANGES = {
-    "5h": [["1h", "1 小时"], ["2h", "2 小时"], ["5h", "5 小时"], ["24h", "24 小时"]],
-    "7d": [["24h", "1 天"], ["7d", "7 天"], ["14d", "14 天"], ["35d", "35 天"]]
+    "5h": [["1h", "1 小时"], ["3h", "3 小时"], ["6h", "6 小时"], ["12h", "12 小时"], ["24h", "24 小时"]],
+    "7d": [["24h", "1 天"], ["3d", "3 天"], ["8d", "8 天"], ["14d", "14 天"], ["35d", "35 天"]]
   };
-  var DEFAULT_RANGE = { "5h": "5h", "7d": "7d" };
+  // The default ranges are the shortest that cover one whole window.
+  var DEFAULT_RANGE = { "5h": "6h", "7d": "8d" };
   // Default row order by quota name; other quotas follow in API order.
   var SERVICE_ORDER = ["Claude", "ChatGPT", "Gemini", "Fable", "Claude / GPT"];
   var LANE = 22, LANE_GAP = 6, AXIS_H = 22, EVENT_H = 24;
@@ -591,7 +592,7 @@
 
   function chartTicks(g) {
     var span = g.to - g.from;
-    var step = span <= 3600 ? 600 : span <= 7200 ? 900 : span <= 6 * 3600 ? 3600 : span <= 2 * 86400 ? 4 * 3600 : span <= 8 * 86400 ? 86400 : span <= 15 * 86400 ? 2 * 86400 : 5 * 86400;
+    var step = span <= 3600 ? 600 : span <= 3 * 3600 ? 1800 : span <= 6 * 3600 ? 3600 : span <= 12 * 3600 ? 2 * 3600 : span <= 2 * 86400 ? 4 * 3600 : span <= 8 * 86400 ? 86400 : span <= 15 * 86400 ? 2 * 86400 : 5 * 86400;
     var offset = offsetSeconds(), list = [];
     for (var t = Math.ceil((g.from + offset) / step) * step - offset; t <= g.to; t += step) list.push(t);
     return { list: list, label: function (t) { return span <= 2 * 86400 ? fmtClock(unixDate(t)) : fmtDay(unixDate(t)); } };
