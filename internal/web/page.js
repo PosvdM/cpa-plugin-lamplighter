@@ -469,10 +469,11 @@
 
   // ---- Chart ----
 
-  // Time ranges follow the quota window: a 5-hour quota is read over hours,
-  // a 7-day quota over days. The longest range is five windows plus one
-  // unit (26 hours, 36 days), so five whole windows always fit. Keys are
-  // the history endpoint's range values.
+  // Time ranges follow the quota window, in hours for the 5-hour quota and
+  // days for the 7-day quota: one unit; half of a window plus one (3h, 4d);
+  // a window plus one (6h, 8d); half a day or month, which fits two whole
+  // windows (12h, 15d); a day or a month; five windows plus one (26h, 36d).
+  // Keys are the history endpoint's range values.
   var RANGES = {
     "5h": [["1h", "1 小时"], ["3h", "3 小时"], ["6h", "6 小时"], ["12h", "12 小时"], ["24h", "24 小时"], ["26h", "26 小时"]],
     "7d": [["24h", "1 天"], ["4d", "4 天"], ["8d", "8 天"], ["15d", "15 天"], ["1mo", "1 个月"], ["36d", "36 天"]]
