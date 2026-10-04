@@ -11,7 +11,7 @@
   var rawConfig = {};
   var chartWindow = "5h";
   var range = "5h";
-  var chartSort = "low";
+  var chartSort = "default";
   var chartExpanded = {};
   var chartSelected = null;
   var history = null;
@@ -453,6 +453,8 @@
     "7d": [["24h", "1 天"], ["7d", "7 天"], ["14d", "14 天"], ["35d", "35 天"]]
   };
   var DEFAULT_RANGE = { "5h": "5h", "7d": "7d" };
+  // Default row order by quota name; other quotas follow in API order.
+  var SERVICE_ORDER = ["Claude", "ChatGPT", "Gemini", "Fable", "Claude / GPT"];
   var LANE = 22, LANE_GAP = 6, AXIS_H = 22, EVENT_H = 24;
   // A rise of this many points between two samples is a reset.
   var RESET_JUMP = 5;
@@ -539,15 +541,16 @@
       var meta = info[s.group + "|" + s.window] || {};
       var id = s.provider + "|" + (s.source_label || s.label);
       if (!byLabel[id]) { byLabel[id] = []; order.push(id); }
-      byLabel[id].push({ id: s.group + "|" + s.window, name: s.label, sub: meta.email || s.auth_index || "", group: s.group,
+      byLabel[id].push({ id: s.group + "|" + s.window, name: s.label, source: s.source_label || s.label, sub: meta.email || s.auth_index || "", group: s.group,
         points: s.points, reset: meta.reset, last: s.points[s.points.length - 1][1] });
     });
     var rows = order.map(function (id, index) {
       var kids = byLabel[id];
-      if (kids.length === 1) { kids[0].order = index; return kids[0]; }
+      var rank = SERVICE_ORDER.indexOf(kids[0].source);
+      if (rank < 0) rank = SERVICE_ORDER.length + index;
+      if (kids.length === 1) { kids[0].order = rank; return kids[0]; }
       var resets = kids.map(function (k) { return k.reset; }).filter(Boolean);
-      var source = history.series.filter(function (s) { return s.group === kids[0].group; })[0];
-      return { id: "group:" + id, name: (source && source.source_label) || kids[0].name, children: kids, points: pooled(kids, limit), order: index,
+      return { id: "group:" + id, name: kids[0].source, children: kids, points: pooled(kids, limit), order: rank,
         last: kids.reduce(function (sum, k) { return sum + k.last; }, 0) / kids.length,
         reset: resets.length ? Math.min.apply(null, resets) : null, groups: kids.map(function (k) { return k.group; }) };
     });
@@ -804,6 +807,33 @@
     return d;
   }
 
+  // Within one window a quota only falls, but active queries and response
+  // headers can disagree by a point and round differently, so samples step
+  // back up for a moment. Pool adjacent violators to the closest
+  // non-increasing sequence; a curve through the raw samples would show
+  // each reversal as a notch.
+  function declining(pts, key) {
+    var blocks = [];
+    pts.forEach(function (p) {
+      blocks.push({ sum: p[key], n: 1 });
+      while (blocks.length > 1) {
+        var top = blocks[blocks.length - 1], prev = blocks[blocks.length - 2];
+        if (top.sum / top.n <= prev.sum / prev.n) break;
+        prev.sum += top.sum; prev.n += top.n;
+        blocks.pop();
+      }
+    });
+    var out = [], i = 0;
+    blocks.forEach(function (b) {
+      for (var j = 0; j < b.n; j++, i++) {
+        var p = pts[i].slice();
+        p[key] = b.sum / b.n;
+        out.push(p);
+      }
+    });
+    return out;
+  }
+
   // Keep the first sample of every value, and the last sample of a plateau
   // only when a real drop follows it: 62, 61, 60 is a steady decline, while
   // 100 held for an hour and then 80 is a burst of use.
@@ -890,14 +920,14 @@
       resets = resets.concat(split.resets);
       if (group) splitAtResets(pts, [3, 4]).parts.forEach(function (part) {
         if (part.length < 2) return;
-        var upper = curvePoints(part, 4).map(function (p) { return [g.x(p[0]), y(p[4])]; });
-        var lower = curvePoints(part, 3).map(function (p) { return [g.x(p[0]), y(p[3])]; }).reverse();
+        var upper = curvePoints(declining(part, 4), 4).map(function (p) { return [g.x(p[0]), y(p[4])]; });
+        var lower = curvePoints(declining(part, 3), 3).map(function (p) { return [g.x(p[0]), y(p[3])]; }).reverse();
         root.appendChild(svg("path", { d: monotonePath(upper) + monotonePath(lower).replace(/^M/, "L") + "Z", fill: cssVar("--text-secondary"), "fill-opacity": 0.13 }));
       });
       // Each piece starts at its reset sample, so the return to full is a
       // break in the line rather than a slope that never happened.
       split.parts.forEach(function (part) {
-        var xy = curvePoints(part, 1).map(function (p) { return [g.x(p[0]), y(p[1])]; });
+        var xy = curvePoints(declining(part, 1), 1).map(function (p) { return [g.x(p[0]), y(p[1])]; });
         if (xy.length === 1) xy.push([xy[0][0] + 1, xy[0][1]]);
         var d = monotonePath(xy);
         if (!group) root.appendChild(svg("path", { d: d + "L" + xy[xy.length - 1][0] + " " + y(0) + "L" + xy[0][0] + " " + y(0) + "Z", fill: "url(#chart-fade)" }));
