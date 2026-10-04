@@ -1,8 +1,12 @@
+<p align="center"><img src="./assets/logo.png" alt="" width="128"></p>
+
 # Lamplighter
 
 [English](./README_EN.md)
 
 Lamplighter（点灯人）是 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI)（CPA）的原生插件。它监控 ChatGPT（Codex）、Claude 和 Antigravity 账号的额度，通过 [Bark](https://github.com/Finb/Bark) 推送提醒，并在 5 小时额度窗口重置后发送一个极小的请求，让下一个窗口立即开始计时。
+
+![管理页面：各账号额度和自动点火计划](./docs/images/overview.png)
 
 ## 功能
 
@@ -21,14 +25,14 @@ Lamplighter（点灯人）是 [CLIProxyAPI](https://github.com/router-for-me/CLI
 
 ## 要求
 
-- CPA v8.0.4 或更新版本，运行在 Linux amd64 或 arm64 上，并开启插件（`plugins.enabled: true`）。
+- CPA v8.0.4 或更新版本，并开启插件（`plugins.enabled: true`）。插件提供 Linux amd64/arm64、macOS amd64/arm64 和 Windows amd64 版本；macOS 和 Windows 版本只在 CI 中构建和测试，还没有在实际运行的 CPA 上验证。
 - 一个专门给 Lamplighter 用的 CPA API key。插件用它读取模型列表来选择点火模型。
 - 需要通知时，一台装有 Bark 的 iPhone。
 
 ## 安装
 
-1. 在 [Releases](https://github.com/PosvdM/cpa-plugin-lamplighter/releases) 下载与服务器架构对应的 zip：`uname -m` 显示 `x86_64` 时选 `linux_amd64`，显示 `aarch64` 时选 `linux_arm64`。
-2. 解压出 `lamplighter-v<版本>.so`，放进 CPA 插件目录下的 `linux/<架构>/` 子目录，例如 `plugins/linux/arm64/`。Docker 部署时，插件目录是挂载到容器 `/CLIProxyAPI/plugins` 的宿主机目录。
+1. 在 [Releases](https://github.com/PosvdM/cpa-plugin-lamplighter/releases) 下载与 CPA 所在系统对应的 zip：Linux 上 `uname -m` 显示 `x86_64` 时选 `linux_amd64`，显示 `aarch64` 时选 `linux_arm64`；Apple 芯片的 Mac 选 `darwin_arm64`，Intel 芯片的 Mac 选 `darwin_amd64`；Windows 选 `windows_amd64`。
+2. 解压出动态库（Linux 为 `lamplighter-v<版本>.so`，macOS 为 `.dylib`，Windows 为 `.dll`），放进 CPA 插件目录下的 `<系统>/<架构>/` 子目录，例如 `plugins/linux/arm64/` 或 `plugins/windows/amd64/`。Docker 部署时，插件目录是挂载到容器 `/CLIProxyAPI/plugins` 的宿主机目录。
 3. 在 CPA 的 `config.yaml` 中新增一个 API key，并启用插件：
 
    ```yaml
@@ -48,7 +52,7 @@ Lamplighter（点灯人）是 [CLIProxyAPI](https://github.com/router-for-me/CLI
 4. 重启 CPA（Docker 部署时运行 `docker compose restart`）。插件在 CPA 启动约 20 秒后开始第一次查询。
 5. 打开管理中心侧边栏的 **Lamplighter** 页面。如果登录管理中心时勾选了“记住密码”，页面会直接使用该密钥，否则会请你输入。
 
-升级时，把新版本的 `.so` 放进同一目录，删除旧版本文件，再重启 CPA。
+升级时，把新版本的动态库放进同一目录，删除旧版本文件，再重启 CPA。
 
 插件的状态和额度历史保存在插件目录下的 `data/lamplighter/`。Docker 部署时插件目录已经挂载在宿主机上，重建容器不会丢失这些数据。
 
@@ -171,6 +175,8 @@ plugins:
 
 ## 管理页面
 
+![额度变化图表：多账号的 Claude 展开为各账号，下方为合计曲线和账号间的范围](./docs/images/chart.png)
+
 页面包含：
 
 - 各账号的额度窗口、重置时间和数据来源，可以单独刷新某个账号；
@@ -188,3 +194,7 @@ plugins:
 ## 开发
 
 插件结构、数据流和设计约束见 [架构文档](./docs/architecture.md)，构建、测试和发布见 [开发文档](./docs/development.md)。
+
+## 许可证
+
+[AGPL-3.0](./LICENSE)。分发修改后的版本，或通过网络向他人提供修改后的版本时，需要按同一许可证公开源代码。

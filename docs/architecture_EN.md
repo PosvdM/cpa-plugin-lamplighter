@@ -8,7 +8,8 @@ Lamplighter is a CPA native plugin written in Go and built with `-buildmode=c-sh
 
 | Path | Responsibility |
 | --- | --- |
-| `main.go` | cgo entry point: exports the C ABI functions, forwards RPC, implements host calls, computes the default data directory |
+| `main.go` | cgo entry point: exports the C ABI functions, forwards RPC, implements host calls |
+| `datadir_unix.go`, `datadir_windows.go` | the default data directory per platform |
 | `internal/plugin` | Plugin RPC methods: register, reconfigure, quiesce, management API, `usage.handle` |
 | `internal/engine` | Background loop: active queries, passive data, ignition, notifications, history and status data |
 | `internal/host` | Go wrapper of the host callbacks and timeout handling for `host.http.do` |
@@ -39,6 +40,8 @@ Management routes (require the CPA management key):
 | `POST /v0/management/lamplighter/test-bark` | Send a test notification |
 
 The page is the resource `GET /v0/resource/plugins/lamplighter/page` with the menu label `Lamplighter`. The resource itself needs no authentication; its data requests carry the management key. The page reads the key from `cli-proxy-auth` in `localStorage`, where the Management Center stores it with a reversible obfuscation derived from the host and user agent; otherwise it asks for the key and keeps it in `sessionStorage` only. Settings are saved through CPA's `PATCH /v0/management/plugins/lamplighter/config`, which merges top-level keys only, so the page sends `ignition`, `providers` and `codex_reset_updates` as complete objects.
+
+The icon next to the page title is `assets/logo.png` loaded from the GitHub repository, so it can change without a release; it is hidden when it fails to load.
 
 The page looks like the Management Center: its CSS variables reuse the names and values of the Management Center's `src/styles/themes.scss` (light, white and dark themes), quota bars and the chart are colored by the first two notification thresholds (by default green above 50% remaining, amber above 20%, red at 20% or less), matching the 🟡 and 🔴 notification titles, and telemetry numbers use a monospace font. The page is same-origin with the Management Center, so it reads `data-theme` from the parent page's root element and watches it for changes; opened on its own, it falls back to `cli-proxy-theme` that the Management Center stores in `localStorage`. When the Management Center changes its colors, update the variables in `internal/web/page.css`.
 
@@ -80,7 +83,7 @@ If the loop panics, `supervise` logs it and restarts the loop after 30 seconds. 
 
 - `plugin.register` and `plugin.reconfigure` parse and apply the config. A config that cannot be parsed is not applied; the status page shows the error and the previous config stays in effect.
 - When a new library version loads, CPA calls `plugin.quiesce` on the old instance but does not unload it. After `plugin.quiesce` or `plugin.shutdown` the plugin stops its loop and never starts it again.
-- `instance.lock` is an `flock` lock in the data directory that keeps only one instance querying, igniting and notifying at a time. A new instance that cannot take the lock retries every 10 seconds.
+- `instance.lock` is an exclusive lock on a file in the data directory (`flock` on Unix; on Windows the file is opened without sharing) that keeps only one instance querying, igniting and notifying at a time. A new instance that cannot take the lock retries every 10 seconds.
 
 ## Reading quota
 
@@ -202,7 +205,7 @@ Did Codex Reset is read every `poll_seconds` seconds (at least 300, aligned to t
 
 ## Data
 
-The data directory defaults to `data/lamplighter` in the plugin directory. `main.go` finds the library path with `dladdr`; when the library sits in `<plugins>/<goos>/<goarch>/`, those two levels are removed.
+The data directory defaults to `data/lamplighter` in the plugin directory. On Linux and macOS, `datadir_unix.go` finds the library path with `dladdr`; when the library sits in `<plugins>/<goos>/<goarch>/`, those two levels are removed. On Windows CPA loads a copy of the DLL from the temp directory, so the library path does not point to the plugin directory; `datadir_windows.go` reads `plugins.dir` from CPA's `config.yaml` instead (default `plugins`, relative to CPA's working directory).
 
 | File | Content |
 | --- | --- |

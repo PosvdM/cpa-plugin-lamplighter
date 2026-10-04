@@ -4,9 +4,6 @@
 package main
 
 /*
-#cgo linux LDFLAGS: -ldl
-#cgo linux CFLAGS: -D_GNU_SOURCE
-#include <dlfcn.h>
 #include <stdint.h>
 #include <stdlib.h>
 
@@ -58,15 +55,6 @@ static void free_host_buffer(void* ptr, size_t len) {
 		stored_host->free_buffer(ptr, len);
 	}
 }
-
-// plugin_self_path returns the path of this shared library.
-static const char* plugin_self_path(void) {
-	Dl_info info;
-	if (dladdr((void*)&store_host_api, &info) != 0 && info.dli_fname != NULL) {
-		return info.dli_fname;
-	}
-	return NULL;
-}
 */
 import "C"
 
@@ -74,7 +62,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sync"
 	"unsafe"
 
@@ -106,23 +93,21 @@ func cliproxy_plugin_init(hostAPI *C.cliproxy_host_api, pluginAPI *C.cliproxy_pl
 	pluginAPI.shutdown = C.cliproxy_plugin_shutdown_fn(C.cliproxyPluginShutdown)
 
 	workDir, _ := os.Getwd()
+	hostConfigPath := config.HostConfigPath(os.Args, workDir)
 	instanceMu.Lock()
-	instance = plugin.New(host.RPC{Call: callHost}, version, defaultDataDir(), config.HostConfigPath(os.Args, workDir))
+	instance = plugin.New(host.RPC{Call: callHost}, version, defaultDataDir(hostConfigPath, workDir), hostConfigPath)
 	instanceMu.Unlock()
 	return 0
 }
 
-// defaultDataDir places the data next to the plugin files:
-// <plugins>/data/lamplighter. CPA also accepts plugins in
-// <plugins>/<goos>/<goarch>, so that suffix is removed first.
-func defaultDataDir() string {
-	raw := C.plugin_self_path()
-	if raw == nil {
-		return ""
-	}
-	dir := filepath.Dir(C.GoString(raw))
-	if filepath.Base(dir) == runtime.GOARCH && filepath.Base(filepath.Dir(dir)) == runtime.GOOS {
-		dir = filepath.Dir(filepath.Dir(dir))
+// configDataDir places the data in <plugins.dir>/data/lamplighter, reading
+// plugins.dir from the CPA config file. A relative plugins.dir is relative to
+// the CPA working directory.
+func configDataDir(hostConfigPath, workDir string) string {
+	raw, _ := os.ReadFile(hostConfigPath)
+	dir := config.PluginsDir(raw)
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(workDir, dir)
 	}
 	return filepath.Join(dir, "data", config.PluginID)
 }

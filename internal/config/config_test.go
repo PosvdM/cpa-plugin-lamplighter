@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -71,5 +72,21 @@ func TestPluginEnabled(t *testing.T) {
 	enabled, _ = PluginEnabled([]byte("plugins:\n  enabled: true\n  configs:\n    lamplighter:\n      enabled: false\n"))
 	if enabled {
 		t.Fatal("disabled plugin reported as enabled")
+	}
+}
+
+func TestPluginsDir(t *testing.T) {
+	if got := PluginsDir(nil); got != "plugins" {
+		t.Fatalf("default: got %q", got)
+	}
+	if got := PluginsDir([]byte("plugins:\n  dir: ./ext/plugins/\n")); got != filepath.Join("ext", "plugins") {
+		t.Fatalf("relative: got %q", got)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip(err)
+	}
+	if got := PluginsDir([]byte("plugins:\n  dir: ~/cpa/plugins\n")); got != filepath.Join(home, "cpa", "plugins") {
+		t.Fatalf("home: got %q", got)
 	}
 }

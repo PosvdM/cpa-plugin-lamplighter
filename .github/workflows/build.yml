@@ -11,13 +11,17 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version: "1.26"
-      - run: test -z "$(gofmt -l .)"
+      - if: runner.os == 'Linux'
+        run: test -z "$(gofmt -l .)"
       - run: go vet ./internal/...
       - run: go test ./internal/...
       - run: node --check internal/web/page.js
@@ -27,53 +31,66 @@ jobs:
     strategy:
       matrix:
         include:
-          - runner: ubuntu-latest
-            arch: amd64
-          - runner: ubuntu-24.04-arm
-            arch: arm64
+          - { runner: ubuntu-latest, os: linux, arch: amd64 }
+          - { runner: ubuntu-24.04-arm, os: linux, arch: arm64 }
     runs-on: ${{ matrix.runner }}
     # Debian 12 matches the CPA Docker image, so the plugin links against the same glibc.
     container: golang:1.26-bookworm
     steps:
       - uses: actions/checkout@v7
-      - name: Version
-        run: |
-          case "$GITHUB_REF" in
-            refs/tags/v*) echo "VERSION=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_ENV" ;;
-            *) echo "VERSION=0.0.0-dev.${GITHUB_SHA%"${GITHUB_SHA#???????}"}" >> "$GITHUB_ENV" ;;
-          esac
-      - name: Build
-        run: |
-          go build -buildvcs=false -trimpath -buildmode=c-shared \
-            -ldflags "-s -w -X main.version=$VERSION" \
-            -o "dist/lamplighter-v$VERSION.so" .
-          rm -f dist/*.h
-      - name: Package
-        run: |
-          apt-get update -qq && apt-get install -y -qq zip > /dev/null
-          cd dist
-          zip -q "lamplighter_${VERSION}_linux_${{ matrix.arch }}.zip" "lamplighter-v$VERSION.so"
-          sha256sum "lamplighter_${VERSION}_linux_${{ matrix.arch }}.zip" > "lamplighter_${VERSION}_linux_${{ matrix.arch }}.zip.sha256"
+      - run: sh scripts/ci-build.sh ${{ matrix.arch }}
       - uses: actions/upload-artifact@v7
         with:
-          name: lamplighter-linux-${{ matrix.arch }}
-          path: dist/*.zip*
+          name: lamplighter-${{ matrix.os }}-${{ matrix.arch }}
+          path: dist/
+
+  build-native:
+    needs: test
+    strategy:
+      matrix:
+        include:
+          - { runner: macos-latest, os: darwin, arch: amd64 }
+          - { runner: macos-latest, os: darwin, arch: arm64 }
+          - { runner: windows-latest, os: windows, arch: amd64 }
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.26"
+      - run: sh scripts/ci-build.sh ${{ matrix.arch }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: lamplighter-${{ matrix.os }}-${{ matrix.arch }}
+          path: dist/
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: [build, build-native]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/download-artifact@v8
         with:
-          path: dist
-          merge-multiple: true
+          path: artifacts
+      # The CPA plugin store expects <id>_<version>_<os>_<arch>.zip with the
+      # library at the zip root, plus checksums.txt in sha256sum format.
+      - name: Package
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          mkdir dist
+          for dir in artifacts/lamplighter-*; do
+            platform=${dir#artifacts/lamplighter-}
+            zip -j -q "dist/lamplighter_${VERSION}_${platform%-*}_${platform##*-}.zip" "$dir"/*
+          done
+          cd dist
+          sha256sum *.zip > checksums.txt
+          cat checksums.txt
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          cd dist
-          cat *.sha256 > SHA256SUMS
-          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes *.zip SHA256SUMS
+        run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes dist/*
