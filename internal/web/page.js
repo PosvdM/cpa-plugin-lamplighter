@@ -176,6 +176,13 @@
     return Math.round(hours / 24) + " 天";
   }
 
+  function fmtIn(t) {
+    if (!t) return "";
+    var ms = t.getTime() - Date.now();
+    if (ms < 60000) return "即将";
+    return fmtDuration(ms) + "后";
+  }
+
   function fmtAgo(t) {
     if (!t) return "";
     var ms = Date.now() - t.getTime();
@@ -223,8 +230,8 @@
     else state.appendChild(badge("success", "运行中"));
     var parts = ["v" + status.version];
     var last = parseTime(status.last_poll), next = parseTime(status.next_poll);
-    if (last) parts.push("上次查询 " + fmtClock(last));
-    if (next) parts.push("下次 " + fmtClock(next));
+    if (last) parts.push("上次查询 " + fmtClock(last) + "（" + fmtAgo(last) + "）");
+    if (next) parts.push("下次 " + fmtClock(next) + "（" + fmtIn(next) + "）");
     $("meta").textContent = parts.join(" · ");
   }
 
