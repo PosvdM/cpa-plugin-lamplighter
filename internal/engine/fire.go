@@ -34,6 +34,10 @@ type TargetView struct {
 	ConsecutiveFailures int       `json:"consecutive_failures"`
 	CircuitUntil        time.Time `json:"circuit_until,omitempty"`
 	CircuitReason       string    `json:"circuit_reason,omitempty"`
+	// BlockedWindow names a used-up window that holds ignition back, and
+	// BlockedUntil is its reset, zero when unknown.
+	BlockedWindow string    `json:"blocked_window,omitempty"`
+	BlockedUntil  time.Time `json:"blocked_until,omitempty"`
 }
 
 type target struct {
@@ -101,6 +105,13 @@ func (e *Engine) nextDue(cfg config.Config) time.Time {
 	var next time.Time
 	for _, t := range e.collectTargets(cfg) {
 		due := schedule.DueAt(e.state.Target(t.group.Key), t.reset, now)
+		if w, blocked := exhaustedWindow(t.group, now); blocked {
+			// Wake at the reset; the next poll shows whether the quota is back.
+			if w.Reset.IsZero() {
+				continue
+			}
+			due = w.Reset
+		}
 		if next.IsZero() || due.Before(next) {
 			next = due
 		}
@@ -136,7 +147,10 @@ func (e *Engine) refreshTargets(cfg config.Config) {
 		if until := epochTime(ts.CircuitOpenUntilEpoch); until.After(now) {
 			view.CircuitUntil = until
 		}
-		if cfg.Ignition.Enabled {
+		if w, blocked := exhaustedWindow(t.group, now); blocked {
+			view.BlockedWindow = quota.ShortLabel(w.Label)
+			view.BlockedUntil = w.Reset
+		} else if cfg.Ignition.Enabled {
 			view.NextDue = schedule.DueAt(ts, t.reset, now)
 		}
 		views = append(views, view)
@@ -162,6 +176,11 @@ func (e *Engine) performDue(ctx context.Context, cfg config.Config) bool {
 			break
 		}
 		now := e.now()
+		// A used-up window, such as the 7-day quota, rejects every request
+		// until it resets; scheduled ignition skips the target until then.
+		if _, blocked := exhaustedWindow(t.group, now); blocked {
+			continue
+		}
 		due := schedule.DueAt(e.state.Target(t.group.Key), t.reset, now)
 		if due.After(now.Add(250 * time.Millisecond)) {
 			continue

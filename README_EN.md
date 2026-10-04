@@ -79,6 +79,8 @@ A 5-hour window starts with the first request after a reset. If nobody uses the 
 - Authentication failures, rate limits (429), unavailable models, or a request that succeeded without starting the window pause ignition for that quota group until 07:00 the next day, with one Bark notification.
 - Network and server errors are retried after 5 and 15 minutes; a third failure also pauses until the next day.
 - When the quota ran out before the reset, CPA cools the account down until a dozen or so seconds after the reset. An ignition that hits this cooldown retries as soon as it ends and is not counted as a failure.
+- When the account's 7-day quota (or another window other than the 5-hour one) is used up, scheduled ignition for the quota group stops until that window resets and a query shows the quota is back; the page shows "7 天额度已用完". "Ignite now" still works.
+- When the quota comes back early, for example after a reset card, while CPA still cools the account down until the original reset, CPA rejects every request and ignition in between. The plugin sends one ⚠️ notification and shows a note on the account card; clear the account's cooldown in the CPA Management Center.
 
 ## Notification example
 
@@ -89,7 +91,7 @@ A 5-hour window starts with the first request after a reset. If nobody uses the 
 7d：48% | 03d | 10/07 14:00
 ```
 
-Title icons: 🟡 remaining fell to the first threshold (50% by default), 🔴 to the second threshold (20% by default) or below, ✅ recovered, ⏰ reset reminder, ⚠️ an error such as ignition paused. Each body line shows the window, the remaining quota, the time until reset, and the reset time. The first time the plugin sees a quota window it only records the current level and sends nothing.
+Title icons: 🟡 remaining fell to the first threshold (50% by default), 🔴 to the second threshold (20% by default) or below, ✅ recovered, ⏰ reset reminder, ⚠️ a problem that needs action, such as ignition paused or a CPA cooldown that outlasts the quota. Each body line shows the window, the remaining quota, the time until reset, and the reset time. The first time the plugin sees a quota window it only records the current level and sends nothing.
 
 ## Configuration
 
@@ -113,7 +115,7 @@ All settings live under `plugins.configs.lamplighter` in `config.yaml`, and can 
 | `passive_skip_max_minutes` | `30` | Longest run of skipped queries for one account |
 | `models_api_key` | empty | CPA API key for reading the model list; without it ignition cannot pick a model |
 | `cpa_base_url` | `http://127.0.0.1:8317` | Address the plugin uses to reach CPA; change it when CPA uses another port or TLS |
-| `history_retention_days` | `70` | Days of quota history to keep |
+| `history_retention_days` | `40` | Days of quota history to keep |
 | `data_dir` | `data/lamplighter` in the plugin directory | State and history directory |
 
 Ignition settings live under `ignition`:
@@ -173,7 +175,7 @@ The page shows:
 
 - the quota windows of each account with reset times and data sources, with a refresh button per account;
 - the next ignition, last result and failure protection state of each quota group, with an "ignite now" button;
-- a quota chart for either the 5-hour quota, over the last 1, 3, 6, 12 or 24 hours (6 by default), or the 7-day quota, over the last 1, 3, 8, 14 or 35 days (8 by default). The top part has one colored band per service, colored like the quota bars, in the order Claude, ChatGPT, Gemini, Fable, Claude / GPT by default or by lowest remaining; a service with several accounts shows their total and expands into one row per account. The bottom part plots the selected row with its resets and ignition results;
+- a quota chart for either the 5-hour quota, over the last 1, 3, 6, 12, 24 or 26 hours (6 by default), or the 7-day quota, over the last 1, 4, 8 or 15 days, one month (from this date last month), or 36 days (8 days by default). The top part has one colored band per service, colored like the quota bars, in the order Claude, ChatGPT, Gemini, Fable, Claude / GPT by default or by lowest remaining; a service with several accounts shows their total and expands into one row per account. The bottom part plots the selected row with its resets and ignition results;
 - recent events in columns for time, type, quota group and detail;
 - the settings form, with a test notification button in the notification settings.
 

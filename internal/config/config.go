@@ -132,7 +132,7 @@ func Default() Config {
 			PollSeconds:          300,
 			NotifyCurrentPending: true,
 		},
-		HistoryRetentionDays: 70,
+		HistoryRetentionDays: 40,
 	}
 }
 

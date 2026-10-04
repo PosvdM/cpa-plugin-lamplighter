@@ -326,12 +326,24 @@
         if (foot) block.appendChild(foot);
         card.appendChild(block);
       });
+      var cooldown = parseTime(account.cooldown_until);
+      if (cooldown && account.stale_cooldown) {
+        card.appendChild(el("div", { class: "error-text", text: "额度已恢复，但 CPA 仍冷却到 " + fmtDateTime(cooldown) +
+          "，期间的请求和点火都会被拒绝；在 CPA 管理中心清除这个账号的冷却。" }));
+      } else if (cooldown) {
+        card.appendChild(el("div", { class: "cell-note", text: "CPA 冷却到 " + fmtDateTime(cooldown) + "（" + fmtIn(cooldown) + "）" }));
+      }
       if (account.error) card.appendChild(el("div", { class: "error-text", text: account.error }));
       box.appendChild(card);
     });
   }
 
   function targetStatus(t) {
+    if (t.blocked_window) {
+      var until = parseTime(t.blocked_until);
+      return { kind: "muted", text: windowName({ short: t.blocked_window, label: t.blocked_window }) + "额度已用完",
+        title: until ? fmtDateTime(until) + " 重置后恢复点火" : "额度恢复后恢复点火" };
+    }
     var circuit = parseTime(t.circuit_until);
     if (circuit) return { kind: "failure", text: "暂停至 " + fmtDateTime(circuit), title: t.circuit_reason };
     if (t.consecutive_failures > 0) return { kind: "warning", text: "失败 " + t.consecutive_failures + " 次", title: t.last_error };
@@ -378,6 +390,7 @@
     ignite_manual: ["success", "手动点火"],
     ignite_failed: ["warning", "点火失败"],
     ignite_paused: ["failure", "点火暂停"],
+    cooldown_stale: ["warning", "冷却未解除"],
     notify: ["muted", "已推送"],
     notify_failed: ["warning", "推送失败"],
     codex_reset: ["muted", "重置信号"],
@@ -459,8 +472,8 @@
   // Time ranges follow the quota window: a 5-hour quota is read over hours,
   // a 7-day quota over days. Keys are the history endpoint's range values.
   var RANGES = {
-    "5h": [["1h", "1 小时"], ["3h", "3 小时"], ["6h", "6 小时"], ["12h", "12 小时"], ["24h", "24 小时"]],
-    "7d": [["24h", "1 天"], ["3d", "3 天"], ["8d", "8 天"], ["14d", "14 天"], ["35d", "35 天"]]
+    "5h": [["1h", "1 小时"], ["3h", "3 小时"], ["6h", "6 小时"], ["12h", "12 小时"], ["24h", "24 小时"], ["26h", "26 小时"]],
+    "7d": [["24h", "1 天"], ["4d", "4 天"], ["8d", "8 天"], ["15d", "15 天"], ["1mo", "1 个月"], ["36d", "36 天"]]
   };
   // The default ranges are the shortest that cover one whole window.
   var DEFAULT_RANGE = { "5h": "6h", "7d": "8d" };

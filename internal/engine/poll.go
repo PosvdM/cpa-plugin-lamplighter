@@ -28,6 +28,9 @@ type Cred struct {
 	Email       string `json:"email,omitempty"`
 	Disabled    bool   `json:"disabled"`
 	Unavailable bool   `json:"unavailable"`
+	// CooldownUntil is when CPA lets the credential serve requests again,
+	// or zero when it is not cooling down.
+	CooldownUntil time.Time `json:"cooldown_until,omitempty"`
 	// Suffix tells accounts of the same provider apart, for example "#rk".
 	Suffix string `json:"suffix,omitempty"`
 }
@@ -195,6 +198,9 @@ func (e *Engine) loadCreds(cfg config.Config) ([]*Cred, error) {
 			Email:       credentialEmail(entry),
 			Unavailable: entry.Unavailable,
 		})
+		if entry.Unavailable {
+			creds[len(creds)-1].CooldownUntil = entry.NextRetryAfter
+		}
 		counts[provider]++
 	}
 	ordinals := map[string]int{}
@@ -282,6 +288,7 @@ func (e *Engine) poll(ctx context.Context, cfg config.Config, slot time.Time, on
 	}
 	e.mu.Unlock()
 	e.dirty = true
+	e.checkCooldowns(ctx, cfg)
 }
 
 // refreshCred runs the active query of one credential.
