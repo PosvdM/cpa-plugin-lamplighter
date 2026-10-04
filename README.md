@@ -199,4 +199,4 @@ plugins:
 
 ## 许可证
 
-[GNU Affero General Public License](./LICENSE) 第 3 版或（由你选择）任何更新的版本（`AGPL-3.0-or-later`）。分发修改后的版本，或通过网络向他人提供修改后的版本时，需要按同一许可证公开源代码。
+[AGPL-3.0-or-later](./LICENSE)。分发修改后的版本，或通过网络向他人提供修改后的版本时，需要按同一许可证公开源代码。
