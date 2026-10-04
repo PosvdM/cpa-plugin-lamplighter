@@ -182,6 +182,7 @@ func (a *Alerts) buildChangeMessage(g Group, changes []change, now time.Time) Me
 			Title: fmt.Sprintf("%s %s · %s", prefix, g.Label, strings.Join(parts, " / ")),
 			Body:  a.body(g, now),
 			Level: level,
+			Label: g.Label,
 		}
 	}
 	labels := make([]string, 0, len(recovering))
@@ -192,6 +193,7 @@ func (a *Alerts) buildChangeMessage(g Group, changes []change, now time.Time) Me
 		Title: fmt.Sprintf("✅ %s · %s 已恢复", g.Label, strings.Join(labels, " / ")),
 		Body:  a.body(g, now),
 		Level: LevelActive,
+		Label: g.Label,
 	}
 }
 
@@ -204,6 +206,7 @@ func (a *Alerts) buildReminderMessage(g Group, reminders []reminder, now time.Ti
 		Title: fmt.Sprintf("⏰ %s · %s 重置提醒", g.Label, strings.Join(labels, " / ")),
 		Body:  a.body(g, now),
 		Level: LevelActive,
+		Label: g.Label,
 	}
 }
 
@@ -367,5 +370,6 @@ func CircuitMessage(label string, until time.Time, reason string, loc *time.Loca
 		Body: fmt.Sprintf("连续或高风险错误触发保护，停止自动重试到 %s。\n%s",
 			until.In(loc).Format("01/02 15:04"), truncate(reason, 220)),
 		Level: LevelTimeSensitive,
+		Label: label,
 	}
 }

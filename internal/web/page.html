@@ -59,7 +59,7 @@
       <select id="view-select" aria-label="显示范围"></select>
     </div>
     <div id="chart" class="chart-box"></div>
-    <div id="legend" class="legend"></div>
+    <p id="legend" class="legend"></p>
     <details>
       <summary>数据表</summary>
       <div class="table-wrap">
@@ -73,7 +73,8 @@
 
   <section class="card">
     <h2 class="card-title">事件</h2>
-    <ul id="events" class="events"></ul>
+    <div id="events" class="events" role="table" aria-label="事件"></div>
+    <button id="events-more" class="btn btn-ghost btn-sm events-more" type="button" hidden>显示更多</button>
   </section>
 
   <section class="card">
@@ -81,33 +82,45 @@
     <form id="settings">
       <fieldset>
         <legend>通知</legend>
-        <div class="fields">
-          <label>Bark 推送地址<input name="bark_url" type="text" autocomplete="off" placeholder="https://api.day.app/device_key"></label>
+        <div class="grid-3">
+          <label class="span-2">Bark 推送地址<input name="bark_url" type="text" autocomplete="off" placeholder="https://api.day.app/device_key"></label>
           <label>Bark 分组<input name="bark_group" type="text"></label>
-          <label>第一档阈值（剩余 %）<input name="notice_threshold" type="number" min="0" max="100" step="1"></label>
-          <label>第二档阈值（剩余 %）<input name="low_threshold" type="number" min="0" max="100" step="1"></label>
-          <label>第三档阈值（剩余 %）<input name="critical_threshold" type="number" min="0" max="100" step="1"></label>
-          <label>时区（UTC 偏移小时）<input name="timezone_offset_hours" type="number" min="-12" max="14" step="0.5"></label>
+        </div>
+        <div class="field">
+          <span class="field-label">提醒阈值</span>
+          <div class="thresholds">
+            <label class="inline-input">剩余 ≤<input name="notice_threshold" type="number" min="0" max="100" step="1">%</label>
+            <label class="inline-input">剩余 ≤<input name="low_threshold" type="number" min="0" max="100" step="1">%</label>
+            <label class="inline-input">剩余 ≤<input name="critical_threshold" type="number" min="0" max="100" step="1">%</label>
+            <span class="hint">额度降到每一档时推送一次，耗尽时再推送一次</span>
+          </div>
+        </div>
+        <div class="checks">
           <label class="inline"><input name="notify_recovery" type="checkbox">额度恢复时通知</label>
           <label class="inline"><input name="notify_reset_reminders" type="checkbox">重置前提醒（5 小时窗口前 1 小时，7 天窗口前 1 天）</label>
         </div>
+        <p class="hint" id="timezone-note"></p>
       </fieldset>
       <fieldset>
         <legend>额度查询</legend>
-        <div class="fields">
-          <label>查询间隔（秒）<input name="poll_interval_seconds" type="number" min="60" step="60"></label>
-          <label>被动数据跳过窗口（秒）<input name="passive_skip_seconds" type="number" min="0" step="10"><span class="hint">整点前这么久内有被动数据时跳过主动查询，0 为不跳过</span></label>
-          <label>最多连续跳过（分钟）<input name="passive_skip_max_minutes" type="number" min="0" step="5"></label>
-          <label>请求超时（秒）<input name="request_timeout_seconds" type="number" min="5" max="120"></label>
-          <label>模型列表 API key<input name="models_api_key" type="password" autocomplete="off"><span class="hint">在 CPA 的 access.api-keys 中新建一个专用 key</span></label>
-          <label>CPA 地址<input name="cpa_base_url" type="text"></label>
-          <label>历史保留（天）<input name="history_retention_days" type="number" min="1" max="365"></label>
+        <div class="grid-3">
+          <label class="span-2">模型列表 API key<input name="models_api_key" type="password" autocomplete="off"><span class="hint">在 CPA 的 access.api-keys 中新建一个专用 key，用于读取模型列表、选择点火模型</span></label>
         </div>
+        <div class="grid-3">
+          <label>查询间隔（秒）<input name="poll_interval_seconds" type="number" min="60" step="60"></label>
+          <label>请求超时（秒）<input name="request_timeout_seconds" type="number" min="5" max="120"></label>
+          <label>历史保留（天）<input name="history_retention_days" type="number" min="1" max="365"></label>
+          <label>被动数据跳过窗口（秒）<input name="passive_skip_seconds" type="number" min="0" step="10"></label>
+          <label>最多连续跳过（分钟）<input name="passive_skip_max_minutes" type="number" min="0" step="5"></label>
+        </div>
+        <p class="hint">整点前这段时间内已有被动数据的账号跳过本轮主动查询；设为 0 则每轮都主动查询。</p>
       </fieldset>
       <fieldset>
         <legend>自动点火</legend>
-        <div class="fields">
+        <div class="checks">
           <label class="inline"><input name="ignition.enabled" type="checkbox">启用自动点火</label>
+        </div>
+        <div class="grid-3">
           <label>每日开始（时）<input name="ignition.start_hour" type="number" min="0" max="23"></label>
           <label>每日结束（时）<input name="ignition.end_hour" type="number" min="0" max="23"></label>
           <label>结束后宽限（分钟）<input name="ignition.end_grace_minutes" type="number" min="0"></label>
@@ -118,15 +131,25 @@
       </fieldset>
       <fieldset>
         <legend>服务</legend>
-        <div class="provider"><strong>ChatGPT</strong><label class="inline"><input name="providers.codex.monitor" type="checkbox">监控</label><label class="inline"><input name="providers.codex.ignite" type="checkbox">点火</label><input name="providers.codex.model" type="text" placeholder="点火模型，留空自动选择"></div>
-        <div class="provider"><strong>Claude</strong><label class="inline"><input name="providers.claude.monitor" type="checkbox">监控</label><label class="inline"><input name="providers.claude.ignite" type="checkbox">点火</label><input name="providers.claude.model" type="text" placeholder="点火模型，留空自动选择"></div>
-        <div class="provider"><strong>Antigravity</strong><label class="inline"><input name="providers.antigravity.monitor" type="checkbox">监控</label><label class="inline"><input name="providers.antigravity.ignite" type="checkbox">点火</label><input name="providers.antigravity.groups" type="text" placeholder="点火额度组，逗号分隔，如 Gemini"></div>
+        <table class="services">
+          <thead><tr><th>服务</th><th>监控</th><th>自动点火</th><th>点火模型</th></tr></thead>
+          <tbody>
+            <tr><td class="strong">ChatGPT</td><td><input name="providers.codex.monitor" type="checkbox" aria-label="监控 ChatGPT"></td><td><input name="providers.codex.ignite" type="checkbox" aria-label="点火 ChatGPT"></td><td><input name="providers.codex.model" type="text" placeholder="自动：最新的 Luna"></td></tr>
+            <tr><td class="strong">Claude</td><td><input name="providers.claude.monitor" type="checkbox" aria-label="监控 Claude"></td><td><input name="providers.claude.ignite" type="checkbox" aria-label="点火 Claude"></td><td><input name="providers.claude.model" type="text" placeholder="自动：最新的 Haiku"></td></tr>
+            <tr><td class="strong">Antigravity</td><td><input name="providers.antigravity.monitor" type="checkbox" aria-label="监控 Antigravity"></td><td><input name="providers.antigravity.ignite" type="checkbox" aria-label="点火 Antigravity"></td><td><input name="providers.antigravity.model" type="text" placeholder="自动：按额度组选择"></td></tr>
+            <tr class="sub-row"><td></td><td colspan="3">
+              <span class="field-label">Antigravity 点火额度组</span>
+              <div id="ag-groups" class="checks"></div>
+              <span class="hint">Antigravity 按模型分成多个独立的 5 小时额度组。只有勾选的额度组会自动点火；Claude / GPT 额度组较小，默认不点。</span>
+            </td></tr>
+          </tbody>
+        </table>
       </fieldset>
       <fieldset>
         <legend>Did Codex Reset</legend>
-        <div class="fields">
-          <label class="inline"><input name="codex_reset_updates.enabled" type="checkbox">转发重置信号</label>
-          <label class="inline"><input name="codex_reset_updates.notify_current_pending" type="checkbox">首次开启时通知当前待生效的排期</label>
+        <div class="checks">
+          <label class="inline"><input name="codex_reset_updates.enabled" type="checkbox">转发 Did Codex Reset 发布的 Codex 重置信号</label>
+          <label class="inline"><input name="codex_reset_updates.notify_current_pending" type="checkbox">首次开启时推送当前待生效的排期</label>
         </div>
       </fieldset>
       <div class="form-actions">
