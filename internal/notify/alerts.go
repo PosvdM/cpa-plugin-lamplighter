@@ -29,6 +29,12 @@ var severityRank = map[string]int{
 // by at most this much; providers return slightly different values per call.
 const resetTolerance = 10 * time.Second
 
+// RecoveryJump is the rise, in percentage points since the previous reading,
+// that counts as a recovery when the reset time has not changed. Smaller
+// rises are noise: usage endpoints and response headers can differ by a
+// point. The page uses the same value to find resets in the chart.
+const RecoveryJump = 5
+
 // Group is a quota group as seen by the alert logic.
 type Group struct {
 	Key     string
@@ -246,6 +252,18 @@ func (a *Alerts) detectResetRecovery(old *store.WindowState, w quota.Window, now
 	return ""
 }
 
+// renewed reports whether w really recovered since the previous reading:
+// its reset time moved to a new window, or it rose by RecoveryJump or more.
+// Within a window the notified severity only moves down, so a reading that
+// bounces around a threshold notifies once.
+func renewed(old *store.WindowState, w quota.Window) bool {
+	reset := formatReset(w.Reset)
+	if old.Reset != "" && reset != "" && !SameResetCycle(old.Reset, reset) {
+		return true
+	}
+	return w.Remaining-old.Remaining >= RecoveryJump
+}
+
 func (a *Alerts) send(ctx context.Context, msg Message) bool {
 	if a.Sender == nil {
 		return false
@@ -294,7 +312,7 @@ func (a *Alerts) ProcessGroup(ctx context.Context, st *store.State, g Group, now
 		switch {
 		case severityRank[current] > severityRank[notified]:
 			direction = "down"
-		case severityRank[notified] > severityRank[current]:
+		case severityRank[notified] > severityRank[current] && renewed(old, w):
 			if a.Cfg.NotifyRecovery {
 				direction = "up"
 			} else {

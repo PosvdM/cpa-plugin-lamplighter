@@ -85,7 +85,7 @@
   // adds a dictionary here and a column in internal/notify/text.go.
   var I18N = {
     zh: {
-      app_sub: "点灯人",
+      app_sub: "点灯人", repo_hint: "在 GitHub 上查看",
       key_title: "需要管理密钥",
       key_hint: "在管理中心登录时勾选“记住密码”，此页面会直接使用该密钥；否则请在这里输入，密钥只保存在当前标签页。",
       key_placeholder: "CPA 管理密钥",
@@ -191,7 +191,7 @@
       refreshed_all: "已刷新全部额度", test_sent: "测试通知已发送"
     },
     en: {
-      app_sub: "",
+      app_sub: "", repo_hint: "View on GitHub",
       key_title: "Management key required",
       key_hint: "If you checked \"remember password\" when signing in to the Management Center, this page uses that key. Otherwise enter it here; it is kept in this tab only.",
       key_placeholder: "CPA management key",
@@ -1206,6 +1206,12 @@
         resets.push(pts[i][0]);
       }
       parts[parts.length - 1].push(pts[i]);
+    }
+    // Hold each piece's last value until the reset sample, so the line
+    // reaches the reset instead of stopping a poll interval before it.
+    for (var k = 0; k + 1 < parts.length; k++) {
+      var tail = parts[k][parts[k].length - 1];
+      parts[k].push([parts[k + 1][0][0]].concat(tail.slice(1)));
     }
     return { parts: parts, resets: resets };
   }
