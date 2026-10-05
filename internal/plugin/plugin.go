@@ -147,24 +147,24 @@ func (p *Plugin) registration() registration {
 			Author:           "PosvdM",
 			GitHubRepository: repository,
 			ConfigFields: []pluginapi.ConfigField{
-				field("bark_url", pluginapi.ConfigFieldTypeString, "Bark 推送地址，到 device key 为止；为空时不推送"),
-				field("bark_group", pluginapi.ConfigFieldTypeString, "Bark 通知分组"),
-				field("models_api_key", pluginapi.ConfigFieldTypeString, "读取 /v1/models 用的专用 CPA API key"),
-				field("cpa_base_url", pluginapi.ConfigFieldTypeString, "插件访问 CPA 自身的地址"),
-				field("notice_threshold", pluginapi.ConfigFieldTypeNumber, "第一档提醒阈值（剩余百分比）"),
-				field("low_threshold", pluginapi.ConfigFieldTypeNumber, "第二档提醒阈值（剩余百分比）"),
-				field("critical_threshold", pluginapi.ConfigFieldTypeNumber, "第三档提醒阈值（剩余百分比）"),
-				field("notify_recovery", pluginapi.ConfigFieldTypeBoolean, "额度恢复时是否通知"),
-				field("notify_reset_reminders", pluginapi.ConfigFieldTypeBoolean, "重置前是否提醒"),
-				field("timezone_offset_hours", pluginapi.ConfigFieldTypeNumber, "显示时间和点火时段使用的 UTC 偏移"),
-				field("poll_interval_seconds", pluginapi.ConfigFieldTypeInteger, "主动查询间隔，对齐到整点"),
-				field("passive_skip_seconds", pluginapi.ConfigFieldTypeInteger, "整点前多少秒内有被动数据时跳过主动查询，0 为不跳过"),
-				field("passive_skip_max_minutes", pluginapi.ConfigFieldTypeInteger, "同一账号最多连续跳过多少分钟"),
-				field("ignition", pluginapi.ConfigFieldTypeObject, "点火开关、每日时段和失败保护"),
-				field("providers", pluginapi.ConfigFieldTypeObject, "codex、claude、antigravity 的监控和点火设置"),
-				field("codex_reset_updates", pluginapi.ConfigFieldTypeObject, "转发 Did Codex Reset 的重置信号"),
-				field("history_retention_days", pluginapi.ConfigFieldTypeInteger, "额度历史保留天数"),
-				field("data_dir", pluginapi.ConfigFieldTypeString, "状态和历史目录，默认 plugins/data/lamplighter"),
+				field("bark_url", pluginapi.ConfigFieldTypeString, "Bark 推送地址，到 device key 为止；为空时不推送 / Bark push URL up to the device key; empty turns notifications off"),
+				field("bark_group", pluginapi.ConfigFieldTypeString, "Bark 通知分组 / Bark notification group"),
+				field("models_api_key", pluginapi.ConfigFieldTypeString, "读取 /v1/models 用的专用 CPA API key / Dedicated CPA API key for reading /v1/models"),
+				field("cpa_base_url", pluginapi.ConfigFieldTypeString, "插件访问 CPA 自身的地址 / Address the plugin uses to reach CPA"),
+				field("notice_threshold", pluginapi.ConfigFieldTypeNumber, "第一档提醒阈值（剩余百分比） / First alert threshold (percent remaining)"),
+				field("low_threshold", pluginapi.ConfigFieldTypeNumber, "第二档提醒阈值（剩余百分比） / Second alert threshold (percent remaining)"),
+				field("critical_threshold", pluginapi.ConfigFieldTypeNumber, "第三档提醒阈值（剩余百分比） / Third alert threshold (percent remaining)"),
+				field("notify_recovery", pluginapi.ConfigFieldTypeBoolean, "额度恢复时是否通知 / Notify when quota recovers"),
+				field("notify_reset_reminders", pluginapi.ConfigFieldTypeBoolean, "重置前是否提醒 / Remind before a reset"),
+				field("timezone_offset_hours", pluginapi.ConfigFieldTypeNumber, "显示时间和点火时段使用的 UTC 偏移 / UTC offset for displayed times and ignition hours"),
+				field("poll_interval_seconds", pluginapi.ConfigFieldTypeInteger, "主动查询间隔，对齐到整点 / Active query interval, aligned to the hour"),
+				field("passive_skip_seconds", pluginapi.ConfigFieldTypeInteger, "整点前多少秒内有被动数据时跳过主动查询，0 为不跳过 / Skip the active query when passive data arrived this many seconds before the slot; 0 never skips"),
+				field("passive_skip_max_minutes", pluginapi.ConfigFieldTypeInteger, "同一账号最多连续跳过多少分钟 / Longest run of skipped queries per account, in minutes"),
+				field("ignition", pluginapi.ConfigFieldTypeObject, "点火开关、每日时段和失败保护 / Ignition switch, daily hours and failure protection"),
+				field("providers", pluginapi.ConfigFieldTypeObject, "codex、claude、antigravity 的监控和点火设置 / Monitoring and ignition settings for codex, claude and antigravity"),
+				field("codex_reset_updates", pluginapi.ConfigFieldTypeObject, "转发 Did Codex Reset 的重置信号 / Forward Did Codex Reset signals"),
+				field("history_retention_days", pluginapi.ConfigFieldTypeInteger, "额度历史保留天数 / Days of quota history to keep"),
+				field("data_dir", pluginapi.ConfigFieldTypeString, "状态和历史目录，默认 plugins/data/lamplighter / State and history directory, default plugins/data/lamplighter"),
 			},
 		},
 		Capabilities: map[string]bool{
@@ -194,9 +194,10 @@ func managementRegistration() map[string]any {
 			{Method: http.MethodPost, Path: apiBase + "/refresh", Description: "Query quota now"},
 			{Method: http.MethodPost, Path: apiBase + "/ignite", Description: "Ignite one quota window now"},
 			{Method: http.MethodPost, Path: apiBase + "/test-bark", Description: "Send a Bark test notification"},
+			{Method: http.MethodPost, Path: apiBase + "/language", Description: "Set the notification language"},
 		},
 		"resources": []resource{
-			{Path: pagePath, Menu: "Lamplighter", Description: "额度监控、自动点火和额度图表"},
+			{Path: pagePath, Menu: "Lamplighter", Description: "额度监控、自动点火和额度图表 / Quota monitoring, ignition and quota chart"},
 		},
 	}
 }
@@ -233,6 +234,7 @@ func (p *Plugin) handleManagement(req pluginapi.ManagementRequest) pluginapi.Man
 	var body struct {
 		AuthIndex string `json:"auth_index"`
 		Target    string `json:"target"`
+		Language  string `json:"language"`
 	}
 	if len(req.Body) > 0 {
 		_ = json.Unmarshal(req.Body, &body)
@@ -255,6 +257,8 @@ func (p *Plugin) handleManagement(req pluginapi.ManagementRequest) pluginapi.Man
 		return actionResponse(p.engine.Ignite(strings.TrimSpace(body.Target)), p)
 	case "POST " + apiBase + "/test-bark":
 		return actionResponse(p.engine.TestBark(), p)
+	case "POST " + apiBase + "/language":
+		return actionResponse(p.engine.SetLanguage(body.Language), p)
 	}
 	return errorResponse(http.StatusNotFound, fmt.Errorf("unknown route %s %s", req.Method, req.Path))
 }

@@ -60,7 +60,7 @@ Pushes to `main` only build and upload workflow artifacts (the unpackaged librar
 - When changing quota URLs or headers, compare with `src/utils/quota/constants.ts` of the CPA Management Center and update the table in [Architecture](./architecture_EN.md).
 - When changing polling, the skip rule, ignition timing or failure protection, update the tests, the READMEs and the architecture docs.
 - Every new goroutine in the background loop recovers from panics, and every network request has a timeout.
-- Keep the page in separate HTML, CSS and JS files, and insert text into the DOM with `textContent`. Chart colors only show how much quota is left, using the same three variables as the quota bars.
+- Keep the page in separate HTML, CSS and JS files, and insert text into the DOM with `textContent`. New or changed page text goes into both the Chinese and the English `I18N` entries in `page.js`; new or changed notification text goes into both columns of `internal/notify/text.go`. A new language adds one dictionary in each place. Chart colors only show how much quota is left, using the same three variables as the quota bars.
 - User-visible behavior, settings and limits go into the READMEs (Chinese and English together); implementation details go into `docs/`.
 
 ## Testing against a real CPA

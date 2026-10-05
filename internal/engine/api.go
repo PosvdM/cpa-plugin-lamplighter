@@ -27,25 +27,29 @@ type Event struct {
 	// so the page can show events in columns.
 	Label  string `json:"label,omitempty"`
 	Detail string `json:"detail,omitempty"`
+	// Params holds the values of the event, such as the model or the retry
+	// delay, so the page can write the event in its own language. Message
+	// and Detail stay in Chinese for the CPA log and older events.
+	Params map[string]string `json:"params,omitempty"`
 }
 
 func (e *Engine) addEvent(level, kind, group, message string) {
-	e.addEventDetail(level, kind, group, "", message, message)
+	e.addEventDetail(level, kind, group, "", message, message, nil)
 }
 
 // addEventDetail records an event. message is the full text for the CPA log;
 // label and detail are the quota group and a short description for the page,
 // which shows the event type separately.
-func (e *Engine) addEventDetail(level, kind, group, label, detail, message string) {
+func (e *Engine) addEventDetail(level, kind, group, label, detail, message string, params map[string]string) {
 	now := e.now()
 	e.mu.Lock()
-	e.events = append(e.events, Event{Time: now, Level: level, Kind: kind, Group: group, Message: message, Label: label, Detail: detail})
+	e.events = append(e.events, Event{Time: now, Level: level, Kind: kind, Group: group, Message: message, Label: label, Detail: detail, Params: params})
 	if len(e.events) > maxEvents {
 		e.events = e.events[len(e.events)-maxEvents:]
 	}
 	e.mu.Unlock()
 	if e.history != nil {
-		e.history.Append(store.Record{Kind: "e", Time: now.Unix(), Group: group, Event: kind, Level: level, Message: message, Label: label, Detail: detail})
+		e.history.Append(store.Record{Kind: "e", Time: now.Unix(), Group: group, Event: kind, Level: level, Message: message, Label: label, Detail: detail, Params: params})
 	}
 	e.logf(level, "%s", message)
 }
@@ -69,6 +73,7 @@ func (e *Engine) loadRecentEvents() {
 			Message: record.Message,
 			Label:   record.Label,
 			Detail:  record.Detail,
+			Params:  record.Params,
 		})
 	}
 	if len(events) > maxEvents {
@@ -158,11 +163,22 @@ func (e *Engine) runCommand(ctx context.Context, cmd command) {
 			err = notify.ErrNotConfigured
 			break
 		}
+		lang := e.language()
 		err = e.alerts.Sender.Send(ctx, notify.Message{
-			Title: "🕯️ Lamplighter 测试通知",
-			Body:  "Bark 推送配置正常。",
+			Title: notify.T(lang, "test_title"),
+			Body:  notify.T(lang, "test_body"),
 			Level: notify.LevelActive,
 		})
+	case "language":
+		lang := notify.NormalizeLang(cmd.arg)
+		e.mu.Lock()
+		e.lang = lang
+		e.mu.Unlock()
+		e.state.Language = lang
+		e.dirty = true
+		if e.alerts != nil {
+			e.alerts.Lang = lang
+		}
 	default:
 		err = fmt.Errorf("未知操作：%s", cmd.kind)
 	}
@@ -216,6 +232,8 @@ type Status struct {
 	ModelsError string `json:"models_error,omitempty"`
 	ListError   string `json:"list_error,omitempty"`
 	DataDir     string `json:"data_dir"`
+	// Language is the notification language, "zh" or "en".
+	Language string `json:"language"`
 	// Timezone and UTCOffset describe the effective display time zone.
 	Timezone  string          `json:"timezone"`
 	UTCOffset int             `json:"utc_offset_seconds"`
@@ -248,6 +266,7 @@ func (e *Engine) Status() Status {
 		LockError:   e.lockErr,
 		ModelsError: e.modelsErr,
 		ListError:   e.pollErrs[""],
+		Language:    notify.NormalizeLang(e.lang),
 		DataDir:     e.dataDir,
 		Timezone:    e.cfg.Location().String(),
 		Now:         e.now().UTC(),
@@ -440,7 +459,7 @@ func (e *Engine) History(span time.Duration) (HistoryResponse, error) {
 			if record.Event == "ignite" || record.Event == "ignite_manual" || record.Event == "ignite_failed" || record.Event == "ignite_paused" {
 				resp.Events = append(resp.Events, Event{
 					Time: time.Unix(record.Time, 0).UTC(), Level: record.Level, Kind: record.Event,
-					Group: record.Group, Message: record.Message, Label: record.Label, Detail: record.Detail,
+					Group: record.Group, Message: record.Message, Label: record.Label, Detail: record.Detail, Params: record.Params,
 				})
 			}
 			continue
@@ -484,4 +503,33 @@ func (e *Engine) History(span time.Duration) (HistoryResponse, error) {
 		resp.Series = append(resp.Series, *series[key])
 	}
 	return resp, nil
+}
+
+// notified records a delivered notification. The page shows its title, which
+// is already in the notification language.
+func (e *Engine) notified(group string, msg notify.Message) {
+	e.addEventDetail("info", "notify", group, msg.Label, msg.Title, msg.Title, map[string]string{"title": msg.Title})
+}
+
+// notifyFailed records a notification that Bark did not accept.
+func (e *Engine) notifyFailed(group string, msg notify.Message, err error) {
+	e.addEventDetail("warn", "notify_failed", group, msg.Label, fmt.Sprintf("%s：%v", msg.Title, err),
+		fmt.Sprintf("推送失败 %s：%v", msg.Title, err), map[string]string{"title": msg.Title, "error": err.Error()})
+}
+
+// language returns the notification language.
+func (e *Engine) language() string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return notify.NormalizeLang(e.lang)
+}
+
+// SetLanguage records the Management Center language reported by the page;
+// notifications use it from then on.
+func (e *Engine) SetLanguage(lang string) error { return e.send("language", lang) }
+
+// eventTime formats a time for event params; the page shows it in the
+// plugin's time zone.
+func eventTime(t time.Time) string {
+	return t.UTC().Format(time.RFC3339)
 }

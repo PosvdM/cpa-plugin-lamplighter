@@ -71,11 +71,301 @@
     else document.documentElement.setAttribute("data-theme", theme);
   }
 
-  function watchParentTheme() {
+  function watchParent() {
     var root = parentRoot();
     if (!root || !window.MutationObserver) return;
-    new MutationObserver(function () { applyTheme(); renderChart(); })
-      .observe(root, { attributes: true, attributeFilter: ["data-theme"] });
+    new MutationObserver(function () { applyTheme(); applyLanguage(); renderChart(); })
+      .observe(root, { attributes: true, attributeFilter: ["data-theme", "lang"] });
+  }
+
+  // ---- Language ----
+
+  // Every visible text, per language. Keys are used by data-i18n attributes
+  // in page.html and by translate() below; {0}, {1} are arguments. A new language
+  // adds a dictionary here and a column in internal/notify/text.go.
+  var I18N = {
+    zh: {
+      app_sub: "点灯人",
+      key_title: "需要管理密钥",
+      key_hint: "在管理中心登录时勾选“记住密码”，此页面会直接使用该密钥；否则请在这里输入，密钥只保存在当前标签页。",
+      key_placeholder: "CPA 管理密钥",
+      key_submit: "确定",
+      key_invalid: "管理密钥无效，请重新输入。",
+      refresh_all: "立即刷新全部",
+      quota: "额度",
+      ignition: "自动点火",
+      col_group: "额度组", col_next: "下次点火", col_reset: "当前重置", col_last: "最近成功", col_model: "模型", col_status: "状态",
+      chart_title: "额度变化", chart_window: "额度窗口", chart_range: "时间范围", chart_sort: "排序",
+      quota_5h: "5 小时额度", quota_7d: "7 天额度",
+      sort_default: "默认排序", sort_low: "最低优先",
+      no_data: "无数据",
+      legend_ignited: "● 点火成功，×n 为同一时刻的多个目标",
+      legend_failed: "✕ 含点火失败",
+      legend_reset: "↻ 重置",
+      legend_pooled: "多账号的服务显示合计额度，点击行查看详情，再点一次展开各账号",
+      data_table: "数据表",
+      col_quota: "额度", col_account: "账号", col_latest: "最新", col_min: "最低", col_max: "最高", col_samples: "样本", col_to_reset: "距重置",
+      events: "事件",
+      settings: "设置",
+      notifications: "通知",
+      bark_url: "Bark 推送地址", bark_group: "Bark 分组",
+      test_bark: "测试推送", test_bark_hint: "按已保存的设置发送，修改地址后先保存",
+      thresholds: "提醒阈值", remaining_le: "剩余 ≤",
+      thresholds_hint: "额度降到每一档时推送一次，耗尽时再推送一次",
+      notify_recovery: "额度恢复时通知",
+      notify_reset_reminders: "重置前提醒（5 小时窗口前 1 小时，7 天窗口前 1 天）",
+      quota_queries: "额度查询",
+      models_api_key: "模型列表 API key",
+      models_api_key_hint: "在 CPA 的 access.api-keys 中新建一个专用 key，用于读取模型列表、选择点火模型",
+      poll_interval: "查询间隔（秒）", request_timeout: "请求超时（秒）", history_retention: "历史保留（天）",
+      passive_skip: "被动数据跳过窗口（秒）", passive_skip_max: "最多连续跳过（分钟）",
+      passive_skip_hint: "整点前这段时间内已有被动数据的账号跳过本轮主动查询；设为 0 则每轮都主动查询。",
+      ignition_enabled: "启用自动点火",
+      start_hour: "每日开始（时）", end_hour: "每日结束（时）", end_grace: "结束后宽限（分钟）",
+      grace: "重置后延迟（秒）", failure_retry: "失败重试间隔（秒）", max_transient: "临时错误上限（次）",
+      services: "服务", col_service: "服务", col_monitor: "监控", col_ignition_model: "点火模型",
+      monitor_codex: "监控 ChatGPT", ignite_codex: "点火 ChatGPT",
+      monitor_claude: "监控 Claude", ignite_claude: "点火 Claude",
+      monitor_antigravity: "监控 Antigravity", ignite_antigravity: "点火 Antigravity",
+      model_auto_codex: "自动：最新的 Luna", model_auto_claude: "自动：最新的 Haiku", model_auto_antigravity: "自动：最新的 Flash",
+      ag_groups: "Antigravity 点火额度组",
+      ag_groups_hint: "Antigravity 按模型分成多个独立的 5 小时额度组。只有勾选的额度组会自动点火；Claude / GPT 额度组较小，默认不点。",
+      codex_reset_enabled: "转发 Did Codex Reset 发布的 Codex 重置信号",
+      codex_reset_pending: "首次开启时推送当前待生效的排期",
+      save: "保存", save_hint: "保存后写入 CPA 的 config.yaml，插件自动应用。",
+      language_note: "通知语言跟随最近打开此页面时管理中心的语言，当前为{0}。",
+      lang_zh: "中文", lang_en: "English",
+      due: "已到", minutes: "{0} 分钟", hours_minutes: "{0} 小时 {1} 分", days: "{0} 天",
+      soon: "即将", in_time: "{0}后", just_now: "刚刚", ago: "{0}前",
+      reset_now: "已重置",
+      window_5h: "5 小时", window_7d: "7 天",
+      state_disabled: "已停用", state_starting: "启动中", state_running: "运行中",
+      last_poll: "上次查询 {0}（{1}）", next_poll: "下次 {0}（{1}）",
+      config_error: "配置无法解析，仍在使用上一份配置：{0}",
+      models_error: "模型列表不可用：{0}",
+      no_bark: "未设置 Bark 推送地址，通知不会发送。",
+      no_models_key: "未设置模型列表 API key，自动点火无法选择模型。",
+      remaining_aria: "{0} {1} 剩余",
+      source_passive: "被动", source_active: "主动", updated: "更新于 {0}",
+      no_accounts: "没有可监控的 ChatGPT、Claude 或 Antigravity 凭证。",
+      first_query: "CPA 启动约 20 秒后开始第一次查询。",
+      refresh: "刷新", refreshed: "已刷新 {0}",
+      cooldown_stale: "额度已恢复，但 CPA 仍冷却到 {0}，期间的请求和点火都会被拒绝；在 CPA 管理中心清除这个账号的冷却。",
+      cooldown: "CPA 冷却到 {0}（{1}）",
+      blocked_5h: "5 小时额度已用完", blocked_7d: "7 天额度已用完", blocked_other: "{0}额度已用完",
+      blocked_until: "{0} 重置后恢复点火", blocked_wait: "额度恢复后恢复点火",
+      paused_until: "暂停至 {0}", failures: "失败 {0} 次", rolling: "窗口未开始", normal: "正常",
+      ignition_note: "每天 {0}:00 开始，之后在每次重置后 {1} 秒点火，最晚到 {2}。",
+      ignition_off: "自动点火已关闭。",
+      no_targets: "没有启用点火的额度组。",
+      ignite_now: "立即点火",
+      ignite_confirm: "立即向 {0} 发送一次点火请求？这会开始一个新的 5 小时窗口。",
+      ignited: "{0} 点火成功",
+      ev_ignite: "点火成功", ev_ignite_manual: "手动点火", ev_ignite_failed: "点火失败", ev_ignite_paused: "点火暂停",
+      ev_cooldown_stale: "冷却未解除", ev_notify: "已推送", ev_notify_failed: "推送失败", ev_codex_reset: "重置信号", ev_error: "错误",
+      ev_ignited: "{0} · 下次重置 {1}",
+      ev_retry: "{0}后重试：{1}", ev_retry_cooldown: "CPA 冷却结束，{0}后重试：{1}",
+      ev_seconds: "{0} 秒", ev_minutes: "{0} 分钟",
+      ev_paused: "暂停到 {0}：{1}",
+      ev_notify_failed_detail: "{0}：{1}",
+      ev_cooldown: "额度已恢复，CPA 仍冷却到 {0}",
+      ev_codex_sent: "已发送 {0} 条通知",
+      no_events: "暂无事件", collapse: "收起", show_more: "显示更多（共 {0} 条）",
+      failed: "失败：{0}",
+      range_h: "{0} 小时", range_d: "{0} 天", range_mo: "{0} 个月",
+      overview_aria: "各额度剩余百分比总览",
+      ignition_lane: "点火", lane_ok: "{0} 成功", lane_failed: " · {0} 失败",
+      total: "合计", total_suffix: " 合计", more_accounts: "　… 另 {0} 个账号",
+      pooled_note: "{0} 个账号合计，阴影为账号间的最低到最高",
+      stat_total: "合计", stat_current: "当前", stat_min_account: "单账号最低", stat_min: "最低", stat_to_reset: "距重置",
+      detail_aria: "{0} 剩余百分比",
+      detail_keys: "按左右方向键查看各时刻的数值",
+      passive_sample: "（被动）", active_sample: "（主动）",
+      quota_reset: "额度重置",
+      loading: "加载中…", no_history: "这个范围内还没有额度数据。",
+      history_failed: "读取历史失败：{0}",
+      tz_config: "配置中指定", tz_cpa: "跟随 CPA 服务器",
+      tz_note: "通知和页面中的时间使用 {0}，{1}。",
+      saved: "已保存，插件会在几秒内应用新设置", save_failed: "保存失败：{0}",
+      load_failed: "加载失败：{0}",
+      refreshed_all: "已刷新全部额度", test_sent: "测试通知已发送"
+    },
+    en: {
+      app_sub: "",
+      key_title: "Management key required",
+      key_hint: "If you checked \"remember password\" when signing in to the Management Center, this page uses that key. Otherwise enter it here; it is kept in this tab only.",
+      key_placeholder: "CPA management key",
+      key_submit: "OK",
+      key_invalid: "The management key is not valid. Enter it again.",
+      refresh_all: "Refresh all",
+      quota: "Quota",
+      ignition: "Ignition",
+      col_group: "Quota group", col_next: "Next ignition", col_reset: "Current reset", col_last: "Last success", col_model: "Model", col_status: "Status",
+      chart_title: "Quota history", chart_window: "Quota window", chart_range: "Time range", chart_sort: "Order",
+      quota_5h: "5-hour quota", quota_7d: "7-day quota",
+      sort_default: "Default order", sort_low: "Lowest first",
+      no_data: "No data",
+      legend_ignited: "● ignition succeeded; ×n marks several targets at the same time",
+      legend_failed: "✕ an ignition failed",
+      legend_reset: "↻ reset",
+      legend_pooled: "Services with several accounts show their total; click a row for details, click again to list the accounts",
+      data_table: "Data table",
+      col_quota: "Quota", col_account: "Account", col_latest: "Latest", col_min: "Lowest", col_max: "Highest", col_samples: "Samples", col_to_reset: "Until reset",
+      events: "Events",
+      settings: "Settings",
+      notifications: "Notifications",
+      bark_url: "Bark push URL", bark_group: "Bark group",
+      test_bark: "Send test", test_bark_hint: "Uses the saved settings; save after changing the URL",
+      thresholds: "Alert thresholds", remaining_le: "Remaining ≤",
+      thresholds_hint: "One notification when quota drops to each threshold, and one more when it runs out",
+      notify_recovery: "Notify when quota recovers",
+      notify_reset_reminders: "Remind before resets (1 hour before a 5-hour window, 1 day before a 7-day window)",
+      quota_queries: "Quota queries",
+      models_api_key: "Model list API key",
+      models_api_key_hint: "Create a dedicated key in CPA's access.api-keys; the plugin reads the model list with it to pick ignition models",
+      poll_interval: "Query interval (s)", request_timeout: "Request timeout (s)", history_retention: "History retention (days)",
+      passive_skip: "Passive data window (s)", passive_skip_max: "Longest skip (min)",
+      passive_skip_hint: "Accounts with passive data within this time before a slot skip that active query; 0 queries every time.",
+      ignition_enabled: "Enable ignition",
+      start_hour: "Daily start (hour)", end_hour: "Daily end (hour)", end_grace: "Grace after end (min)",
+      grace: "Delay after reset (s)", failure_retry: "Retry after failure (s)", max_transient: "Transient error limit",
+      services: "Services", col_service: "Service", col_monitor: "Monitor", col_ignition_model: "Ignition model",
+      monitor_codex: "Monitor ChatGPT", ignite_codex: "Ignite ChatGPT",
+      monitor_claude: "Monitor Claude", ignite_claude: "Ignite Claude",
+      monitor_antigravity: "Monitor Antigravity", ignite_antigravity: "Ignite Antigravity",
+      model_auto_codex: "Auto: latest Luna", model_auto_claude: "Auto: latest Haiku", model_auto_antigravity: "Auto: latest Flash",
+      ag_groups: "Antigravity ignition groups",
+      ag_groups_hint: "Antigravity splits quota into separate 5-hour groups by model. Only checked groups are ignited; the Claude / GPT group is small and off by default.",
+      codex_reset_enabled: "Forward Codex reset signals published by Did Codex Reset",
+      codex_reset_pending: "When first turned on, send the pending schedule",
+      save: "Save", save_hint: "Saved to CPA's config.yaml; the plugin applies it automatically.",
+      language_note: "Notifications use the Management Center language from the last time this page was opened, now {0}.",
+      lang_zh: "中文", lang_en: "English",
+      due: "due", minutes: "{0} min", hours_minutes: "{0} h {1} min", days: "{0} days",
+      soon: "soon", in_time: "in {0}", just_now: "just now", ago: "{0} ago",
+      reset_now: "reset",
+      window_5h: "5 hours", window_7d: "7 days",
+      state_disabled: "Disabled", state_starting: "Starting", state_running: "Running",
+      last_poll: "last query {0} ({1})", next_poll: "next {0} ({1})",
+      config_error: "The config cannot be parsed; the previous config stays in use: {0}",
+      models_error: "Model list unavailable: {0}",
+      no_bark: "No Bark push URL is set, so no notifications are sent.",
+      no_models_key: "No model list API key is set, so ignition cannot pick a model.",
+      remaining_aria: "{0} {1} remaining",
+      source_passive: "passive", source_active: "active", updated: "updated {0}",
+      no_accounts: "No ChatGPT, Claude or Antigravity credentials to monitor.",
+      first_query: "The first query runs about 20 seconds after CPA starts.",
+      refresh: "Refresh", refreshed: "Refreshed {0}",
+      cooldown_stale: "Quota is back, but CPA cools this account down until {0} and rejects requests and ignition until then. Clear the cooldown in the CPA Management Center.",
+      cooldown: "CPA cooldown until {0} ({1})",
+      blocked_5h: "5-hour quota used up", blocked_7d: "7-day quota used up", blocked_other: "{0} quota used up",
+      blocked_until: "Ignition resumes after the reset at {0}", blocked_wait: "Ignition resumes when the quota recovers",
+      paused_until: "Paused until {0}", failures: "{0} failures", rolling: "Window not started", normal: "Normal",
+      ignition_note: "Starts at {0}:00 every day, then ignites {1} seconds after each reset, until {2}.",
+      ignition_off: "Ignition is off.",
+      no_targets: "No quota group has ignition enabled.",
+      ignite_now: "Ignite now",
+      ignite_confirm: "Send an ignition request to {0} now? This starts a new 5-hour window.",
+      ignited: "{0} ignited",
+      ev_ignite: "Ignited", ev_ignite_manual: "Manual ignition", ev_ignite_failed: "Ignition failed", ev_ignite_paused: "Ignition paused",
+      ev_cooldown_stale: "Cooldown not cleared", ev_notify: "Notified", ev_notify_failed: "Notification failed", ev_codex_reset: "Reset signal", ev_error: "Error",
+      ev_ignited: "{0} · next reset {1}",
+      ev_retry: "Retrying in {0}: {1}", ev_retry_cooldown: "Retrying when the CPA cooldown ends, in {0}: {1}",
+      ev_seconds: "{0} s", ev_minutes: "{0} min",
+      ev_paused: "Paused until {0}: {1}",
+      ev_notify_failed_detail: "{0}: {1}",
+      ev_cooldown: "Quota is back, but CPA cools down until {0}",
+      ev_codex_sent: "Sent {0} notifications",
+      no_events: "No events yet", collapse: "Show less", show_more: "Show more ({0} in total)",
+      failed: "Failed: {0}",
+      range_h: "{0}h", range_d: "{0}d", range_mo: "{0} month",
+      overview_aria: "Remaining quota overview",
+      ignition_lane: "Ignition", lane_ok: "{0} succeeded", lane_failed: " · {0} failed",
+      total: "Total", total_suffix: " total", more_accounts: "　… {0} more accounts",
+      pooled_note: "Total of {0} accounts; the shade spans the lowest to the highest account",
+      stat_total: "Total", stat_current: "Now", stat_min_account: "Lowest account", stat_min: "Lowest", stat_to_reset: "Until reset",
+      detail_aria: "{0} remaining percent",
+      detail_keys: "Use the left and right arrow keys to step through the values",
+      passive_sample: " (passive)", active_sample: " (active)",
+      quota_reset: "quota reset",
+      loading: "Loading…", no_history: "No quota data in this range yet.",
+      history_failed: "Could not read the history: {0}",
+      tz_config: "set in the config", tz_cpa: "following the CPA server",
+      tz_note: "Notifications and this page show times in {0}, {1}.",
+      saved: "Saved; the plugin applies the new settings within a few seconds", save_failed: "Could not save: {0}",
+      load_failed: "Could not load: {0}",
+      refreshed_all: "Refreshed all quota", test_sent: "Test notification sent"
+    }
+  };
+
+  var lang = "zh";
+
+  function translate(key) {
+    var text = (I18N[lang] && I18N[lang][key] !== undefined) ? I18N[lang][key] : (I18N.zh[key] !== undefined ? I18N.zh[key] : key);
+    for (var i = 1; i < arguments.length; i++) text = text.split("{" + (i - 1) + "}").join(String(arguments[i]));
+    return text;
+  }
+
+  // The language follows the Management Center: the lang attribute of the
+  // parent page, which it updates on every switch, or the language it stored
+  // when the page is opened on its own. Chinese variants show Chinese and
+  // every other language English.
+  function centerLanguage() {
+    var root = parentRoot();
+    var value = root ? root.getAttribute("lang") || "" : "";
+    if (!value) {
+      try {
+        var raw = localStorage.getItem("cli-proxy-language") || "";
+        try {
+          var parsed = JSON.parse(raw);
+          value = (parsed && parsed.state && parsed.state.language) || (parsed && parsed.language) || (typeof parsed === "string" ? parsed : "");
+        } catch (e) { value = raw; }
+      } catch (e) { /* no storage */ }
+    }
+    if (!value) value = navigator.language || "";
+    return /^zh/i.test(value) ? "zh" : "en";
+  }
+
+  function applyStaticText() {
+    document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
+    [["data-i18n", null], ["data-i18n-placeholder", "placeholder"], ["data-i18n-title", "title"], ["data-i18n-aria-label", "aria-label"]].forEach(function (pair) {
+      Array.prototype.forEach.call(document.querySelectorAll("[" + pair[0] + "]"), function (node) {
+        var text = translate(node.getAttribute(pair[0]));
+        if (pair[1]) node.setAttribute(pair[1], text);
+        else node.textContent = text;
+      });
+    });
+  }
+
+  var languageApplied = false;
+  function applyLanguage() {
+    var next = centerLanguage();
+    if (languageApplied && next === lang) return;
+    lang = next;
+    languageApplied = true;
+    applyStaticText();
+    renderRangeButtons();
+    if (status) {
+      renderStatus();
+      $("timezone-note").textContent = timezoneText();
+      reportLanguage();
+    }
+    if (status && history) renderChart();
+  }
+
+  // Notifications are sent without a page open, so the page tells the
+  // plugin which language to use; it keeps the last one reported.
+  var reportingLanguage = false;
+  function reportLanguage() {
+    if (!status || status.language === lang || reportingLanguage) return;
+    reportingLanguage = true;
+    api("POST", API + "/language", { language: lang }).then(function (data) {
+      if (data.status) { status = data.status; renderLanguageNote(); }
+    }).catch(function () { /* retried on the next status refresh */ }).then(function () { reportingLanguage = false; });
+  }
+
+  function renderLanguageNote() {
+    $("language-note").textContent = translate("language_note", translate("lang_" + (status.language || "zh")));
   }
 
   // The Management Center keeps the key in localStorage, XOR-obfuscated with
@@ -109,7 +399,7 @@
     return fetch(path, opts).then(function (res) {
       return res.json().catch(function () { return {}; }).then(function (data) {
         if (res.status === 401) {
-          askForKey("管理密钥无效，请重新输入。");
+          askForKey(translate("key_invalid"));
           throw new Error("unauthorized");
         }
         if (!res.ok) throw new Error(data.error || data.message || ("HTTP " + res.status));
@@ -170,26 +460,26 @@
   }
 
   function fmtDuration(ms) {
-    if (ms <= 0) return "已到";
+    if (ms <= 0) return translate("due");
     var minutes = Math.round(ms / 60000);
-    if (minutes < 60) return minutes + " 分钟";
+    if (minutes < 60) return translate("minutes", minutes);
     var hours = Math.floor(minutes / 60);
-    if (hours < 48) return hours + " 小时 " + (minutes % 60) + " 分";
-    return Math.round(hours / 24) + " 天";
+    if (hours < 48) return translate("hours_minutes", hours, minutes % 60);
+    return translate("days", Math.round(hours / 24));
   }
 
   function fmtIn(t) {
     if (!t) return "";
     var ms = t.getTime() - Date.now();
-    if (ms < 60000) return "即将";
-    return fmtDuration(ms) + "后";
+    if (ms < 60000) return translate("soon");
+    return translate("in_time", fmtDuration(ms));
   }
 
   function fmtAgo(t) {
     if (!t) return "";
     var ms = Date.now() - t.getTime();
-    if (ms < 60000) return "刚刚";
-    return fmtDuration(ms) + "前";
+    if (ms < 60000) return translate("just_now");
+    return translate("ago", fmtDuration(ms));
   }
 
   // Bars and the chart color quota by the first two notification
@@ -210,7 +500,7 @@
   function meterClass(remaining) { return "fill-" + quotaLevel(remaining); }
 
   function fmtCountdown(ms) {
-    if (ms <= 0) return "已重置";
+    if (ms <= 0) return translate("reset_now");
     var minutes = Math.round(ms / 60000);
     if (minutes < 60) return minutes + "m";
     var hours = Math.floor(minutes / 60);
@@ -219,8 +509,8 @@
   }
 
   function windowName(w) {
-    if (w.short === "5h") return "5 小时";
-    if (w.short === "7d") return "7 天";
+    if (w.short === "5h") return translate("window_5h");
+    if (w.short === "7d") return translate("window_7d");
     return w.label;
   }
 
@@ -237,13 +527,13 @@
   function renderHeader() {
     var state = $("state");
     clear(state);
-    if (!status.enabled) state.appendChild(badge("muted", "已停用"));
-    else if (!status.running) state.appendChild(badge("warning", "启动中"));
-    else state.appendChild(badge("success", "运行中"));
+    if (!status.enabled) state.appendChild(badge("muted", translate("state_disabled")));
+    else if (!status.running) state.appendChild(badge("warning", translate("state_starting")));
+    else state.appendChild(badge("success", translate("state_running")));
     var parts = ["v" + status.version];
     var last = parseTime(status.last_poll), next = parseTime(status.next_poll);
-    if (last) parts.push("上次查询 " + fmtClock(last) + "（" + fmtAgo(last) + "）");
-    if (next) parts.push("下次 " + fmtClock(next) + "（" + fmtIn(next) + "）");
+    if (last) parts.push(translate("last_poll", fmtClock(last), fmtAgo(last)));
+    if (next) parts.push(translate("next_poll", fmtClock(next), fmtIn(next)));
     $("meta").textContent = parts.join(" · ");
   }
 
@@ -254,13 +544,13 @@
   function renderNotices() {
     var box = $("notices");
     clear(box);
-    if (status.config_error) box.appendChild(notice("配置无法解析，仍在使用上一份配置：" + status.config_error));
+    if (status.config_error) box.appendChild(notice(translate("config_error", status.config_error)));
     if (status.lock_error) box.appendChild(notice(status.lock_error));
     if (status.list_error) box.appendChild(notice(status.list_error));
-    if (status.models_error) box.appendChild(notice("模型列表不可用：" + status.models_error));
-    if (status.config && !status.config.bark_url) box.appendChild(notice("未设置 Bark 推送地址，通知不会发送。"));
+    if (status.models_error) box.appendChild(notice(translate("models_error", status.models_error)));
+    if (status.config && !status.config.bark_url) box.appendChild(notice(translate("no_bark")));
     if (status.config && status.config.ignition && status.config.ignition.enabled && !status.config.models_api_key) {
-      box.appendChild(notice("未设置模型列表 API key，自动点火无法选择模型。"));
+      box.appendChild(notice(translate("no_models_key")));
     }
   }
 
@@ -279,7 +569,7 @@
         el("span", { class: "quota-meta" }, meta)
       ]),
       el("div", { class: "quota-bar", role: "meter", "aria-valuemin": "0", "aria-valuemax": "100",
-        "aria-valuenow": String(Math.round(remaining)), "aria-label": group.label + " " + windowName(w) + " 剩余" }, [
+        "aria-valuenow": String(Math.round(remaining)), "aria-label": translate("remaining_aria", group.label, windowName(w)) }, [
         el("span", { class: "quota-fill " + meterClass(remaining), style: "width:" + remaining + "%;--meter-index:" + index })
       ])
     ]);
@@ -293,8 +583,8 @@
     });
     if (!latest) return null;
     return el("div", { class: "group-foot" }, [
-      el("span", { class: "source source-" + source, text: source === "passive" ? "被动" : "主动" }),
-      el("span", { text: "更新于 " + fmtAgo(latest) })
+      el("span", { class: "source source-" + source, text: source === "passive" ? translate("source_passive") : translate("source_active") }),
+      el("span", { text: translate("updated", fmtAgo(latest)) })
     ]);
   }
 
@@ -302,14 +592,14 @@
     var box = $("accounts");
     clear(box);
     if (!status.accounts.length) {
-      box.appendChild(el("p", { class: "empty", text: status.running ? "没有可监控的 ChatGPT、Claude 或 Antigravity 凭证。" : "CPA 启动约 20 秒后开始第一次查询。" }));
+      box.appendChild(el("p", { class: "empty", text: status.running ? translate("no_accounts") : translate("first_query") }));
       return;
     }
     var meterIndex = 0;
     status.accounts.forEach(function (account) {
       var card = el("div", { class: "card account" });
-      var refresh = el("button", { type: "button", class: "btn btn-ghost btn-sm", text: "刷新", onclick: function () {
-        runAction(refresh, API + "/refresh", { auth_index: account.auth_index }, "已刷新 " + account.title);
+      var refresh = el("button", { type: "button", class: "btn btn-ghost btn-sm", text: translate("refresh"), onclick: function () {
+        runAction(refresh, API + "/refresh", { auth_index: account.auth_index }, translate("refreshed", account.title));
       } });
       card.appendChild(el("div", { class: "account-head" }, [
         el("span", { class: "type-badge type-" + account.provider, text: account.title }),
@@ -328,10 +618,9 @@
       });
       var cooldown = parseTime(account.cooldown_until);
       if (cooldown && account.stale_cooldown) {
-        card.appendChild(el("div", { class: "error-text", text: "额度已恢复，但 CPA 仍冷却到 " + fmtDateTime(cooldown) +
-          "，期间的请求和点火都会被拒绝；在 CPA 管理中心清除这个账号的冷却。" }));
+        card.appendChild(el("div", { class: "error-text", text: translate("cooldown_stale", fmtDateTime(cooldown)) }));
       } else if (cooldown) {
-        card.appendChild(el("div", { class: "cell-note", text: "CPA 冷却到 " + fmtDateTime(cooldown) + "（" + fmtIn(cooldown) + "）" }));
+        card.appendChild(el("div", { class: "cell-note", text: translate("cooldown", fmtDateTime(cooldown), fmtIn(cooldown)) }));
       }
       if (account.error) card.appendChild(el("div", { class: "error-text", text: account.error }));
       box.appendChild(card);
@@ -339,16 +628,17 @@
   }
 
   function targetStatus(t) {
+    var tr = translate;
     if (t.blocked_window) {
       var until = parseTime(t.blocked_until);
-      return { kind: "muted", text: windowName({ short: t.blocked_window, label: t.blocked_window }) + "额度已用完",
-        title: until ? fmtDateTime(until) + " 重置后恢复点火" : "额度恢复后恢复点火" };
+      var blocked = t.blocked_window === "5h" || t.blocked_window === "7d" ? tr("blocked_" + t.blocked_window) : tr("blocked_other", t.blocked_window);
+      return { kind: "muted", text: blocked, title: until ? tr("blocked_until", fmtDateTime(until)) : tr("blocked_wait") };
     }
     var circuit = parseTime(t.circuit_until);
-    if (circuit) return { kind: "failure", text: "暂停至 " + fmtDateTime(circuit), title: t.circuit_reason };
-    if (t.consecutive_failures > 0) return { kind: "warning", text: "失败 " + t.consecutive_failures + " 次", title: t.last_error };
-    if (t.rolling) return { kind: "muted", text: "窗口未开始" };
-    return { kind: "success", text: "正常" };
+    if (circuit) return { kind: "failure", text: tr("paused_until", fmtDateTime(circuit)), title: t.circuit_reason };
+    if (t.consecutive_failures > 0) return { kind: "warning", text: tr("failures", t.consecutive_failures), title: t.last_error };
+    if (t.rolling) return { kind: "muted", text: tr("rolling") };
+    return { kind: "success", text: tr("normal") };
   }
 
   function renderTargets() {
@@ -357,18 +647,17 @@
     var ignition = (status.config && status.config.ignition) || {};
     var endMinutes = (ignition.end_hour || 0) * 60 + (ignition.end_grace_minutes || 0);
     $("ignition-note").textContent = ignition.enabled
-      ? "每天 " + pad(ignition.start_hour) + ":00 开始，之后在每次重置后 " + ignition.grace_seconds + " 秒点火，最晚到 " +
-        pad(Math.floor(endMinutes / 60) % 24) + ":" + pad(endMinutes % 60) + "。"
-      : "自动点火已关闭。";
+      ? translate("ignition_note", pad(ignition.start_hour), ignition.grace_seconds, pad(Math.floor(endMinutes / 60) % 24) + ":" + pad(endMinutes % 60))
+      : translate("ignition_off");
     if (!status.targets.length) {
-      body.appendChild(el("tr", {}, [el("td", { colspan: "7", class: "empty", text: "没有启用点火的额度组。" })]));
+      body.appendChild(el("tr", {}, [el("td", { colspan: "7", class: "empty", text: translate("no_targets") })]));
       return;
     }
     status.targets.forEach(function (t) {
       var st = targetStatus(t);
-      var button = el("button", { type: "button", class: "btn btn-secondary btn-sm", text: "立即点火", onclick: function () {
-        if (!confirm("立即向 " + t.label + " 发送一次点火请求？这会开始一个新的 5 小时窗口。")) return;
-        runAction(button, API + "/ignite", { target: t.key }, t.label + " 点火成功");
+      var button = el("button", { type: "button", class: "btn btn-secondary btn-sm", text: translate("ignite_now"), onclick: function () {
+        if (!confirm(translate("ignite_confirm", t.label))) return;
+        runAction(button, API + "/ignite", { target: t.key }, translate("ignited", t.label));
       } });
       var next = parseTime(t.next_due), reset = parseTime(t.reset), last = parseTime(t.last_success);
       var statusCell = el("td", {}, [badge(st.kind, st.text)]);
@@ -385,16 +674,10 @@
     });
   }
 
+  // Badge style per event type; the label is ev_<kind> in the dictionary.
   var EVENT_TYPES = {
-    ignite: ["success", "点火成功"],
-    ignite_manual: ["success", "手动点火"],
-    ignite_failed: ["warning", "点火失败"],
-    ignite_paused: ["failure", "点火暂停"],
-    cooldown_stale: ["warning", "冷却未解除"],
-    notify: ["muted", "已推送"],
-    notify_failed: ["warning", "推送失败"],
-    codex_reset: ["muted", "重置信号"],
-    error: ["failure", "错误"]
+    ignite: "success", ignite_manual: "success", ignite_failed: "warning", ignite_paused: "failure",
+    cooldown_stale: "warning", notify: "muted", notify_failed: "warning", codex_reset: "muted", error: "failure"
   };
   var EVENTS_COLLAPSED = 12;
   var eventsExpanded = false;
@@ -407,10 +690,34 @@
     return label;
   }
 
+  function retryText(seconds) {
+    return seconds < 60 ? translate("ev_seconds", seconds) : translate("ev_minutes", Math.round(seconds / 60));
+  }
+
+  // The event text in the page language, built from the event params.
+  // Events written before params existed keep their stored Chinese text.
+  function eventDetail(ev) {
+    var p = ev.params;
+    if (!p) return null;
+    var time = function (value) { return fmtDateTime(parseTime(value)); };
+    switch (ev.kind) {
+      case "ignite": case "ignite_manual": return p.reset ? translate("ev_ignited", p.model, time(p.reset)) : p.model;
+      case "ignite_failed": return translate(p.cooldown ? "ev_retry_cooldown" : "ev_retry", retryText(Number(p.retry_seconds) || 0), p.error);
+      case "ignite_paused": return translate("ev_paused", time(p.until), p.error);
+      case "notify": return p.title;
+      case "notify_failed": return translate("ev_notify_failed_detail", p.title, p.error);
+      case "cooldown_stale": return translate("ev_cooldown", time(p.until));
+      case "codex_reset": return translate("ev_codex_sent", p.count);
+    }
+    return null;
+  }
+
   // Events written before label and detail existed only have a message that
   // starts with the group label.
   function eventParts(ev) {
     var label = ev.label || (ev.group ? groupLabel(ev.group) : "");
+    var translated = eventDetail(ev);
+    if (translated !== null) return { label: label || "—", detail: translated };
     var detail = ev.detail || ev.message || "";
     if (!ev.detail && label && detail.indexOf(label + " ") === 0) detail = detail.slice(label.length + 1);
     if (!ev.detail) detail = detail.replace(/^点火成功（(.+?)），下次重置 /, "$1 · 下次重置 ");
@@ -422,13 +729,14 @@
     clear(list);
     var more = $("events-more");
     if (!status.events.length) {
-      list.appendChild(el("p", { class: "empty", text: "暂无事件" }));
+      list.appendChild(el("p", { class: "empty", text: translate("no_events") }));
       more.hidden = true;
       return;
     }
     var events = eventsExpanded ? status.events.slice(0, 100) : status.events.slice(0, EVENTS_COLLAPSED);
     events.forEach(function (ev) {
-      var type = EVENT_TYPES[ev.kind] || [ev.level === "error" ? "failure" : ev.level === "warn" ? "warning" : "muted", ev.kind];
+      var known = EVENT_TYPES[ev.kind];
+      var type = [known || (ev.level === "error" ? "failure" : ev.level === "warn" ? "warning" : "muted"), known ? translate("ev_" + ev.kind) : ev.kind];
       var parts = eventParts(ev);
       list.appendChild(el("div", { class: "event-row", role: "row" }, [
         el("span", { class: "event-time", role: "cell", text: fmtDateTime(parseTime(ev.time)) }),
@@ -438,7 +746,7 @@
       ]));
     });
     more.hidden = status.events.length <= EVENTS_COLLAPSED;
-    more.textContent = eventsExpanded ? "收起" : "显示更多（共 " + Math.min(status.events.length, 100) + " 条）";
+    more.textContent = eventsExpanded ? translate("collapse") : translate("show_more", Math.min(status.events.length, 100));
   }
 
   function renderStatus() {
@@ -447,12 +755,14 @@
     renderAccounts();
     renderTargets();
     renderEvents();
+    renderLanguageNote();
   }
 
   function loadStatus() {
     return api("GET", API + "/status").then(function (data) {
       status = data;
       renderStatus();
+      reportLanguage();
     });
   }
 
@@ -460,10 +770,10 @@
     button.disabled = true;
     return api("POST", path, body).then(function (data) {
       if (data.status) { status = data.status; renderStatus(); }
-      toast(data.ok ? success : ("失败：" + data.error));
+      toast(data.ok ? success : translate("failed", data.error));
       loadHistory();
     }).catch(function (err) {
-      if (err.message !== "unauthorized") toast("失败：" + err.message);
+      if (err.message !== "unauthorized") toast(translate("failed", err.message));
     }).then(function () { button.disabled = false; });
   }
 
@@ -474,9 +784,10 @@
   // a window plus one (6h, 8d); half a day or month, which fits two whole
   // windows (12h, 15d); a day or a month; five windows plus one (26h, 36d).
   // Keys are the history endpoint's range values.
+  // Each entry is the range value, the count and the unit of its label.
   var RANGES = {
-    "5h": [["1h", "1 小时"], ["3h", "3 小时"], ["6h", "6 小时"], ["12h", "12 小时"], ["24h", "24 小时"], ["26h", "26 小时"]],
-    "7d": [["24h", "1 天"], ["4d", "4 天"], ["8d", "8 天"], ["15d", "15 天"], ["1mo", "1 个月"], ["36d", "36 天"]]
+    "5h": [["1h", 1, "h"], ["3h", 3, "h"], ["6h", 6, "h"], ["12h", 12, "h"], ["24h", 24, "h"], ["26h", 26, "h"]],
+    "7d": [["24h", 1, "d"], ["4d", 4, "d"], ["8d", 8, "d"], ["15d", 15, "d"], ["1mo", 1, "mo"], ["36d", 36, "d"]]
   };
   // The default ranges are the shortest that cover one whole window.
   var DEFAULT_RANGE = { "5h": "6h", "7d": "8d" };
@@ -682,7 +993,9 @@
   function ignitionEvents() {
     var from = new Date(history.from).getTime() / 1000;
     return (history.events || []).map(function (ev) {
-      return { t: new Date(ev.time).getTime() / 1000, failed: ev.kind === "ignite_failed" || ev.kind === "ignite_paused", message: ev.message, group: ev.group };
+      var parts = eventParts(ev);
+      return { t: new Date(ev.time).getTime() / 1000, failed: ev.kind === "ignite_failed" || ev.kind === "ignite_paused",
+        message: (parts.label !== "—" ? parts.label + " " : "") + parts.detail, group: ev.group };
     }).filter(function (ev) { return ev.t >= from; });
   }
 
@@ -697,7 +1010,7 @@
     tip.appendChild(el("div", { class: "row" + (strong ? " strong" : "") }, [
       el("span", { class: "key", style: "background:" + (value != null ? cssVar(levelVar(value)) : "transparent") }),
       el("span", { class: "name", text: text }),
-      el("span", { class: "value", text: value != null ? pct(value) : "无数据" })
+      el("span", { class: "value", text: value != null ? pct(value) : translate("no_data") })
     ]));
   }
 
@@ -712,7 +1025,7 @@
       if (r.children && chartExpanded[r.id]) r.children.forEach(function (c) { flat.push({ row: c, depth: 1 }); });
     });
     var height = AXIS_H + flat.length * (LANE + LANE_GAP) + EVENT_H + 6;
-    var root = svg("svg", { viewBox: "0 0 " + g.width + " " + height, role: "img", "aria-label": "各额度剩余百分比总览" });
+    var root = svg("svg", { viewBox: "0 0 " + g.width + " " + height, role: "img", "aria-label": translate("overview_aria") });
     hatchPattern(root);
     var ticks = chartTicks(g);
     ticks.list.forEach(function (t) {
@@ -753,7 +1066,7 @@
 
     // Ignitions at the same moment merge into one mark with a count.
     var ey = AXIS_H + flat.length * (LANE + LANE_GAP) + 4, cy = ey + 9;
-    root.appendChild(svgText({ x: 4, y: ey + 13, "font-size": 12, fill: cssVar("--text-tertiary"), "class": "row-name" }, "点火"));
+    root.appendChild(svgText({ x: 4, y: ey + 13, "font-size": 12, fill: cssVar("--text-tertiary"), "class": "row-name" }, translate("ignition_lane")));
     root.appendChild(svg("line", { x1: g.labelW, x2: g.labelW + g.plotW, y1: cy, y2: cy, stroke: cssVar("--border-color") }));
     var events = ignitionEvents(), clusters = [];
     events.slice().sort(function (a, b) { return a.t - b.t; }).forEach(function (ev) {
@@ -770,7 +1083,7 @@
     });
     var failed = events.filter(function (ev) { return ev.failed; }).length;
     root.appendChild(svgText({ x: g.width - 2, y: ey + 13, "font-size": 11, "text-anchor": "end", fill: cssVar(failed ? "--viz-failure" : "--text-tertiary") },
-      (events.length - failed) + " 成功" + (failed ? " · " + failed + " 失败" : "")));
+      translate("lane_ok", events.length - failed) + (failed ? translate("lane_failed", failed) : "")));
     var eventHit = svg("rect", { x: g.labelW, y: ey - 2, width: g.plotW, height: 22, fill: "transparent" });
     eventHit.addEventListener("pointermove", function (e) { hoverAt(e, root, null, "overview"); });
     root.appendChild(eventHit);
@@ -795,10 +1108,10 @@
       flat.forEach(function (f) {
         var r = f.row;
         if (f.depth) { tipRow(tip, "　" + r.sub, at(r), r.id === rowId); return; }
-        tipRow(tip, r.name + (r.children ? " 合计" : ""), at(r), r.id === rowId);
+        tipRow(tip, r.name + (r.children ? translate("total_suffix") : ""), at(r), r.id === rowId);
         if (r.children && !chartExpanded[r.id]) {
           r.children.slice(0, 5).forEach(function (c) { tipRow(tip, "　" + c.sub, at(c), false); });
-          if (r.children.length > 5) tip.appendChild(el("div", { class: "row muted", text: "　… 另 " + (r.children.length - 5) + " 个账号" }));
+          if (r.children.length > 5) tip.appendChild(el("div", { class: "row muted", text: translate("more_accounts", r.children.length - 5) }));
         }
       });
       var near = (g.to - g.from) / g.plotW * 8;
@@ -895,16 +1208,16 @@
     var g = chartView, limit = gapLimit();
     var group = !!row.children;
     var lowest = Math.min.apply(null, row.points.map(function (p) { return group ? p[3] : p[1]; }));
-    head.appendChild(el("span", { class: "detail-name", text: row.name + " · " + (chartWindow === "5h" ? "5 小时额度" : "7 天额度") }));
-    head.appendChild(el("span", { class: "muted", text: group ? row.children.length + " 个账号合计，阴影为账号间的最低到最高" : row.sub }));
-    [[group ? "合计" : "当前", pct(row.last)], [group ? "单账号最低" : "最低", pct(lowest)],
-      ["距重置", row.reset ? fmtCountdown(row.reset * 1000 - Date.now()) : "—"]].forEach(function (stat) {
+    head.appendChild(el("span", { class: "detail-name", text: row.name + " · " + translate(chartWindow === "5h" ? "quota_5h" : "quota_7d") }));
+    head.appendChild(el("span", { class: "muted", text: group ? translate("pooled_note", row.children.length) : row.sub }));
+    [[translate(group ? "stat_total" : "stat_current"), pct(row.last)], [translate(group ? "stat_min_account" : "stat_min"), pct(lowest)],
+      [translate("stat_to_reset"), row.reset ? fmtCountdown(row.reset * 1000 - Date.now()) : "—"]].forEach(function (stat) {
       head.appendChild(el("span", { class: "detail-stat" }, [document.createTextNode(stat[0]), el("strong", { text: stat[1] })]));
     });
 
     var H = 206, top = 22, bottom = 24, plotH = H - top - bottom;
     function y(v) { return top + (1 - v / 100) * plotH; }
-    var root = svg("svg", { viewBox: "0 0 " + g.width + " " + H, role: "img", "aria-label": row.name + " 剩余百分比" });
+    var root = svg("svg", { viewBox: "0 0 " + g.width + " " + H, role: "img", "aria-label": translate("detail_aria", row.name) });
     var defs = hatchPattern(root);
     var fade = svg("linearGradient", { id: "chart-fade", x1: 0, x2: 0, y1: 0, y2: 1 });
     fade.appendChild(svg("stop", { offset: "0%", "stop-color": cssVar("--text-secondary"), "stop-opacity": 0.18 }));
@@ -933,7 +1246,7 @@
     if (cursor < g.to - limit) root.appendChild(svg("rect", { x: g.x(cursor), y: top, width: g.x(g.to) - g.x(cursor), height: plotH, fill: "url(#chart-hatch)" }));
     if (stretches.length && stretches[0].start > g.from + limit) {
       root.appendChild(svgText({ x: (g.x(g.from) + g.x(stretches[0].start)) / 2, y: top + plotH / 2 + 4, "text-anchor": "middle", "font-size": 12,
-        fill: cssVar("--text-tertiary"), "class": "row-name" }, "无数据"));
+        fill: cssVar("--text-tertiary"), "class": "row-name" }, translate("no_data")));
     }
 
     var resets = [];
@@ -989,7 +1302,7 @@
     var dot = svg("circle", { r: 4, fill: cssVar("--text-primary"), stroke: cssVar("--bg-primary"), "stroke-width": 2, visibility: "hidden", "pointer-events": "none" });
     root.appendChild(dot);
     var hit = svg("rect", { x: g.labelW, y: top, width: g.plotW, height: plotH, fill: "transparent", tabindex: "0",
-      "aria-label": "按左右方向键查看各时刻的数值" });
+      "aria-label": translate("detail_keys") });
     hit.addEventListener("pointermove", function (e) { hoverAt(e, root, row.id, "detail"); });
     root.appendChild(hit);
     root.addEventListener("pointerleave", function () { setHover(null); });
@@ -1023,17 +1336,17 @@
       clear(tip);
       tip.appendChild(el("div", { class: "time", text: fmtDateTime(unixDate(t)) }));
       if (group) {
-        tipRow(tip, "合计", p ? p[1] : null, true);
+        tipRow(tip, translate("total"), p ? p[1] : null, true);
         row.children.slice(0, 6).forEach(function (c) {
           var q = valueAt(c.points, t);
           tipRow(tip, "　" + c.sub, q && t - q[0] <= limit ? q[1] : null, false);
         });
-        if (row.children.length > 6) tip.appendChild(el("div", { class: "row muted", text: "　… 另 " + (row.children.length - 6) + " 个账号" }));
+        if (row.children.length > 6) tip.appendChild(el("div", { class: "row muted", text: translate("more_accounts", row.children.length - 6) }));
       } else {
-        tipRow(tip, row.name + (p ? (p[2] === 1 ? "（被动）" : "（主动）") : ""), p ? p[1] : null, true);
+        tipRow(tip, row.name + (p ? translate(p[2] === 1 ? "passive_sample" : "active_sample") : ""), p ? p[1] : null, true);
       }
       var near = (g.to - g.from) / g.plotW * 8;
-      resets.forEach(function (r) { if (Math.abs(r - t) <= near) tip.appendChild(el("div", { class: "note", text: fmtClock(unixDate(r)) + " 额度重置" })); });
+      resets.forEach(function (r) { if (Math.abs(r - t) <= near) tip.appendChild(el("div", { class: "note", text: fmtClock(unixDate(r)) + " " + translate("quota_reset") })); });
       tip.hidden = false;
       placeTip(tip, box, g, t, 6);
     });
@@ -1078,12 +1391,12 @@
     hoverListeners = [];
     head.hidden = true;
     if (!history || !status) {
-      overview.appendChild(el("div", { class: "empty", text: "加载中…" }));
+      overview.appendChild(el("div", { class: "empty", text: translate("loading") }));
       return;
     }
     var rows = chartRows();
     if (!rows.length) {
-      overview.appendChild(el("div", { class: "empty", text: "这个范围内还没有额度数据。" }));
+      overview.appendChild(el("div", { class: "empty", text: translate("no_history") }));
       return;
     }
     if (!findRow(rows, chartSelected)) chartSelected = rows[0].id;
@@ -1101,7 +1414,7 @@
     var box = $("range-buttons");
     clear(box);
     RANGES[chartWindow].forEach(function (r) {
-      box.appendChild(el("button", { type: "button", class: "seg", "aria-pressed": r[0] === range ? "true" : "false", text: r[1], onclick: function () {
+      box.appendChild(el("button", { type: "button", class: "seg", "aria-pressed": r[0] === range ? "true" : "false", text: translate("range_" + r[2], r[1]), onclick: function () {
         range = r[0];
         renderRangeButtons();
         loadHistory();
@@ -1115,7 +1428,7 @@
       history = data;
       renderChart();
     }).catch(function (err) {
-      if (err.message !== "unauthorized") toast("读取历史失败：" + err.message);
+      if (err.message !== "unauthorized") toast(translate("history_failed", err.message));
       $("chart").classList.remove("loading");
     });
   }
@@ -1163,8 +1476,8 @@
     var name = status && status.timezone && status.timezone !== "Local" ? status.timezone : "";
     var sign = offset >= 0 ? "+" : "-";
     var utc = "UTC" + sign + Math.abs(offset);
-    var source = rawConfig.timezone || rawConfig.timezone_offset_hours !== undefined ? "配置中指定" : "跟随 CPA 服务器";
-    return "通知和页面中的时间使用 " + (name ? name + "（" + utc + "）" : utc) + "，" + source + "。";
+    var source = rawConfig.timezone || rawConfig.timezone_offset_hours !== undefined ? translate("tz_config") : translate("tz_cpa");
+    return translate("tz_note", name ? name + " (" + utc + ")" : utc, source);
   }
 
   // Effective values come from the status config (defaults applied); saved
@@ -1211,12 +1524,12 @@
     var button = form.querySelector("button[type=submit]");
     button.disabled = true;
     api("PATCH", CONFIG_API, patch).then(function () {
-      toast("已保存，插件会在几秒内应用新设置");
+      toast(translate("saved"));
       return loadConfig();
     }).then(function () {
       setTimeout(function () { loadStatus().then(fillSettings); }, 3000);
     }).catch(function (err) {
-      if (err.message !== "unauthorized") toast("保存失败：" + err.message);
+      if (err.message !== "unauthorized") toast(translate("save_failed", err.message));
     }).then(function () { button.disabled = false; });
   }
 
@@ -1233,7 +1546,7 @@
       fillSettings();
       return loadHistory();
     }).catch(function (err) {
-      if (err.message !== "unauthorized") toast("加载失败：" + err.message);
+      if (err.message !== "unauthorized") toast(translate("load_failed", err.message));
     });
     clearInterval(refreshTimer);
     refreshTimer = setInterval(function () {
@@ -1250,10 +1563,10 @@
     start();
   });
   $("refresh-all").addEventListener("click", function (e) {
-    runAction(e.currentTarget, API + "/refresh", {}, "已刷新全部额度");
+    runAction(e.currentTarget, API + "/refresh", {}, translate("refreshed_all"));
   });
   $("test-bark").addEventListener("click", function (e) {
-    runAction(e.currentTarget, API + "/test-bark", {}, "测试通知已发送");
+    runAction(e.currentTarget, API + "/test-bark", {}, translate("test_sent"));
   });
   $("settings").addEventListener("submit", saveSettings);
   $("events-more").addEventListener("click", function () { eventsExpanded = !eventsExpanded; renderEvents(); });
@@ -1276,14 +1589,18 @@
   bindSegmented("sort-buttons", function (value) { chartSort = value; renderChart(); });
   renderRangeButtons();
   window.addEventListener("resize", function () { if (history) renderChart(); });
-  window.addEventListener("storage", function (e) { if (e.key === "cli-proxy-theme") { applyTheme(); renderChart(); } });
+  window.addEventListener("storage", function (e) {
+    if (e.key === "cli-proxy-theme") { applyTheme(); renderChart(); }
+    if (e.key === "cli-proxy-language") applyLanguage();
+  });
   if (window.matchMedia) {
     var media = window.matchMedia("(prefers-color-scheme: dark)");
     if (media.addEventListener) media.addEventListener("change", function () { applyTheme(); renderChart(); });
   }
 
   applyTheme();
-  watchParentTheme();
+  applyLanguage();
+  watchParent();
   key = sessionStorage.getItem(KEY_STORE) || centerKey();
   if (key) start(); else askForKey("");
 })();

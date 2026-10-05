@@ -454,9 +454,10 @@ func (e *Engine) pollResetFeed(ctx context.Context, cfg config.Config) {
 	if e.alerts != nil {
 		sender = e.alerts.Sender
 	}
-	sent := notify.ProcessResetRecords(ctx, e.state, records, cfg.CodexResetUpdates.NotifyCurrentPending, sender, cfg.Location(), e.now())
+	sent := notify.ProcessResetRecords(ctx, e.state, records, cfg.CodexResetUpdates.NotifyCurrentPending, sender, cfg.Location(), e.language(), e.now())
 	if sent > 0 {
-		e.addEventDetail("info", "codex_reset", "", "Did Codex Reset", fmt.Sprintf("已发送 %d 条通知", sent), fmt.Sprintf("Did Codex Reset：已发送 %d 条通知", sent))
+		e.addEventDetail("info", "codex_reset", "", "Did Codex Reset", fmt.Sprintf("已发送 %d 条通知", sent), fmt.Sprintf("Did Codex Reset：已发送 %d 条通知", sent),
+			map[string]string{"count": strconv.Itoa(sent)})
 	}
 	e.dirty = true
 }

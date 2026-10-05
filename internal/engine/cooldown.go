@@ -96,16 +96,17 @@ func (e *Engine) checkCooldowns(ctx context.Context, cfg config.Config) {
 		}
 		e.state.CooldownNotice(s.cred.AuthIndex, until)
 		e.dirty = true
-		msg := notify.CooldownMessage(s.label, s.cred.CooldownUntil, cfg.Location())
+		msg := notify.CooldownMessage(e.language(), s.label, s.cred.CooldownUntil, cfg.Location())
 		e.addEventDetail("warn", "cooldown_stale", "", s.label,
-			fmt.Sprintf("额度已恢复，CPA 仍冷却到 %s", s.cred.CooldownUntil.In(cfg.Location()).Format("01/02 15:04")), msg.Title)
+			fmt.Sprintf("额度已恢复，CPA 仍冷却到 %s", s.cred.CooldownUntil.In(cfg.Location()).Format("01/02 15:04")), msg.Title,
+			map[string]string{"until": eventTime(s.cred.CooldownUntil)})
 		if e.alerts == nil || e.alerts.Sender == nil {
 			continue
 		}
 		if err := e.alerts.Sender.Send(ctx, msg); err != nil {
-			e.addEventDetail("warn", "notify_failed", "", s.label, fmt.Sprintf("冷却提醒发送失败：%v", err), fmt.Sprintf("%s 冷却提醒发送失败：%v", s.label, err))
+			e.notifyFailed("", msg, err)
 		} else {
-			e.addEventDetail("info", "notify", "", s.label, msg.Title, msg.Title)
+			e.notified("", msg)
 		}
 	}
 }

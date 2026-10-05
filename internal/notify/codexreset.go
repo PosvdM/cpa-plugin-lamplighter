@@ -99,19 +99,19 @@ func RecordKey(r ResetRecord) string {
 	return "manual:" + strings.Join(parts, "|")
 }
 
-func resetTypeLabel(value string) string {
+func resetTypeLabel(value, lang string) string {
 	switch strings.ToLower(value) {
 	case "global":
-		return "全局重置"
+		return T(lang, "reset_global")
 	case "banked":
-		return "重置卡"
+		return T(lang, "reset_banked")
 	case "global_and_banked":
-		return "全局重置 + 重置卡"
+		return T(lang, "reset_both")
 	}
-	return "Codex 重置"
+	return T(lang, "reset_other")
 }
 
-func scopeLabel(scope any) string {
+func scopeLabel(scope any, lang string) string {
 	m, _ := scope.(map[string]any)
 	plans := stringList(m["plans"])
 	if len(plans) == 0 {
@@ -122,7 +122,7 @@ func scopeLabel(scope any) string {
 	for _, plan := range plans {
 		plan = strings.ToLower(plan)
 		if plan == "all" {
-			return "全部套餐"
+			return T(lang, "plans_all")
 		}
 		if name, ok := names[plan]; ok {
 			out = append(out, name)
@@ -134,8 +134,8 @@ func scopeLabel(scope any) string {
 }
 
 // ResetMessage builds the notification for one record.
-func ResetMessage(r ResetRecord, loc *time.Location) Message {
-	resetType := resetTypeLabel(r.str("resetType"))
+func ResetMessage(r ResetRecord, loc *time.Location, lang string) Message {
+	resetType := resetTypeLabel(r.str("resetType"), lang)
 	confidence := ""
 	if value, ok := r["confidence"].(float64); ok {
 		confidence = fmt.Sprintf("%d%%", int(math.RoundToEven(value*100)))
@@ -151,33 +151,33 @@ func ResetMessage(r ResetRecord, loc *time.Location) Message {
 	var title string
 	var lines []string
 	if strings.ToLower(r.str("kind")) == "reset_scheduled" {
-		title = fmt.Sprintf("📅 Codex %s已排期", resetType)
+		title = T(lang, "reset_scheduled", resetType)
 		if text := formatTime(r.str("effectiveAt")); text != "" {
-			lines = append(lines, "预计："+text)
+			lines = append(lines, T(lang, "line_expected", text))
 		}
 	} else {
-		suffix := "已完成"
+		done := "reset_done"
 		if r.str("resetType") == "banked" {
-			suffix = "已到账"
+			done = "reset_credited"
 		}
-		title = fmt.Sprintf("✅ Codex %s%s", resetType, suffix)
+		title = T(lang, done, resetType)
 		if text := formatTime(r.str("effectiveAt"), r.str("completedAt"), r.str("announcedAt")); text != "" {
-			lines = append(lines, "时间："+text)
+			lines = append(lines, T(lang, "line_time", text))
 		}
 	}
 	if confidence != "" {
-		lines = append(lines, "置信度："+confidence)
+		lines = append(lines, T(lang, "line_confidence", confidence))
 	}
-	if scope := scopeLabel(r["scope"]); scope != "" {
-		lines = append(lines, "范围："+scope)
+	if scope := scopeLabel(r["scope"], lang); scope != "" {
+		lines = append(lines, T(lang, "line_scope", scope))
 	}
 	body := strings.Join(lines, "\n")
 	if body == "" {
-		body = "Did Codex Reset 发布了新的重置信号"
+		body = T(lang, "reset_signal")
 	}
 	msg := Message{Title: title, Body: body, Level: LevelActive}
 	if announced := quota.ParseTime(r.str("announcedAt")); !announced.IsZero() {
-		msg.JumpURL = fmt.Sprintf("https://didcodexreset.com/zh/history/%d.html", announced.UnixMilli())
+		msg.JumpURL = T(lang, "reset_history_link", announced.UnixMilli())
 	}
 	return msg
 }
@@ -185,7 +185,7 @@ func ResetMessage(r ResetRecord, loc *time.Location) Message {
 // ProcessResetRecords sends notifications for unseen records and returns how
 // many were sent. On the first run only the current pending schedule is sent
 // (when notifyPending is set); older records are marked as seen.
-func ProcessResetRecords(ctx context.Context, st *store.State, records []ResetRecord, notifyPending bool, sender Sender, loc *time.Location, now time.Time) int {
+func ProcessResetRecords(ctx context.Context, st *store.State, records []ResetRecord, notifyPending bool, sender Sender, loc *time.Location, lang string, now time.Time) int {
 	if st.CodexReset == nil {
 		st.CodexReset = &store.CodexResetState{}
 	}
@@ -225,7 +225,7 @@ func ProcessResetRecords(ctx context.Context, st *store.State, records []ResetRe
 		if sender == nil {
 			break
 		}
-		if err := sender.Send(ctx, ResetMessage(r, loc)); err == nil {
+		if err := sender.Send(ctx, ResetMessage(r, loc, lang)); err == nil {
 			seen[RecordKey(r)] = true
 			sent++
 		}

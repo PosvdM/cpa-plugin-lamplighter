@@ -25,6 +25,9 @@ type Record struct {
 	Message   string  `json:"m,omitempty"` // event text, events only
 	Label     string  `json:"l,omitempty"` // quota group or source label, events only
 	Detail    string  `json:"d,omitempty"` // event text without the label, events only
+	// Params holds the values the page builds the event text from in its
+	// own language, events only.
+	Params map[string]string `json:"p,omitempty"`
 }
 
 // History stores records in one JSON Lines file per UTC day under Dir.

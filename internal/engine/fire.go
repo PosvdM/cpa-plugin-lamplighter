@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -223,13 +224,14 @@ func (e *Engine) igniteTarget(ctx context.Context, cfg config.Config, t target, 
 			until := outcome.Until.In(cfg.Location()).Format("01/02 15:04")
 			e.addEventDetail("error", "ignite_paused", t.group.Key, t.group.Label,
 				fmt.Sprintf("暂停到 %s：%v", until, err),
-				fmt.Sprintf("%s 点火失败，暂停到 %s：%v", t.group.Label, until, err))
+				fmt.Sprintf("%s 点火失败，暂停到 %s：%v", t.group.Label, until, err),
+				map[string]string{"until": eventTime(outcome.Until), "error": err.Error()})
 			if outcome.NotifyCircuit && e.alerts != nil && e.alerts.Sender != nil {
-				msg := notify.CircuitMessage(t.group.Label, outcome.Until, err.Error(), cfg.Location())
+				msg := notify.CircuitMessage(e.language(), t.group.Label, outcome.Until, err.Error(), cfg.Location())
 				if sendErr := e.alerts.Sender.Send(ctx, msg); sendErr != nil {
-					e.addEventDetail("warn", "notify_failed", t.group.Key, t.group.Label, fmt.Sprintf("暂停通知发送失败：%v", sendErr), fmt.Sprintf("%s 暂停通知发送失败：%v", t.group.Label, sendErr))
+					e.notifyFailed(t.group.Key, msg, sendErr)
 				} else {
-					e.addEventDetail("info", "notify", t.group.Key, t.group.Label, msg.Title, msg.Title)
+					e.notified(t.group.Key, msg)
 				}
 			}
 		} else {
@@ -237,18 +239,24 @@ func (e *Engine) igniteTarget(ctx context.Context, cfg config.Config, t target, 
 			if outcome.Cooldown {
 				retry = "CPA 冷却结束，" + retry
 			}
+			params := map[string]string{"retry_seconds": strconv.Itoa(int(outcome.RetryIn.Round(time.Second).Seconds())), "error": err.Error()}
+			if outcome.Cooldown {
+				params["cooldown"] = "1"
+			}
 			e.addEventDetail("warn", "ignite_failed", t.group.Key, t.group.Label,
 				fmt.Sprintf("%s后重试：%v", retry, err),
-				fmt.Sprintf("%s 点火失败，%s后重试：%v", t.group.Label, retry, err))
+				fmt.Sprintf("%s 点火失败，%s后重试：%v", t.group.Label, retry, err), params)
 		}
 		return err
 	}
 	ignite.RecordSuccess(ts, model, now)
 	e.dirty = true
 	resetText := "未知"
+	params := map[string]string{"model": model}
 	if group, ok := e.group(t.group.Key); ok {
 		if w, ok := group.fiveHour(); ok && !w.Reset.IsZero() {
 			resetText = w.Reset.In(cfg.Location()).Format("01/02 15:04:05")
+			params["reset"] = eventTime(w.Reset)
 		}
 	}
 	kind := "ignite"
@@ -257,7 +265,7 @@ func (e *Engine) igniteTarget(ctx context.Context, cfg config.Config, t target, 
 	}
 	e.addEventDetail("info", kind, t.group.Key, t.group.Label,
 		fmt.Sprintf("%s · 下次重置 %s", model, resetText),
-		fmt.Sprintf("%s 点火成功（%s），下次重置 %s", t.group.Label, model, resetText))
+		fmt.Sprintf("%s 点火成功（%s），下次重置 %s", t.group.Label, model, resetText), params)
 	return nil
 }
 

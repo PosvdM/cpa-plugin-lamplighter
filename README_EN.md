@@ -92,11 +92,13 @@ A 5-hour window starts with the first request after a reset. If nobody uses the 
 
 ## Notification example
 
+Notifications use the Management Center language from the last time the management page was opened, Chinese or English; until the page has been opened, they are in Chinese.
+
 ```text
 🟡 Claude · 7d 48% | 03d
 
-5h：96% | 04h | 10/04 13:50
-7d：48% | 03d | 10/07 14:00
+5h: 96% | 04h | 10/04 13:50
+7d: 48% | 03d | 10/07 14:00
 ```
 
 Title icons: 🟡 remaining fell to the first threshold (50% by default), 🔴 to the second threshold (20% by default) or below, ✅ recovered, ⏰ reset reminder, ⚠️ a problem that needs action, such as ignition paused or a CPA cooldown that outlasts the quota. Each body line shows the window, the remaining quota, the time until reset, and the reset time. The first time the plugin sees a quota window it only records the current level and sends nothing.
@@ -187,7 +189,7 @@ The page shows:
 - recent events in columns for time, type, quota group and detail;
 - the settings form, with a test notification button in the notification settings.
 
-The page text is in Chinese.
+The page follows the language of the CPA Management Center: Chinese for Simplified or Traditional Chinese, English for every other language.
 
 ## Security and risk
 
