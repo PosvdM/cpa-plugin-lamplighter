@@ -4,6 +4,8 @@
 
 [中文](./README.md)
 
+> A lamplighter was the person who walked the streets at dusk lighting each lamp. This plugin does the same for quota: as soon as a 5-hour window resets, it lights the next one, and it keeps an eye on how much oil each lamp has left.
+
 Lamplighter is a native plugin for [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) (CPA). It monitors the quota of ChatGPT (Codex), Claude and Antigravity accounts, sends alerts through [Bark](https://github.com/Finb/Bark), and sends one minimal request after each 5-hour quota window resets so that the next window starts right away.
 
 ![Management page: quota per account and ignition plans](./docs/images/overview.png)
