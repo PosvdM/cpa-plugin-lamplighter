@@ -137,9 +137,8 @@ func (e *Engine) applyUsage(ctx context.Context, ev usageEvent) {
 }
 
 // notePassiveFable logs the first passive Fable window seen for a credential
-// in this process. It is not known yet whether Anthropic sends the 7d_oi
-// headers on every request or only on Fable requests; the log line answers
-// that.
+// in this process. Regular Claude requests do not carry the 7d_oi headers;
+// the log line shows whether a Fable request does.
 func (e *Engine) notePassiveFable(cred *Cred, groups []quota.RawGroup) {
 	for _, g := range groups {
 		if g.Key != quota.FableGroupKey || e.fableSeen[cred.AuthIndex] {

@@ -122,7 +122,7 @@ CPA passes the upstream response headers in `ResponseHeaders` of the usage recor
 | Service | Headers | Windows |
 | --- | --- | --- |
 | Claude | `Anthropic-Ratelimit-Unified-5h-Utilization` / `-5h-Reset`, same for `-7d-` | 5-hour and 7-day; the value is the used fraction, for example `0.2` |
-| Claude | `Anthropic-Ratelimit-Unified-7d_oi-Utilization` / `-7d_oi-Reset` | Fable's 7-day window, written to the same Fable quota group as the usage API (`quota.FableGroupKey`). CPA also treats `7d_oi` as the Fable-specific window. Whether Anthropic sends these headers on every request or only on Fable requests is not confirmed yet; the plugin logs the first one it reads after each start |
+| Claude | `Anthropic-Ratelimit-Unified-7d_oi-Utilization` / `-7d_oi-Reset` | Fable's 7-day window, written to the same Fable quota group as the usage API (`quota.FableGroupKey`). CPA also treats `7d_oi` as the Fable-specific window. Regular (non-Fable) requests do not carry these headers; whether Fable requests do has not been verified on an account that can use Fable. The plugin logs the first one it reads after each start |
 | Codex | `X-Codex-Primary-Used-Percent`, `-Reset-At`, `-Reset-After-Seconds`, `-Window-Minutes`, same for `Secondary` | Classified by window length: 300 minutes is 5-hour, 10080 is 7-day |
 
 Passive data only updates the windows present in the headers; an active result replaces the whole group.
