@@ -122,7 +122,7 @@ CPA 在用量记录的 `ResponseHeaders` 中提供上游响应头：
 | 服务 | 响应头 | 窗口 |
 | --- | --- | --- |
 | Claude | `Anthropic-Ratelimit-Unified-5h-Utilization` / `-5h-Reset`，`-7d-` 同理 | 5 小时、7 天；值是已用比例，如 `0.2` |
-| Claude | `Anthropic-Ratelimit-Unified-7d_oi-Utilization` / `-7d_oi-Reset` | Fable 的 7 天窗口，写入与主动查询相同的 Fable 额度组（`quota.FableGroupKey`）。CPA 也把 `7d_oi` 当作 Fable 专用窗口。尚未确认 Anthropic 是每次都返回这组响应头，还是只在 Fable 请求时返回；插件每次启动后第一次读到时记一条日志 |
+| Claude | `Anthropic-Ratelimit-Unified-7d_oi-Utilization` / `-7d_oi-Reset` | Fable 的 7 天窗口，写入与主动查询相同的 Fable 额度组（`quota.FableGroupKey`）。CPA 也把 `7d_oi` 当作 Fable 专用窗口。普通（非 Fable）请求的响应头里没有这组；Fable 请求时是否返回，还没有在能用 Fable 的账号上验证过。插件每次启动后第一次读到时记一条日志 |
 | Codex | `X-Codex-Primary-Used-Percent`、`-Reset-At`、`-Reset-After-Seconds`、`-Window-Minutes`，`Secondary` 同理 | 按窗口长度区分，300 分钟为 5 小时，10080 分钟为 7 天 |
 
 被动数据只更新响应头里有的窗口，主动查询结果替换整个额度组。
