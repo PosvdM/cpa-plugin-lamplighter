@@ -17,20 +17,44 @@ func headerValue(header http.Header, name string) string {
 }
 
 // ParsePassive extracts quota windows from the upstream response headers of a
-// Claude or Codex model request. It returns false when the headers carry no
-// quota information. The returned group only holds the windows present in the
-// headers; Claude headers do not include the Fable window.
-func ParsePassive(provider string, header http.Header, now time.Time) (RawGroup, bool) {
+// Claude or Codex model request. It returns no groups when the headers carry
+// no quota information. Each group only holds the windows present in the
+// headers.
+func ParsePassive(provider string, header http.Header, now time.Time) []RawGroup {
 	switch provider {
 	case "claude":
 		return parseClaudeHeaders(header)
 	case "codex":
-		return parseCodexHeaders(header, now)
+		if group, ok := parseCodexHeaders(header, now); ok {
+			return []RawGroup{group}
+		}
 	}
-	return RawGroup{}, false
+	return nil
 }
 
-func parseClaudeHeaders(header http.Header) (RawGroup, bool) {
+// FableGroupKey is the raw group key of Claude's Fable window, the same for
+// active and passive data.
+const FableGroupKey = "claude:" + WindowFable
+
+func parseClaudeHeaders(header http.Header) []RawGroup {
+	var groups []RawGroup
+	if main, ok := parseClaudeMainHeaders(header); ok {
+		groups = append(groups, main)
+	}
+	// Anthropic reports the Fable window as 7d_oi, which CPA also treats as
+	// the Fable-specific 7-day window.
+	if utilization, ok := floatValue(headerValue(header, "Anthropic-Ratelimit-Unified-7d_oi-Utilization")); ok {
+		groups = append(groups, RawGroup{Key: FableGroupKey, SourceLabel: "Fable", Windows: []Window{{
+			ID:        WindowFable,
+			Label:     LabelFable,
+			Remaining: clampPercent(100 - utilization*100),
+			Reset:     ParseTime(headerValue(header, "Anthropic-Ratelimit-Unified-7d_oi-Reset")),
+		}}})
+	}
+	return groups
+}
+
+func parseClaudeMainHeaders(header http.Header) (RawGroup, bool) {
 	group := RawGroup{Key: "claude:main", SourceLabel: "Claude"}
 	for _, spec := range []struct{ prefix, id, label string }{
 		{"Anthropic-Ratelimit-Unified-5h-", WindowFiveHour, LabelFiveHour},

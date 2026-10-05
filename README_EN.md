@@ -66,7 +66,7 @@ The plugin keeps its state and quota history in `data/lamplighter/` under the pl
 
 **Passive data**: when a Claude or Codex model request passes through CPA, the provider returns the current quota in the response, and the plugin uses it without an extra request. Antigravity returns no such data and is only queried actively.
 
-If an account produced passive data in the 60 seconds before a scheduled query, that query is skipped for the account. An account is skipped for at most 30 minutes in a row; after that it is queried actively, so that quotas only available through queries, such as Claude's Fable quota, stay current.
+If an account produced passive data in the 60 seconds before a scheduled query, that query is skipped for the account. An account is skipped for at most 30 minutes in a row; after that it is queried actively, so that quotas missing from the response headers, such as an unused Claude Fable quota, stay current. The chart does not draw this planned interval as missing data.
 
 Claude and Codex quotas have 1% precision, whether queried or read passively. Antigravity queries return decimals.
 

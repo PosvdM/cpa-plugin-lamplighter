@@ -117,8 +117,8 @@ func (e *Engine) drainUsage(ctx context.Context) {
 
 func (e *Engine) applyUsage(ctx context.Context, ev usageEvent) {
 	now := e.now()
-	group, ok := quota.ParsePassive(ev.provider, ev.header, now)
-	if !ok {
+	groups := quota.ParsePassive(ev.provider, ev.header, now)
+	if len(groups) == 0 {
 		return
 	}
 	e.mu.Lock()
@@ -132,7 +132,27 @@ func (e *Engine) applyUsage(ctx context.Context, ev usageEvent) {
 		return
 	}
 	e.passiveAt[ev.authIndex] = now
-	e.applyGroups(ctx, cfg, cred, []quota.RawGroup{group}, quota.SourcePassive, now)
+	e.notePassiveFable(cred, groups)
+	e.applyGroups(ctx, cfg, cred, groups, quota.SourcePassive, now)
+}
+
+// notePassiveFable logs the first passive Fable window seen for a credential
+// in this process. It is not known yet whether Anthropic sends the 7d_oi
+// headers on every request or only on Fable requests; the log line answers
+// that.
+func (e *Engine) notePassiveFable(cred *Cred, groups []quota.RawGroup) {
+	for _, g := range groups {
+		if g.Key != quota.FableGroupKey || e.fableSeen[cred.AuthIndex] {
+			continue
+		}
+		if e.fableSeen == nil {
+			e.fableSeen = map[string]bool{}
+		}
+		e.fableSeen[cred.AuthIndex] = true
+		w := g.Windows[0]
+		e.logf("info", "首次从响应头读到 Fable 额度：%s，剩余 %.1f%%，重置 %s",
+			labelFor(quota.ProviderTitle(cred.Provider), cred), w.Remaining, w.Reset.Format(time.RFC3339))
+	}
 }
 
 var emailPattern = regexp.MustCompile(`([A-Za-z0-9._%+]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})`)

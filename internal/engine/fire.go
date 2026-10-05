@@ -399,10 +399,11 @@ func (e *Engine) confirmed(key string, start, now time.Time) bool {
 // of the same request. When neither arrives, and for Antigravity, the
 // credential is queried actively.
 func (e *Engine) confirm(ctx context.Context, cfg config.Config, t target, start time.Time, resp pluginapi.HostModelExecutionResponse) error {
-	if group, ok := quota.ParsePassive(t.group.Provider, resp.Headers, e.now()); ok {
+	if groups := quota.ParsePassive(t.group.Provider, resp.Headers, e.now()); len(groups) > 0 {
 		now := e.now()
 		e.passiveAt[t.cred.AuthIndex] = now
-		e.applyGroups(ctx, cfg, t.cred, []quota.RawGroup{group}, quota.SourcePassive, now)
+		e.notePassiveFable(t.cred, groups)
+		e.applyGroups(ctx, cfg, t.cred, groups, quota.SourcePassive, now)
 	}
 	if e.confirmed(t.group.Key, start, e.now()) {
 		return nil

@@ -77,14 +77,16 @@ type Engine struct {
 	lang      string // notification language, a copy of state.Language
 
 	// Owned by the loop goroutine.
-	state       *store.State
-	stateFile   *store.StateFile
-	history     *store.History
-	dirty       bool
-	egress      *egress.Egress
-	lister      *models.Lister
-	alerts      *notify.Alerts
-	passiveAt   map[string]time.Time
+	state     *store.State
+	stateFile *store.StateFile
+	history   *store.History
+	dirty     bool
+	egress    *egress.Egress
+	lister    *models.Lister
+	alerts    *notify.Alerts
+	passiveAt map[string]time.Time
+	// fableSeen marks credentials whose passive Fable window was logged.
+	fableSeen   map[string]bool
 	activeAt    map[string]time.Time
 	lastSample  map[string]sampleMark
 	pendingSamp map[string]store.Record
