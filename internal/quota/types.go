@@ -7,6 +7,7 @@ package quota
 
 import (
 	"encoding/json"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -164,7 +165,11 @@ func scalarString(value any) string {
 	return ""
 }
 
+// clampPercent limits value to 0–100 and drops float noise such as
+// 19.999999999999996 from 100 - 0.8*100. It keeps six decimals, because
+// Antigravity reports fractions like 0.9999985 that must stay below 100.
 func clampPercent(value float64) float64 {
+	value = math.Round(value*1e6) / 1e6
 	if value < 0 {
 		return 0
 	}

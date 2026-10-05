@@ -262,3 +262,46 @@ func TestEnglishNotifications(t *testing.T) {
 		t.Fatalf("reset message %+v", msg)
 	}
 }
+
+// Usage endpoints and response headers can differ by a point, so a reading
+// bounces around a threshold within one window.
+func TestThresholdBounceNotifiesOnce(t *testing.T) {
+	for _, recovery := range []bool{false, true} {
+		sender := &fakeSender{}
+		st := store.NewState()
+		now := time.Date(2026, 10, 4, 1, 0, 0, 0, time.UTC)
+		cfg := config.Default()
+		cfg.NotifyRecovery = recovery
+		a := alerts(cfg, sender)
+		for _, v := range []float64{60, 50, 51, 50, 49, 21, 20, 21, 19.99, 20} {
+			a.ProcessGroup(context.Background(), st, group(v, 80, now), now)
+		}
+		if len(sender.sent) != 2 || !strings.HasPrefix(sender.sent[0].Title, "🟡") || !strings.HasPrefix(sender.sent[1].Title, "🔴") {
+			t.Fatalf("recovery=%v: want one yellow and one red alert, got %+v", recovery, sender.sent)
+		}
+	}
+}
+
+func TestRecoveryNeedsNewWindowOrJump(t *testing.T) {
+	sender := &fakeSender{}
+	st := store.NewState()
+	now := time.Date(2026, 10, 4, 1, 0, 0, 0, time.UTC)
+	a := alerts(config.Default(), sender)
+	a.ProcessGroup(context.Background(), st, group(80, 80, now), now)
+	a.ProcessGroup(context.Background(), st, group(48, 80, now), now)
+	// A small rise into a new window counts; the reset moved by 5 hours.
+	later := now.Add(5 * time.Hour)
+	a.ProcessGroup(context.Background(), st, group(52, 80, later), later)
+	a.ProcessGroup(context.Background(), st, group(49, 80, later), later)
+	// A reset time one second off is the same window.
+	g := group(51, 80, later)
+	g.Windows[0].Reset = g.Windows[0].Reset.Add(-time.Second)
+	a.ProcessGroup(context.Background(), st, g, later)
+	a.ProcessGroup(context.Background(), st, group(50, 80, later), later)
+	// A jump of 5 points counts without a reset change.
+	a.ProcessGroup(context.Background(), st, group(55, 80, later), later)
+	a.ProcessGroup(context.Background(), st, group(50, 80, later), later)
+	if len(sender.sent) != 3 {
+		t.Fatalf("want three alerts, got %+v", sender.sent)
+	}
+}
