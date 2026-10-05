@@ -67,7 +67,7 @@ func TestManagementRoutesAndPage(t *testing.T) {
 		Resources []struct{ Path, Menu string }   `json:"resources"`
 	}
 	json.Unmarshal(result(t, p.Handle("management.register", nil)), &reg)
-	if len(reg.Routes) != 5 || reg.Resources[0].Path != "/page" || reg.Resources[0].Menu != "Lamplighter" {
+	if len(reg.Routes) != 6 || reg.Resources[0].Path != "/page" || reg.Resources[0].Menu != "Lamplighter" {
 		t.Fatalf("registration %+v", reg)
 	}
 

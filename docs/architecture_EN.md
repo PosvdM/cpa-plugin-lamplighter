@@ -38,10 +38,15 @@ Management routes (require the CPA management key):
 | `POST /v0/management/lamplighter/refresh` | Query now; `{"auth_index": "..."}` limits it to one account |
 | `POST /v0/management/lamplighter/ignite` | Ignite now, `{"target": "<group key>"}` |
 | `POST /v0/management/lamplighter/test-bark` | Send a test notification |
+| `POST /v0/management/lamplighter/language` | Record the notification language, `{"language": "zh-CN"}`; any form of Chinese is stored as `zh`, every other language as `en` |
 
 The page is the resource `GET /v0/resource/plugins/lamplighter/page` with the menu label `Lamplighter`. The resource itself needs no authentication; its data requests carry the management key. The page reads the key from `cli-proxy-auth` in `localStorage`, where the Management Center stores it with a reversible obfuscation derived from the host and user agent; otherwise it asks for the key and keeps it in `sessionStorage` only. Settings are saved through CPA's `PATCH /v0/management/plugins/lamplighter/config`, which merges top-level keys only, so the page sends `ignition`, `providers` and `codex_reset_updates` as complete objects.
 
 The icon next to the page title is `assets/logo.png` loaded from the GitHub repository, so it can change without a release; it is hidden when it fails to load.
+
+All page text lives in the `I18N` dictionaries in `page.js`, one for Chinese and one for English. Static text in `page.html` names its entry with `data-i18n` (and `data-i18n-placeholder`, `data-i18n-title`, `data-i18n-aria-label`); the Chinese text there only shows until the script applies the language. The language follows the Management Center: the page reads the `lang` attribute of the parent page's root element, which the Management Center updates on every switch, and watches it; opened on its own, it reads `cli-proxy-language` from `localStorage`, then falls back to the browser language. Languages starting with `zh` show Chinese, all others English. When the `language` in the status differs from the page language, the page reports it with `POST .../language` and retries on the next status refresh if that fails.
+
+The page writes event text in its language from the event `params` (see Data below). Older events without `params` show their stored Chinese text. Error text returned by upstream services and notification titles are not translated; the titles are already in the notification language.
 
 The page looks like the Management Center: its CSS variables reuse the names and values of the Management Center's `src/styles/themes.scss` (light, white and dark themes), quota bars and the chart are colored by the first two notification thresholds (by default green above 50% remaining, amber above 20%, red at 20% or less), matching the 🟡 and 🔴 notification titles, and telemetry numbers use a monospace font. The page is same-origin with the Management Center, so it reads `data-theme` from the parent page's root element and watches it for changes; opened on its own, it falls back to `cli-proxy-theme` that the Management Center stores in `localStorage`. When the Management Center changes its colors, update the variables in `internal/web/page.css`.
 
@@ -201,6 +206,8 @@ A pause sends one Bark notification (`circuit_notified_until_epoch` prevents rep
 
 A Bark request is `GET {bark_url}/{title}/{body}?group&level&icon&url`, with title and body percent-encoded except RFC 3986 unreserved characters. A JSON `code` other than 200 is a failure.
 
+Notification texts are in `internal/notify/text.go`, one column each for Chinese and English, chosen by `language` in `state.json`. The management page reports the language: notifications are sent without a page open, so they use the language reported last, and Chinese until one has been reported. Window names in notifications are always `5h` and `7d`. The Did Codex Reset link points to the Chinese or English history page.
+
 Did Codex Reset is read every `poll_seconds` seconds (at least 300, aligned to time boundaries), 10 latest records at a time. Records are deduplicated by ID, except `manual:` records, whose IDs can change and which are deduplicated by content; up to 100 seen keys are kept. The first run marks existing records as seen and notifies only the pending schedule when `notify_current_pending` is on.
 
 ## Data
@@ -209,11 +216,11 @@ The data directory defaults to `data/lamplighter` in the plugin directory. On Li
 
 | File | Content |
 | --- | --- |
-| `state.json` | `groups`: notification baselines per window; `scheduler`: ignition state per group; `codex_reset_updates`: seen records; `cooldown_notices`: stale cooldowns already notified. Written to a temporary file that replaces the old one |
+| `state.json` | `groups`: notification baselines per window; `scheduler`: ignition state per group; `codex_reset_updates`: seen records; `cooldown_notices`: stale cooldowns already notified; `language`: notification language. Written to a temporary file that replaces the old one |
 | `history/YYYY-MM-DD.jsonl` | Quota samples and events, one file per UTC day |
 | `instance.lock` | Instance lock |
 
-Each history line is one JSON object. A sample is `{"k":"s","t":seconds,"g":group,"w":window,"r":remaining,"x":reset,"s":"active|passive"}`, an event is `{"k":"e","t":seconds,"g":group,"e":type,"v":level,"m":text}`. Active samples are always written. Passive samples are written only when the value or reset changes, at most once per minute per window; a newer value inside that minute waits in `pendingSamp`. The history API keeps the last sample per 5-minute bucket for ranges over 2 days and per 30-minute bucket for ranges over 8 days. Each series has a `label` with the account suffix, such as `ChatGPT#rk`, and a `source_label` without it; the page merges the accounts of one quota by service and `source_label`.
+Each history line is one JSON object. A sample is `{"k":"s","t":seconds,"g":group,"w":window,"r":remaining,"x":reset,"s":"active|passive"}`, an event is `{"k":"e","t":seconds,"g":group,"e":type,"v":level,"m":text,"l":label,"d":detail,"p":params}`. `m` and `d` are Chinese text for the CPA log; `p` holds the values the page builds the event text from: `model` and `reset` for `ignite` and `ignite_manual`, `retry_seconds`, `error` and an optional `cooldown` for `ignite_failed`, `until` and `error` for `ignite_paused`, `title` for `notify`, `title` and `error` for `notify_failed`, `until` for `cooldown_stale`, and `count` for `codex_reset`; times are RFC 3339 UTC. Active samples are always written. Passive samples are written only when the value or reset changes, at most once per minute per window; a newer value inside that minute waits in `pendingSamp`. The history API keeps the last sample per 5-minute bucket for ranges over 2 days and per 30-minute bucket for ranges over 8 days. Each series has a `label` with the account suffix, such as `ChatGPT#rk`, and a `source_label` without it; the page merges the accounts of one quota by service and `source_label`.
 
 Group keys are `<service>:<auth_index>:<group>`, for example `codex:3:codex:main`, `claude:3:claude:seven-day-fable` and `antigravity:4:antigravity:gemini-models`. The group key is also the ignition target ID.
 

@@ -40,6 +40,8 @@ type Group struct {
 type Alerts struct {
 	Cfg    config.Config
 	Sender Sender
+	// Lang is the notification language, LangZH or LangEN.
+	Lang string
 	// OnSent is called for every delivered notification, for the event log.
 	OnSent func(msg Message)
 	// OnError is called when a delivery fails.
@@ -96,10 +98,10 @@ func SameResetCycle(left, right string) bool {
 }
 
 // CompactDuration formats a duration as 05h, 03d or 12m.
-func CompactDuration(d time.Duration) string {
+func CompactDuration(d time.Duration, lang string) string {
 	seconds := d.Seconds()
 	if seconds <= 0 {
-		return "可刷新"
+		return T(lang, "due")
 	}
 	unit := func(size float64, suffix string) string {
 		n := int(seconds/size + 0.5)
@@ -127,10 +129,10 @@ func (a *Alerts) windowLine(w quota.Window, now time.Time) string {
 	label := quota.ShortLabel(w.Label)
 	value := fmt.Sprintf("%d%%", roundPercent(w.Remaining))
 	if w.Reset.IsZero() {
-		return fmt.Sprintf("%s：%s", label, value)
+		return T(a.Lang, "window_line", label, value)
 	}
 	local := w.Reset.In(a.Cfg.Location())
-	return fmt.Sprintf("%s：%s | %s | %s", label, value, CompactDuration(w.Reset.Sub(now)), local.Format("01/02 15:04"))
+	return T(a.Lang, "window_line_reset", label, value, CompactDuration(w.Reset.Sub(now), a.Lang), local.Format("01/02 15:04"))
 }
 
 func (a *Alerts) body(g Group, now time.Time) string {
@@ -174,7 +176,7 @@ func (a *Alerts) buildChangeMessage(g Group, changes []change, now time.Time) Me
 		for _, c := range worsening {
 			text := fmt.Sprintf("%s %d%%", quota.ShortLabel(c.window.Label), roundPercent(c.window.Remaining))
 			if !c.window.Reset.IsZero() {
-				text += " | " + CompactDuration(c.window.Reset.Sub(now))
+				text += " | " + CompactDuration(c.window.Reset.Sub(now), a.Lang)
 			}
 			parts = append(parts, text)
 		}
@@ -199,7 +201,7 @@ func (a *Alerts) buildChangeMessage(g Group, changes []change, now time.Time) Me
 		labels = append(labels, quota.ShortLabel(c.window.Label))
 	}
 	return Message{
-		Title: fmt.Sprintf("✅ %s · %s 已恢复", g.Label, strings.Join(labels, " / ")),
+		Title: T(a.Lang, "recovered", g.Label, strings.Join(labels, " / ")),
 		Body:  a.body(g, now),
 		Level: LevelActive,
 		Label: g.Label,
@@ -212,7 +214,7 @@ func (a *Alerts) buildReminderMessage(g Group, reminders []reminder, now time.Ti
 		labels = append(labels, quota.ShortLabel(r.window.Label))
 	}
 	return Message{
-		Title: fmt.Sprintf("⏰ %s · %s 重置提醒", g.Label, strings.Join(labels, " / ")),
+		Title: T(a.Lang, "reset_reminder", g.Label, strings.Join(labels, " / ")),
 		Body:  a.body(g, now),
 		Level: LevelActive,
 		Label: g.Label,
@@ -374,22 +376,20 @@ func (a *Alerts) ProcessGroup(ctx context.Context, st *store.State, g Group, now
 
 // CooldownMessage is sent once when CPA keeps an account in a cooldown
 // although its quota has recovered.
-func CooldownMessage(label string, until time.Time, loc *time.Location) Message {
+func CooldownMessage(lang, label string, until time.Time, loc *time.Location) Message {
 	return Message{
-		Title: fmt.Sprintf("⚠️ %s 额度已恢复，CPA 仍在冷却", label),
-		Body: fmt.Sprintf("CPA 把这个账号冷却到 %s，期间的请求和点火都会被拒绝。在 CPA 管理中心清除这个账号的冷却后恢复。",
-			until.In(loc).Format("01/02 15:04")),
+		Title: T(lang, "cooldown_title", label),
+		Body:  T(lang, "cooldown_body", until.In(loc).Format("01/02 15:04")),
 		Level: LevelTimeSensitive,
 		Label: label,
 	}
 }
 
 // CircuitMessage is sent once when ignition pauses until the next day.
-func CircuitMessage(label string, until time.Time, reason string, loc *time.Location) Message {
+func CircuitMessage(lang, label string, until time.Time, reason string, loc *time.Location) Message {
 	return Message{
-		Title: fmt.Sprintf("⚠️ %s 点火已暂停", label),
-		Body: fmt.Sprintf("连续或高风险错误触发保护，停止自动重试到 %s。\n%s",
-			until.In(loc).Format("01/02 15:04"), truncate(reason, 220)),
+		Title: T(lang, "circuit_title", label),
+		Body:  T(lang, "circuit_body", until.In(loc).Format("01/02 15:04"), truncate(reason, 220)),
 		Level: LevelTimeSensitive,
 		Label: label,
 	}

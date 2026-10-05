@@ -7,12 +7,14 @@
 <style>/*CSS*/</style>
 </head>
 <body>
+<!-- Text marked with data-i18n comes from the dictionaries in page.js; the
+     Chinese text here is shown until the script applies the language. -->
 <div id="key-section" class="card" hidden>
-  <h2 class="card-title">需要管理密钥</h2>
-  <p class="secondary">在管理中心登录时勾选“记住密码”，此页面会直接使用该密钥；否则请在这里输入，密钥只保存在当前标签页。</p>
+  <h2 class="card-title" data-i18n="key_title">需要管理密钥</h2>
+  <p class="secondary" data-i18n="key_hint">在管理中心登录时勾选“记住密码”，此页面会直接使用该密钥；否则请在这里输入，密钥只保存在当前标签页。</p>
   <form id="key-form">
-    <input id="key-input" type="password" autocomplete="off" placeholder="CPA 管理密钥">
-    <button class="btn btn-primary" type="submit">确定</button>
+    <input id="key-input" type="password" autocomplete="off" placeholder="CPA 管理密钥" data-i18n-placeholder="key_placeholder">
+    <button class="btn btn-primary" type="submit" data-i18n="key_submit">确定</button>
   </form>
   <p id="key-error" class="error-text" hidden></p>
 </div>
@@ -21,27 +23,27 @@
   <header>
     <!-- Loaded from GitHub so the logo can change without a release; removed when it cannot load. -->
     <img class="logo" src="https://raw.githubusercontent.com/PosvdM/cpa-plugin-lamplighter/main/assets/logo.png" alt="" width="30" height="30" onerror="this.remove()">
-    <h1>Lamplighter<span class="sub">点灯人</span></h1>
+    <h1>Lamplighter<span class="sub" data-i18n="app_sub">点灯人</span></h1>
     <span id="state" class="state"></span>
     <span id="meta" class="meta"></span>
     <div class="actions">
-      <button id="refresh-all" class="btn btn-secondary" type="button">立即刷新全部</button>
+      <button id="refresh-all" class="btn btn-secondary" type="button" data-i18n="refresh_all">立即刷新全部</button>
     </div>
   </header>
 
   <div id="notices"></div>
 
   <section class="block">
-    <h2 class="block-title">额度</h2>
+    <h2 class="block-title" data-i18n="quota">额度</h2>
     <div id="accounts" class="accounts"></div>
   </section>
 
   <section class="card">
-    <h2 class="card-title">自动点火</h2>
+    <h2 class="card-title" data-i18n="ignition">自动点火</h2>
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>额度组</th><th>下次点火</th><th>当前重置</th><th>最近成功</th><th>模型</th><th>状态</th><th></th></tr>
+          <tr><th data-i18n="col_group">额度组</th><th data-i18n="col_next">下次点火</th><th data-i18n="col_reset">当前重置</th><th data-i18n="col_last">最近成功</th><th data-i18n="col_model">模型</th><th data-i18n="col_status">状态</th><th></th></tr>
         </thead>
         <tbody id="targets"></tbody>
       </table>
@@ -50,16 +52,16 @@
   </section>
 
   <section class="card">
-    <h2 class="card-title">额度变化</h2>
+    <h2 class="card-title" data-i18n="chart_title">额度变化</h2>
     <div class="filters">
-      <div class="segmented" id="window-buttons" role="group" aria-label="额度窗口">
-        <button type="button" class="seg" data-value="5h" aria-pressed="true">5 小时额度</button>
-        <button type="button" class="seg" data-value="7d" aria-pressed="false">7 天额度</button>
+      <div class="segmented" id="window-buttons" role="group" aria-label="额度窗口" data-i18n-aria-label="chart_window">
+        <button type="button" class="seg" data-value="5h" aria-pressed="true" data-i18n="quota_5h">5 小时额度</button>
+        <button type="button" class="seg" data-value="7d" aria-pressed="false" data-i18n="quota_7d">7 天额度</button>
       </div>
-      <div class="segmented" id="range-buttons" role="group" aria-label="时间范围"></div>
-      <div class="segmented" id="sort-buttons" role="group" aria-label="排序">
-        <button type="button" class="seg" data-value="default" aria-pressed="true">默认排序</button>
-        <button type="button" class="seg" data-value="low" aria-pressed="false">最低优先</button>
+      <div class="segmented" id="range-buttons" role="group" aria-label="时间范围" data-i18n-aria-label="chart_range"></div>
+      <div class="segmented" id="sort-buttons" role="group" aria-label="排序" data-i18n-aria-label="chart_sort">
+        <button type="button" class="seg" data-value="default" aria-pressed="true" data-i18n="sort_default">默认排序</button>
+        <button type="button" class="seg" data-value="low" aria-pressed="false" data-i18n="sort_low">最低优先</button>
       </div>
     </div>
     <div id="chart" class="chart-box"></div>
@@ -69,17 +71,17 @@
       <span><i class="swatch fill-high"></i><span id="legend-high">&gt; 50%</span></span>
       <span><i class="swatch fill-medium"></i><span id="legend-medium">20–50%</span></span>
       <span><i class="swatch fill-low"></i><span id="legend-low">≤ 20%</span></span>
-      <span><i class="swatch hatch"></i>无数据</span>
-      <span>● 点火成功，×n 为同一时刻的多个目标</span>
-      <span>✕ 含点火失败</span>
-      <span>↻ 重置</span>
-      <span class="muted">多账号的服务显示合计额度，点击行查看详情，再点一次展开各账号</span>
+      <span><i class="swatch hatch"></i><span data-i18n="no_data">无数据</span></span>
+      <span data-i18n="legend_ignited">● 点火成功，×n 为同一时刻的多个目标</span>
+      <span data-i18n="legend_failed">✕ 含点火失败</span>
+      <span data-i18n="legend_reset">↻ 重置</span>
+      <span class="muted" data-i18n="legend_pooled">多账号的服务显示合计额度，点击行查看详情，再点一次展开各账号</span>
     </p>
     <details>
-      <summary>数据表</summary>
+      <summary data-i18n="data_table">数据表</summary>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>额度</th><th>账号</th><th class="num">最新</th><th class="num">最低</th><th class="num">最高</th><th class="num">样本</th><th class="num">距重置</th></tr></thead>
+          <thead><tr><th data-i18n="col_quota">额度</th><th data-i18n="col_account">账号</th><th class="num" data-i18n="col_latest">最新</th><th class="num" data-i18n="col_min">最低</th><th class="num" data-i18n="col_max">最高</th><th class="num" data-i18n="col_samples">样本</th><th class="num" data-i18n="col_to_reset">距重置</th></tr></thead>
           <tbody id="chart-table"></tbody>
         </table>
       </div>
@@ -87,76 +89,77 @@
   </section>
 
   <section class="card">
-    <h2 class="card-title">事件</h2>
-    <div id="events" class="events" role="table" aria-label="事件"></div>
-    <button id="events-more" class="btn btn-ghost btn-sm events-more" type="button" hidden>显示更多</button>
+    <h2 class="card-title" data-i18n="events">事件</h2>
+    <div id="events" class="events" role="table" aria-label="事件" data-i18n-aria-label="events"></div>
+    <button id="events-more" class="btn btn-ghost btn-sm events-more" type="button" hidden></button>
   </section>
 
   <section class="card">
-    <h2 class="card-title">设置</h2>
+    <h2 class="card-title" data-i18n="settings">设置</h2>
     <form id="settings">
       <fieldset>
-        <legend>通知</legend>
+        <legend data-i18n="notifications">通知</legend>
         <div class="bark-row">
-          <label>Bark 推送地址<input name="bark_url" type="text" autocomplete="off" placeholder="https://api.day.app/device_key"></label>
-          <label>Bark 分组<input name="bark_group" type="text"></label>
-          <button id="test-bark" class="btn btn-secondary" type="button" title="按已保存的设置发送，修改地址后先保存">测试推送</button>
+          <label><span data-i18n="bark_url">Bark 推送地址</span><input name="bark_url" type="text" autocomplete="off" placeholder="https://api.day.app/device_key"></label>
+          <label><span data-i18n="bark_group">Bark 分组</span><input name="bark_group" type="text"></label>
+          <button id="test-bark" class="btn btn-secondary" type="button" title="按已保存的设置发送，修改地址后先保存" data-i18n="test_bark" data-i18n-title="test_bark_hint">测试推送</button>
         </div>
         <div class="field">
-          <span class="field-label">提醒阈值</span>
+          <span class="field-label" data-i18n="thresholds">提醒阈值</span>
           <div class="thresholds">
-            <label class="inline-input">剩余 ≤<input name="notice_threshold" type="number" min="0" max="100" step="1">%</label>
-            <label class="inline-input">剩余 ≤<input name="low_threshold" type="number" min="0" max="100" step="1">%</label>
-            <label class="inline-input">剩余 ≤<input name="critical_threshold" type="number" min="0" max="100" step="1">%</label>
-            <span class="hint">额度降到每一档时推送一次，耗尽时再推送一次</span>
+            <label class="inline-input"><span data-i18n="remaining_le">剩余 ≤</span><input name="notice_threshold" type="number" min="0" max="100" step="1">%</label>
+            <label class="inline-input"><span data-i18n="remaining_le">剩余 ≤</span><input name="low_threshold" type="number" min="0" max="100" step="1">%</label>
+            <label class="inline-input"><span data-i18n="remaining_le">剩余 ≤</span><input name="critical_threshold" type="number" min="0" max="100" step="1">%</label>
+            <span class="hint" data-i18n="thresholds_hint">额度降到每一档时推送一次，耗尽时再推送一次</span>
           </div>
         </div>
         <div class="checks">
-          <label class="inline"><input name="notify_recovery" type="checkbox">额度恢复时通知</label>
-          <label class="inline"><input name="notify_reset_reminders" type="checkbox">重置前提醒（5 小时窗口前 1 小时，7 天窗口前 1 天）</label>
+          <label class="inline"><input name="notify_recovery" type="checkbox"><span data-i18n="notify_recovery">额度恢复时通知</span></label>
+          <label class="inline"><input name="notify_reset_reminders" type="checkbox"><span data-i18n="notify_reset_reminders">重置前提醒（5 小时窗口前 1 小时，7 天窗口前 1 天）</span></label>
         </div>
         <p class="hint" id="timezone-note"></p>
+        <p class="hint" id="language-note"></p>
       </fieldset>
       <fieldset>
-        <legend>额度查询</legend>
+        <legend data-i18n="quota_queries">额度查询</legend>
         <div class="grid-3">
-          <label class="span-2">模型列表 API key<input name="models_api_key" type="password" autocomplete="off"><span class="hint">在 CPA 的 access.api-keys 中新建一个专用 key，用于读取模型列表、选择点火模型</span></label>
+          <label class="span-2"><span data-i18n="models_api_key">模型列表 API key</span><input name="models_api_key" type="password" autocomplete="off"><span class="hint" data-i18n="models_api_key_hint">在 CPA 的 access.api-keys 中新建一个专用 key，用于读取模型列表、选择点火模型</span></label>
         </div>
         <div class="grid-3">
-          <label>查询间隔（秒）<input name="poll_interval_seconds" type="number" min="60" step="60"></label>
-          <label>请求超时（秒）<input name="request_timeout_seconds" type="number" min="5" max="120"></label>
-          <label>历史保留（天）<input name="history_retention_days" type="number" min="1" max="365"></label>
-          <label>被动数据跳过窗口（秒）<input name="passive_skip_seconds" type="number" min="0" step="10"></label>
-          <label>最多连续跳过（分钟）<input name="passive_skip_max_minutes" type="number" min="0" step="5"></label>
+          <label><span data-i18n="poll_interval">查询间隔（秒）</span><input name="poll_interval_seconds" type="number" min="60" step="60"></label>
+          <label><span data-i18n="request_timeout">请求超时（秒）</span><input name="request_timeout_seconds" type="number" min="5" max="120"></label>
+          <label><span data-i18n="history_retention">历史保留（天）</span><input name="history_retention_days" type="number" min="1" max="365"></label>
+          <label><span data-i18n="passive_skip">被动数据跳过窗口（秒）</span><input name="passive_skip_seconds" type="number" min="0" step="10"></label>
+          <label><span data-i18n="passive_skip_max">最多连续跳过（分钟）</span><input name="passive_skip_max_minutes" type="number" min="0" step="5"></label>
         </div>
-        <p class="hint">整点前这段时间内已有被动数据的账号跳过本轮主动查询；设为 0 则每轮都主动查询。</p>
+        <p class="hint" data-i18n="passive_skip_hint">整点前这段时间内已有被动数据的账号跳过本轮主动查询；设为 0 则每轮都主动查询。</p>
       </fieldset>
       <fieldset>
-        <legend>自动点火</legend>
+        <legend data-i18n="ignition">自动点火</legend>
         <div class="checks">
-          <label class="inline"><input name="ignition.enabled" type="checkbox">启用自动点火</label>
+          <label class="inline"><input name="ignition.enabled" type="checkbox"><span data-i18n="ignition_enabled">启用自动点火</span></label>
         </div>
         <div class="grid-3">
-          <label>每日开始（时）<input name="ignition.start_hour" type="number" min="0" max="23"></label>
-          <label>每日结束（时）<input name="ignition.end_hour" type="number" min="0" max="23"></label>
-          <label>结束后宽限（分钟）<input name="ignition.end_grace_minutes" type="number" min="0"></label>
-          <label>重置后延迟（秒）<input name="ignition.grace_seconds" type="number" min="0"></label>
-          <label>失败重试间隔（秒）<input name="ignition.failure_retry_seconds" type="number" min="60"></label>
-          <label>临时错误上限（次）<input name="ignition.max_transient_failures" type="number" min="1" max="10"></label>
+          <label><span data-i18n="start_hour">每日开始（时）</span><input name="ignition.start_hour" type="number" min="0" max="23"></label>
+          <label><span data-i18n="end_hour">每日结束（时）</span><input name="ignition.end_hour" type="number" min="0" max="23"></label>
+          <label><span data-i18n="end_grace">结束后宽限（分钟）</span><input name="ignition.end_grace_minutes" type="number" min="0"></label>
+          <label><span data-i18n="grace">重置后延迟（秒）</span><input name="ignition.grace_seconds" type="number" min="0"></label>
+          <label><span data-i18n="failure_retry">失败重试间隔（秒）</span><input name="ignition.failure_retry_seconds" type="number" min="60"></label>
+          <label><span data-i18n="max_transient">临时错误上限（次）</span><input name="ignition.max_transient_failures" type="number" min="1" max="10"></label>
         </div>
       </fieldset>
       <fieldset>
-        <legend>服务</legend>
+        <legend data-i18n="services">服务</legend>
         <table class="services">
-          <thead><tr><th>服务</th><th>监控</th><th>自动点火</th><th>点火模型</th></tr></thead>
+          <thead><tr><th data-i18n="col_service">服务</th><th data-i18n="col_monitor">监控</th><th data-i18n="ignition">自动点火</th><th data-i18n="col_ignition_model">点火模型</th></tr></thead>
           <tbody>
-            <tr><td class="strong">ChatGPT</td><td><input name="providers.codex.monitor" type="checkbox" aria-label="监控 ChatGPT"></td><td><input name="providers.codex.ignite" type="checkbox" aria-label="点火 ChatGPT"></td><td><input name="providers.codex.model" type="text" placeholder="自动：最新的 Luna"></td></tr>
-            <tr><td class="strong">Claude</td><td><input name="providers.claude.monitor" type="checkbox" aria-label="监控 Claude"></td><td><input name="providers.claude.ignite" type="checkbox" aria-label="点火 Claude"></td><td><input name="providers.claude.model" type="text" placeholder="自动：最新的 Haiku"></td></tr>
-            <tr><td class="strong">Antigravity</td><td><input name="providers.antigravity.monitor" type="checkbox" aria-label="监控 Antigravity"></td><td><input name="providers.antigravity.ignite" type="checkbox" aria-label="点火 Antigravity"></td><td><input name="providers.antigravity.model" type="text" placeholder="自动：最新的 Flash"></td></tr>
+            <tr><td class="strong">ChatGPT</td><td><input name="providers.codex.monitor" type="checkbox" aria-label="监控 ChatGPT" data-i18n-aria-label="monitor_codex"></td><td><input name="providers.codex.ignite" type="checkbox" aria-label="点火 ChatGPT" data-i18n-aria-label="ignite_codex"></td><td><input name="providers.codex.model" type="text" placeholder="自动：最新的 Luna" data-i18n-placeholder="model_auto_codex"></td></tr>
+            <tr><td class="strong">Claude</td><td><input name="providers.claude.monitor" type="checkbox" aria-label="监控 Claude" data-i18n-aria-label="monitor_claude"></td><td><input name="providers.claude.ignite" type="checkbox" aria-label="点火 Claude" data-i18n-aria-label="ignite_claude"></td><td><input name="providers.claude.model" type="text" placeholder="自动：最新的 Haiku" data-i18n-placeholder="model_auto_claude"></td></tr>
+            <tr><td class="strong">Antigravity</td><td><input name="providers.antigravity.monitor" type="checkbox" aria-label="监控 Antigravity" data-i18n-aria-label="monitor_antigravity"></td><td><input name="providers.antigravity.ignite" type="checkbox" aria-label="点火 Antigravity" data-i18n-aria-label="ignite_antigravity"></td><td><input name="providers.antigravity.model" type="text" placeholder="自动：最新的 Flash" data-i18n-placeholder="model_auto_antigravity"></td></tr>
             <tr class="sub-row"><td></td><td colspan="3">
-              <span class="field-label">Antigravity 点火额度组</span>
+              <span class="field-label" data-i18n="ag_groups">Antigravity 点火额度组</span>
               <div id="ag-groups" class="checks"></div>
-              <span class="hint">Antigravity 按模型分成多个独立的 5 小时额度组。只有勾选的额度组会自动点火；Claude / GPT 额度组较小，默认不点。</span>
+              <span class="hint" data-i18n="ag_groups_hint">Antigravity 按模型分成多个独立的 5 小时额度组。只有勾选的额度组会自动点火；Claude / GPT 额度组较小，默认不点。</span>
             </td></tr>
           </tbody>
         </table>
@@ -164,13 +167,13 @@
       <fieldset>
         <legend>Did Codex Reset</legend>
         <div class="checks">
-          <label class="inline"><input name="codex_reset_updates.enabled" type="checkbox">转发 Did Codex Reset 发布的 Codex 重置信号</label>
-          <label class="inline"><input name="codex_reset_updates.notify_current_pending" type="checkbox">首次开启时推送当前待生效的排期</label>
+          <label class="inline"><input name="codex_reset_updates.enabled" type="checkbox"><span data-i18n="codex_reset_enabled">转发 Did Codex Reset 发布的 Codex 重置信号</span></label>
+          <label class="inline"><input name="codex_reset_updates.notify_current_pending" type="checkbox"><span data-i18n="codex_reset_pending">首次开启时推送当前待生效的排期</span></label>
         </div>
       </fieldset>
       <div class="form-actions">
-        <button class="btn btn-primary" type="submit">保存</button>
-        <span id="settings-note" class="muted">保存后写入 CPA 的 config.yaml，插件自动应用。</span>
+        <button class="btn btn-primary" type="submit" data-i18n="save">保存</button>
+        <span id="settings-note" class="muted" data-i18n="save_hint">保存后写入 CPA 的 config.yaml，插件自动应用。</span>
       </div>
     </form>
   </section>

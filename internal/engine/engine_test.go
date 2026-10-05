@@ -276,6 +276,15 @@ func TestIgnitionIsConfirmedFromResponseHeaders(t *testing.T) {
 	if ts.LastModel != "claude-haiku-4-5-20251001" || ts.LastSuccessEpoch == 0 || ts.ConsecutiveFailures != 0 {
 		t.Fatalf("target state %+v", ts)
 	}
+	var ignited *Event
+	for i, ev := range e.Status().Events {
+		if ev.Kind == "ignite" {
+			ignited = &e.Status().Events[i]
+		}
+	}
+	if ignited == nil || ignited.Params["model"] != "claude-haiku-4-5-20251001" || ignited.Params["reset"] == "" {
+		t.Fatalf("ignite event %+v", ignited)
+	}
 	e.refreshTargets(cfg)
 	for _, target := range e.Status().Targets {
 		if target.Key == "claude:3:claude:main" && !target.NextDue.Equal(c.t.Add(5*time.Hour+3*time.Second).UTC()) {
@@ -363,4 +372,39 @@ func TestHistoryRecordsActiveAndPassiveSamples(t *testing.T) {
 		}
 	}
 	t.Fatalf("claude series missing: %+v", resp.Series)
+}
+
+func TestLanguageReportedByThePageIsUsedForNotifications(t *testing.T) {
+	c := &clock{t: time.Date(2026, 10, 4, 10, 0, 0, 0, shanghai)}
+	h := claudeIgnitionHost(c, nil)
+	h.execute = func(pluginapi.HostModelExecutionRequest) (pluginapi.HostModelExecutionResponse, error) {
+		return pluginapi.HostModelExecutionResponse{}, &host.Error{Code: "host_call_failed", Message: "unauthorized", Status: 401}
+	}
+	e, sender := newTestEngine(t, h, c)
+	ctx := context.Background()
+	cmd := command{kind: "language", arg: "en-US", reply: make(chan error, 1)}
+	e.runCommand(ctx, cmd)
+	if err := <-cmd.reply; err != nil {
+		t.Fatal(err)
+	}
+	if e.Status().Language != "en" || e.state.Language != "en" {
+		t.Fatalf("language %q, state %q", e.Status().Language, e.state.Language)
+	}
+	cfg := e.config()
+	cfg.Providers["codex"] = config.Provider{Monitor: true}
+	e.Configure(cfg, nil)
+	e.poll(ctx, cfg, c.t, "", false)
+	e.performDue(ctx, cfg)
+	var titles []string
+	for _, msg := range sender.sent {
+		titles = append(titles, msg.Title)
+	}
+	if strings.Join(titles, ",") != "⚠️ Claude ignition paused" {
+		t.Fatalf("notifications %v", titles)
+	}
+	for _, ev := range e.Status().Events {
+		if ev.Kind == "ignite_paused" && (ev.Params["until"] == "" || ev.Params["error"] == "") {
+			t.Fatalf("paused event %+v", ev)
+		}
+	}
 }

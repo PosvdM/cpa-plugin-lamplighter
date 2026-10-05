@@ -74,6 +74,7 @@ type Engine struct {
 	nextPoll  time.Time
 	pollErrs  map[string]string
 	modelsErr string
+	lang      string // notification language, a copy of state.Language
 
 	// Owned by the loop goroutine.
 	state       *store.State
@@ -300,7 +301,11 @@ func (e *Engine) openStores(cfg config.Config) error {
 	e.history = &store.History{Dir: filepath.Join(dir, "history")}
 	e.mu.Lock()
 	e.dataDir = dir
+	e.lang = notify.NormalizeLang(state.Language)
 	e.mu.Unlock()
+	if e.alerts != nil {
+		e.alerts.Lang = e.language()
+	}
 	e.loadRecentEvents()
 	return nil
 }
@@ -345,7 +350,8 @@ func (e *Engine) saveState() {
 func (e *Engine) applyRuntimeConfig(cfg config.Config) {
 	e.egress.Timeout = cfg.RequestTimeout()
 	e.alerts = &notify.Alerts{
-		Cfg: cfg,
+		Cfg:  cfg,
+		Lang: e.language(),
 		Sender: &notify.Bark{
 			URL:       cfg.BarkURL,
 			Group:     cfg.BarkGroup,
@@ -353,12 +359,8 @@ func (e *Engine) applyRuntimeConfig(cfg config.Config) {
 			UserAgent: "cpa-plugin-lamplighter/" + e.version,
 			Client:    &http.Client{Timeout: cfg.RequestTimeout()},
 		},
-		OnSent: func(msg notify.Message) {
-			e.addEventDetail("info", "notify", "", msg.Label, msg.Title, msg.Title)
-		},
-		OnError: func(msg notify.Message, err error) {
-			e.addEventDetail("warn", "notify_failed", "", msg.Label, fmt.Sprintf("%s：%v", msg.Title, err), fmt.Sprintf("推送失败 %s：%v", msg.Title, err))
-		},
+		OnSent:  func(msg notify.Message) { e.notified("", msg) },
+		OnError: func(msg notify.Message, err error) { e.notifyFailed("", msg, err) },
 	}
 }
 

@@ -71,6 +71,9 @@ type State struct {
 	// CooldownNotices maps an auth index to the end of the stale CPA
 	// cooldown that was already notified, in Unix seconds.
 	CooldownNotices map[string]int64 `json:"cooldown_notices,omitempty"`
+	// Language is the notification language, the Management Center language
+	// last reported by the management page.
+	Language string `json:"language,omitempty"`
 }
 
 // CooldownNotice records that the stale cooldown of authIndex ending at
