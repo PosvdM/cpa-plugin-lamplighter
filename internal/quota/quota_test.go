@@ -187,3 +187,11 @@ func TestParseTime(t *testing.T) {
 		t.Error("empty values must give zero time")
 	}
 }
+
+func TestClampPercentDropsFloatNoise(t *testing.T) {
+	for in, want := range map[float64]float64{100 - 0.8*100: 20, 100 - 0.78*100: 22, 99.99985: 99.99985, -1: 0, 101: 100} {
+		if got := clampPercent(in); got != want {
+			t.Fatalf("clampPercent(%v) = %v, want %v", in, got, want)
+		}
+	}
+}
