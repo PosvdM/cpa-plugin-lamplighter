@@ -4,6 +4,8 @@
 
 [English](./README_EN.md)
 
+> 点灯人是从前每天傍晚沿街点亮路灯的人。这个插件做的也是这件事：每个 5 小时额度窗口一重置，就点亮下一个窗口，同时看着每盏灯还剩多少油。
+
 Lamplighter（点灯人）是 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI)（CPA）的原生插件。它监控 ChatGPT（Codex）、Claude 和 Antigravity 账号的额度，通过 [Bark](https://github.com/Finb/Bark) 推送提醒，并在 5 小时额度窗口重置后发送一个极小的请求，让下一个窗口立即开始计时。
 
 ![管理页面：各账号额度和自动点火计划](./docs/images/overview.png)
