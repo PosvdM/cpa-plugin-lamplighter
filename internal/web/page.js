@@ -833,10 +833,18 @@
   }
 
   // Samples further apart than a few poll intervals leave a gap, which is
-  // drawn as missing data rather than as a held value.
+  // drawn as missing data rather than as a held value. Active queries are
+  // skipped for up to passive_skip_max_minutes while response headers keep
+  // the main windows fresh; windows without header data, such as Fable, then
+  // wait that long plus one poll, which is not a gap.
   function gapLimit() {
-    var poll = status && status.config ? Number(status.config.poll_interval_seconds) || 300 : 300;
-    return Math.max(history.bucket_seconds || 0, poll) * 3.5;
+    var cfg = status && status.config ? status.config : {};
+    var poll = Number(cfg.poll_interval_seconds) || 300;
+    var limit = Math.max(history.bucket_seconds || 0, poll) * 3.5;
+    if (Number(cfg.passive_skip_seconds) > 0) {
+      limit = Math.max(limit, (Number(cfg.passive_skip_max_minutes) || 0) * 60 + poll * 1.5);
+    }
+    return limit;
   }
 
   // Pooled remaining of several accounts: the mean percentage, which is the

@@ -97,15 +97,38 @@ func TestParsePassiveClaudeHeaders(t *testing.T) {
 		"Anthropic-Ratelimit-Unified-7d-Utilization": {"0.19"},
 		"Anthropic-Ratelimit-Unified-7d-Reset":       {"1791439200"},
 	}
-	group, ok := ParsePassive("claude", header, time.Now())
-	if !ok || group.Key != "claude:main" || len(group.Windows) != 2 {
-		t.Fatalf("unexpected %+v", group)
+	groups := ParsePassive("claude", header, time.Now())
+	if len(groups) != 1 || groups[0].Key != "claude:main" || len(groups[0].Windows) != 2 {
+		t.Fatalf("unexpected %+v", groups)
 	}
+	group := groups[0]
 	if group.Windows[0].Remaining != 80 || group.Windows[0].Reset.Unix() != 1791058200 {
 		t.Fatalf("5h %+v", group.Windows[0])
 	}
 	if diff := group.Windows[1].Remaining - 81; diff > 1e-9 || diff < -1e-9 {
 		t.Fatalf("7d %+v", group.Windows[1])
+	}
+}
+
+func TestParsePassiveClaudeFableHeaders(t *testing.T) {
+	header := http.Header{
+		"Anthropic-Ratelimit-Unified-5h-Utilization":    {"0.2"},
+		"Anthropic-Ratelimit-Unified-7d_oi-Utilization": {"0.35"},
+		"Anthropic-Ratelimit-Unified-7d_oi-Reset":       {"1793865540"},
+	}
+	groups := ParsePassive("claude", header, time.Now())
+	if len(groups) != 2 || groups[1].Key != FableGroupKey || groups[1].SourceLabel != "Fable" {
+		t.Fatalf("unexpected %+v", groups)
+	}
+	w := groups[1].Windows[0]
+	if w.ID != WindowFable || w.Label != LabelFable || w.Remaining != 65 || w.Reset.Unix() != 1793865540 {
+		t.Fatalf("fable %+v", w)
+	}
+	// The Fable group key matches the one from the usage API, so passive
+	// and active data land in the same group.
+	active, err := ParseClaudeUsage(map[string]any{"limits": []any{map[string]any{"kind": "weekly_scoped", "percent": 10.0, "scope": map[string]any{"model": map[string]any{"display_name": "Fable"}}}}})
+	if err != nil || len(active) != 1 || active[0].Key != FableGroupKey {
+		t.Fatalf("active %+v %v", active, err)
 	}
 }
 
@@ -119,10 +142,11 @@ func TestParsePassiveCodexHeaders(t *testing.T) {
 		"X-Codex-Secondary-Reset-After-Seconds": {"93262"},
 		"X-Codex-Secondary-Window-Minutes":      {"10080"},
 	}
-	group, ok := ParsePassive("codex", header, now)
-	if !ok || len(group.Windows) != 2 {
-		t.Fatalf("unexpected %+v", group)
+	groups := ParsePassive("codex", header, now)
+	if len(groups) != 1 || len(groups[0].Windows) != 2 {
+		t.Fatalf("unexpected %+v", groups)
 	}
+	group := groups[0]
 	if group.Windows[0].ID != WindowFiveHour || group.Windows[0].Reset.Unix() != 1791064435 {
 		t.Fatalf("5h %+v", group.Windows[0])
 	}
@@ -132,10 +156,10 @@ func TestParsePassiveCodexHeaders(t *testing.T) {
 }
 
 func TestParsePassiveIgnoresUnrelatedHeaders(t *testing.T) {
-	if _, ok := ParsePassive("claude", http.Header{"Content-Type": {"application/json"}}, time.Now()); ok {
+	if groups := ParsePassive("claude", http.Header{"Content-Type": {"application/json"}}, time.Now()); len(groups) > 0 {
 		t.Fatal("headers without quota fields must be ignored")
 	}
-	if _, ok := ParsePassive("antigravity", http.Header{"X-Codex-Primary-Used-Percent": {"1"}}, time.Now()); ok {
+	if groups := ParsePassive("antigravity", http.Header{"X-Codex-Primary-Used-Percent": {"1"}}, time.Now()); len(groups) > 0 {
 		t.Fatal("antigravity has no passive quota")
 	}
 }

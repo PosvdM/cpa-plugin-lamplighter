@@ -264,7 +264,11 @@ func ParseClaudeUsage(payload map[string]any) ([]RawGroup, error) {
 		if w.ID == WindowFable {
 			label = "Fable"
 		}
-		groups = append(groups, RawGroup{Key: "claude:" + w.ID, SourceLabel: label, Windows: []Window{w}})
+		key := "claude:" + w.ID
+		if w.ID == WindowFable {
+			key = FableGroupKey
+		}
+		groups = append(groups, RawGroup{Key: key, SourceLabel: label, Windows: []Window{w}})
 	}
 	return groups, nil
 }

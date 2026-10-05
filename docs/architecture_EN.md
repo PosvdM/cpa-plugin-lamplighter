@@ -52,7 +52,7 @@ The page looks like the Management Center: its CSS variables reuse the names and
 
 The page does all data handling for the quota chart:
 
-- **Missing data**: when two samples are more than 3.5 poll intervals (or history buckets) apart, the gap is drawn with diagonal hatching instead of holding the previous value.
+- **Missing data**: when two samples are more than 3.5 poll intervals (or history buckets) apart, the gap is drawn with diagonal hatching instead of holding the previous value. With the passive skip enabled, the limit is at least `passive_skip_max_minutes` plus 1.5 poll intervals: windows missing from the response headers, such as an unused Fable quota, wait for the next active query during the skip, and that interval is not a gap.
 - **Pooled accounts**: accounts with the same service and `source_label` share one row showing the mean of their remaining percentages. With equal plans this is the share of the total quota left; the API only reports percentages, so the mean cannot be weighted by quota size. The detail chart also shows the range from the lowest to the highest account.
 - **Order**: rows follow `SERVICE_ORDER` (Claude, ChatGPT, Gemini, Fable, Claude / GPT) by default, with other quotas after them in API order; they can also be sorted by current remaining, lowest first. The status API orders the quota groups of each account the same way (`groupOrder` in `internal/engine/api.go`), so account cards show Gemini before Claude / GPT and Claude before Fable.
 - **Resets**: a rise of 5 points or more between two samples is a reset. The line breaks there, the next piece starts at the value after the reset, and the reset time is labeled; two rises one sample apart count as one reset. One account resetting raises the pooled total by only its share, so the pooled line does not break when the rise is under 5 points.
@@ -122,6 +122,7 @@ CPA passes the upstream response headers in `ResponseHeaders` of the usage recor
 | Service | Headers | Windows |
 | --- | --- | --- |
 | Claude | `Anthropic-Ratelimit-Unified-5h-Utilization` / `-5h-Reset`, same for `-7d-` | 5-hour and 7-day; the value is the used fraction, for example `0.2` |
+| Claude | `Anthropic-Ratelimit-Unified-7d_oi-Utilization` / `-7d_oi-Reset` | Fable's 7-day window, written to the same Fable quota group as the usage API (`quota.FableGroupKey`). CPA also treats `7d_oi` as the Fable-specific window. Whether Anthropic sends these headers on every request or only on Fable requests is not confirmed yet; the plugin logs the first one it reads after each start |
 | Codex | `X-Codex-Primary-Used-Percent`, `-Reset-At`, `-Reset-After-Seconds`, `-Window-Minutes`, same for `Secondary` | Classified by window length: 300 minutes is 5-hour, 10080 is 7-day |
 
 Passive data only updates the windows present in the headers; an active result replaces the whole group.

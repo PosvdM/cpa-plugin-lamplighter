@@ -52,7 +52,7 @@ Lamplighter 是用 Go 编写、以 `-buildmode=c-shared` 构建的 CPA 原生插
 
 额度变化图表的数据处理都在页面中完成：
 
-- **缺数据**：相邻样本间隔超过 3.5 个查询间隔（或接口的分段长度）时视为缺数据，画成斜线纹理，不延续前一个值。
+- **缺数据**：相邻样本间隔超过 3.5 个查询间隔（或接口的分段长度）时视为缺数据，画成斜线纹理，不延续前一个值。启用被动跳过时，阈值至少为 `passive_skip_max_minutes` 加 1.5 个查询间隔：响应头里没有的窗口（如没在使用的 Fable）在跳过期间只能等下一次主动查询，这段间隔不算缺数据。
 - **多账号合计**：同一服务、同一 `source_label` 的多个账号合成一行，取各账号剩余百分比的平均值。各账号套餐相同时，这等于总额度的剩余比例；接口只提供百分比，无法按额度大小加权。详情图同时画出各账号的最低到最高范围。
 - **排序**：默认按 `SERVICE_ORDER`（Claude、ChatGPT、Gemini、Fable、Claude / GPT）排列，其他额度按接口顺序排在后面；也可按当前剩余从低到高排列。状态接口中同一账号的额度组也按这个顺序排列（`internal/engine/api.go` 中的 `groupOrder`），所以账号卡片上 Gemini 在 Claude / GPT 之前、Claude 在 Fable 之前。
 - **重置**：相邻样本的剩余上升 5 个百分点及以上视为重置。曲线在重置处断开，新的一段从重置后的值开始，图上标出重置时间；相隔一个样本的两次上升算一次重置。单个账号重置只让合计上升一部分，上升不足 5 个百分点时合计曲线不断开。
@@ -122,6 +122,7 @@ CPA 在用量记录的 `ResponseHeaders` 中提供上游响应头：
 | 服务 | 响应头 | 窗口 |
 | --- | --- | --- |
 | Claude | `Anthropic-Ratelimit-Unified-5h-Utilization` / `-5h-Reset`，`-7d-` 同理 | 5 小时、7 天；值是已用比例，如 `0.2` |
+| Claude | `Anthropic-Ratelimit-Unified-7d_oi-Utilization` / `-7d_oi-Reset` | Fable 的 7 天窗口，写入与主动查询相同的 Fable 额度组（`quota.FableGroupKey`）。CPA 也把 `7d_oi` 当作 Fable 专用窗口。尚未确认 Anthropic 是每次都返回这组响应头，还是只在 Fable 请求时返回；插件每次启动后第一次读到时记一条日志 |
 | Codex | `X-Codex-Primary-Used-Percent`、`-Reset-At`、`-Reset-After-Seconds`、`-Window-Minutes`，`Secondary` 同理 | 按窗口长度区分，300 分钟为 5 小时，10080 分钟为 7 天 |
 
 被动数据只更新响应头里有的窗口，主动查询结果替换整个额度组。
