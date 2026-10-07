@@ -46,6 +46,16 @@ func TestParseClampsValues(t *testing.T) {
 	}
 }
 
+func TestParseReplacesOldBarkIcon(t *testing.T) {
+	cfg, err := Parse([]byte("bark_icon: " + oldBarkIcon + "\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.BarkIcon != DefaultBarkIcon {
+		t.Fatalf("bark_icon %q", cfg.BarkIcon)
+	}
+}
+
 func TestParseRejectsInvalidYAML(t *testing.T) {
 	if _, err := Parse([]byte("bark_url: [")); err == nil {
 		t.Fatal("invalid YAML must fail")

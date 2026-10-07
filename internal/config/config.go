@@ -15,8 +15,12 @@ import (
 // PluginID is the CPA plugin ID and the key under plugins.configs.
 const PluginID = "lamplighter"
 
-// DefaultBarkIcon is the CPA Management Center logo.
-const DefaultBarkIcon = "https://raw.githubusercontent.com/router-for-me/Cli-Proxy-API-Management-Center/main/logo.jpg"
+// DefaultBarkIcon is the Lamplighter logo.
+const DefaultBarkIcon = "https://raw.githubusercontent.com/PosvdM/cpa-plugin-lamplighter/main/assets/logo.png"
+
+// oldBarkIcon is the CPA Management Center logo, the default before v0.1.17.
+// Saved configs that still hold it get the new default.
+const oldBarkIcon = "https://raw.githubusercontent.com/router-for-me/Cli-Proxy-API-Management-Center/main/logo.jpg"
 
 // Provider holds the per-provider monitoring and ignition switches.
 type Provider struct {
@@ -183,6 +187,9 @@ func (c *Config) normalize() {
 	c.BarkURL = strings.TrimRight(strings.TrimSpace(c.BarkURL), "/")
 	c.BarkGroup = strings.TrimSpace(c.BarkGroup)
 	c.BarkIcon = strings.TrimSpace(c.BarkIcon)
+	if c.BarkIcon == oldBarkIcon {
+		c.BarkIcon = DefaultBarkIcon
+	}
 	c.CPABaseURL = strings.TrimRight(strings.TrimSpace(c.CPABaseURL), "/")
 	if c.CPABaseURL == "" {
 		c.CPABaseURL = "http://127.0.0.1:8317"
