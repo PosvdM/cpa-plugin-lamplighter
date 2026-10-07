@@ -206,7 +206,7 @@ A pause sends one Bark notification (`circuit_notified_until_epoch` prevents rep
 - A window seen for the first time only records its baseline.
 - A failed delivery leaves the notified level unchanged, so the next check retries.
 
-A Bark request is `GET {bark_url}/{title}/{body}?group&level&icon&url`, with title and body percent-encoded except RFC 3986 unreserved characters. A JSON `code` other than 200 is a failure.
+A Bark request is `GET {bark_url}/{title}/{body}?group&level&icon&url`, with title and body percent-encoded except RFC 3986 unreserved characters. A JSON `code` other than 200 is a failure. `icon` defaults to the repository's `assets/logo.png`; a `bark_icon` that still holds the old default (the CPA Management Center logo) is replaced with it on load.
 
 Notification texts are in `internal/notify/text.go`, one column each for Chinese and English, chosen by `language` in `state.json`. The management page reports the language: notifications are sent without a page open, so they use the language reported last, and Chinese until one has been reported. Window names in notifications are always `5h` and `7d`. The Did Codex Reset link points to the Chinese or English history page.
 

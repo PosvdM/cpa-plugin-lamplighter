@@ -113,7 +113,7 @@ Claude 和 Codex 的额度无论主动还是被动获取，都精确到 1%；Ant
 | --- | --- | --- |
 | `bark_url` | 空 | Bark 推送地址，写到 device key 为止；为空时不推送 |
 | `bark_group` | `CPA` | Bark 通知分组 |
-| `bark_icon` | CPA 图标 | 通知图标 |
+| `bark_icon` | Lamplighter 图标 | 通知图标 |
 | `notice_threshold` | `50` | 第一档提醒阈值（剩余百分比） |
 | `low_threshold` | `20` | 第二档提醒阈值 |
 | `critical_threshold` | `10` | 第三档提醒阈值 |

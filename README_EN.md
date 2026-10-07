@@ -111,7 +111,7 @@ All settings live under `plugins.configs.lamplighter` in `config.yaml`, and can 
 | --- | --- | --- |
 | `bark_url` | empty | Bark push URL up to the device key; empty disables notifications |
 | `bark_group` | `CPA` | Bark notification group |
-| `bark_icon` | CPA logo | Notification icon |
+| `bark_icon` | Lamplighter logo | Notification icon |
 | `notice_threshold` | `50` | First alert level (remaining percent) |
 | `low_threshold` | `20` | Second alert level |
 | `critical_threshold` | `10` | Third alert level |
