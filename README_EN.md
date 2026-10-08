@@ -115,8 +115,8 @@ All settings live under `plugins.configs.lamplighter` in `config.yaml`, and can 
 | `notice_threshold` | `50` | First alert level (remaining percent) |
 | `low_threshold` | `20` | Second alert level |
 | `critical_threshold` | `10` | Third alert level |
-| `notify_recovery` | `false` | Notify when quota recovers |
-| `notify_reset_reminders` | `false` | Remind 1 hour before any window resets and 1 day before a 7-day window resets |
+| `recovery_notify` | `off` for both | Recovery notifications, see below |
+| `reset_reminder` | `off` for both | Reset reminders, see below |
 | `timezone` | empty | Time zone for displayed times and the ignition window, such as `Asia/Shanghai`; empty follows the CPA server (set by `TZ` in the official Docker image) |
 | `timezone_offset_hours` | empty | Fixed UTC offset such as `8`; used only when `timezone` is empty |
 | `poll_interval_seconds` | `300` | Active query interval, at least 60 |
@@ -127,6 +127,17 @@ All settings live under `plugins.configs.lamplighter` in `config.yaml`, and can 
 | `cpa_base_url` | `http://127.0.0.1:8317` | Address the plugin uses to reach CPA; change it when CPA uses another port or TLS |
 | `history_retention_days` | `40` | Days of quota history to keep |
 | `data_dir` | `data/lamplighter` in the plugin directory | State and history directory |
+
+Recovery notifications and reset reminders are set per window: `five_hour` for 5-hour windows and `seven_day` for 7-day windows.
+
+| Key | Values | Description |
+| --- | --- | --- |
+| `recovery_notify` | `off`, `all`, `after_exhausted` | `all`: notify every time the window resets; `after_exhausted`: after the window runs out, notify once at its next reset |
+| `reset_reminder` | `off`, `all`, `has_remaining` | 5-hour windows are reminded 1 hour before the reset, 7-day windows 1 day before; `has_remaining`: remind only when more than `critical_threshold` is left |
+
+The first line of a recovery notification is what was left when the previous cycle ended. With `recovery_notify` set to `all`, the plugin queries the account once more 2 minutes before the reset to get this value; usage in those last 2 minutes is not counted. Without a reading from the last 15 minutes before the reset, the line is left out. A window that is neither a 5-hour nor a 7-day window counts as a 7-day window once it was seen more than a day before its reset, and as a 5-hour window otherwise.
+
+`notify_recovery: true` and `notify_reset_reminders: true` set both windows of the matching key to `all`. They apply only when `recovery_notify` or `reset_reminder` is absent; saving the settings on the management page replaces them with the new keys.
 
 Ignition settings live under `ignition`:
 

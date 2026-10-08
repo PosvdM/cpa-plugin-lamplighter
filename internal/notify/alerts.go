@@ -150,10 +150,13 @@ func (a *Alerts) body(g Group, now time.Time) string {
 }
 
 type change struct {
-	window           quota.Window
-	to               string
-	down             bool
-	resetRecoveryFor string
+	window quota.Window
+	to     string
+}
+
+type recovery struct {
+	window   quota.Window
+	previous *float64
 }
 
 type reminder struct {
@@ -163,52 +166,56 @@ type reminder struct {
 }
 
 func (a *Alerts) buildChangeMessage(g Group, changes []change, now time.Time) Message {
-	var worsening, recovering []change
+	worst := changes[0]
+	for _, c := range changes[1:] {
+		if severityRank[c.to] > severityRank[worst.to] {
+			worst = c
+		}
+	}
+	parts := make([]string, 0, len(changes))
 	for _, c := range changes {
-		if c.down {
-			worsening = append(worsening, c)
-		} else {
-			recovering = append(recovering, c)
+		text := fmt.Sprintf("%s %d%%", quota.ShortLabel(c.window.Label), roundPercent(c.window.Remaining))
+		if !c.window.Reset.IsZero() {
+			text += " | " + CompactDuration(c.window.Reset.Sub(now), a.Lang)
+		}
+		parts = append(parts, text)
+	}
+	// Yellow for the first threshold, red from the second one down; the
+	// page colors quota the same way. ⚠️ is kept for errors.
+	prefix, level := "🟡", LevelActive
+	if worst.to != SeverityNotice {
+		prefix = "🔴"
+	}
+	if worst.to == SeverityCritical || worst.to == SeverityExhausted {
+		level = LevelTimeSensitive
+	}
+	return Message{
+		Title: fmt.Sprintf("%s %s · %s", prefix, g.Label, strings.Join(parts, " / ")),
+		Body:  a.body(g, now),
+		Level: level,
+		Label: g.Label,
+	}
+}
+
+// buildRecoveryMessage lists the reset windows in the title. The body starts
+// with what was left of each window in the ended cycle, when known.
+func (a *Alerts) buildRecoveryMessage(g Group, recoveries []recovery, now time.Time) Message {
+	labels := make([]string, 0, len(recoveries))
+	var previous []string
+	for _, r := range recoveries {
+		label := quota.ShortLabel(r.window.Label)
+		labels = append(labels, label)
+		if r.previous != nil {
+			previous = append(previous, fmt.Sprintf("%s %d%%", label, roundPercent(*r.previous)))
 		}
 	}
-	if len(worsening) > 0 {
-		worst := worsening[0]
-		for _, c := range worsening[1:] {
-			if severityRank[c.to] > severityRank[worst.to] {
-				worst = c
-			}
-		}
-		parts := make([]string, 0, len(worsening))
-		for _, c := range worsening {
-			text := fmt.Sprintf("%s %d%%", quota.ShortLabel(c.window.Label), roundPercent(c.window.Remaining))
-			if !c.window.Reset.IsZero() {
-				text += " | " + CompactDuration(c.window.Reset.Sub(now), a.Lang)
-			}
-			parts = append(parts, text)
-		}
-		// Yellow for the first threshold, red from the second one down; the
-		// page colors quota the same way. ⚠️ is kept for errors.
-		prefix, level := "🟡", LevelActive
-		if worst.to != SeverityNotice {
-			prefix = "🔴"
-		}
-		if worst.to == SeverityCritical || worst.to == SeverityExhausted {
-			level = LevelTimeSensitive
-		}
-		return Message{
-			Title: fmt.Sprintf("%s %s · %s", prefix, g.Label, strings.Join(parts, " / ")),
-			Body:  a.body(g, now),
-			Level: level,
-			Label: g.Label,
-		}
-	}
-	labels := make([]string, 0, len(recovering))
-	for _, c := range recovering {
-		labels = append(labels, quota.ShortLabel(c.window.Label))
+	body := a.body(g, now)
+	if len(previous) > 0 {
+		body = T(a.Lang, "previous_cycle", strings.Join(previous, " / ")) + "\n" + body
 	}
 	return Message{
 		Title: T(a.Lang, "recovered", g.Label, strings.Join(labels, " / ")),
-		Body:  a.body(g, now),
+		Body:  body,
 		Level: LevelActive,
 		Label: g.Label,
 	}
@@ -227,29 +234,63 @@ func (a *Alerts) buildReminderMessage(g Group, reminders []reminder, now time.Ti
 	}
 }
 
-func (a *Alerts) detectResetRecovery(old *store.WindowState, w quota.Window, now time.Time, current string) string {
-	pending := old.PendingResetRecoveryFor
-	if pending != "" && current == SeverityNormal && !SameResetCycle(old.ResetRecoveryFor, pending) {
-		return pending
+// SevenDayClass reports whether the recovery and reminder settings treat w
+// as a 7-day window. 5-hour and 7-day windows are known by their labels. A
+// window of another kind counts as a 7-day window once it was seen more
+// than a day before its reset; ws may be nil.
+func SevenDayClass(w quota.Window, ws *store.WindowState) bool {
+	switch {
+	case quota.IsSevenDay(w):
+		return true
+	case quota.IsFiveHour(w):
+		return false
 	}
-	if current != SeverityNormal {
-		return ""
-	}
-	cycle := old.ResetNotice1hFor
-	if cycle == "" || SameResetCycle(old.ResetRecoveryFor, cycle) {
-		return ""
-	}
-	target := parseReset(cycle)
-	if target.IsZero() || now.Before(target) {
-		return ""
-	}
-	currentReset := formatReset(w.Reset)
-	if old.Reset != "" && SameResetCycle(old.Reset, cycle) {
-		if currentReset == "" || !SameResetCycle(currentReset, cycle) {
-			return cycle
+	return ws != nil && ws.Long
+}
+
+// cycleEnded reports whether w belongs to a new cycle after the reading in
+// old. When both reset times are known, the reset time must have moved and
+// either the old one must have passed or the quota must have risen by
+// RecoveryJump; Codex reports a reset time that moves forward with every
+// query while a window is unused, and that alone is no reset. Without a new
+// reset time, a passed old reset time or a rise by RecoveryJump counts.
+func cycleEnded(old *store.WindowState, w quota.Window, now time.Time) bool {
+	rose := w.Remaining-old.Remaining >= RecoveryJump
+	oldReset := parseReset(old.Reset)
+	passed := !oldReset.IsZero() && !now.Before(oldReset.Add(-resetTolerance))
+	if !oldReset.IsZero() && !w.Reset.IsZero() {
+		if SameResetCycle(old.Reset, formatReset(w.Reset)) {
+			return false
 		}
+		return passed || rose
 	}
-	return ""
+	return passed || rose
+}
+
+// previousReadingAge is how old the last reading of an ended cycle may be,
+// measured at the reset, to be reported as what was left of that cycle.
+const previousReadingAge = 15 * time.Minute
+
+// pendingRecoveryAge is how long an undelivered recovery notification is
+// retried.
+const pendingRecoveryAge = time.Hour
+
+// endedCycle returns the last remaining percentage of the cycle that ended
+// before w, or nil when the last reading is too old to tell. A used-up
+// window stays used up until its reset, so that reading never gets old.
+func endedCycle(old *store.WindowState, now time.Time) *float64 {
+	previous := old.Remaining
+	if previous <= ExhaustedRemaining {
+		return &previous
+	}
+	end := now
+	if reset := parseReset(old.Reset); !reset.IsZero() && reset.Before(now) {
+		end = reset
+	}
+	if old.LastSeen == 0 || end.Sub(time.Unix(old.LastSeen, 0)) > previousReadingAge {
+		return nil
+	}
+	return &previous
 }
 
 // renewed reports whether w really recovered since the previous reading:
@@ -286,10 +327,13 @@ func (a *Alerts) send(ctx context.Context, msg Message) bool {
 func (a *Alerts) ProcessGroup(ctx context.Context, st *store.State, g Group, now time.Time) {
 	groupState := st.Group(g.Key)
 	var changes []change
+	var recoveries []recovery
 	var reminders []reminder
 
 	for _, w := range g.Windows {
 		current := a.Severity(w.Remaining)
+		exhausted := w.Remaining <= ExhaustedRemaining
+		long := !w.Reset.IsZero() && w.Reset.Sub(now) > 24*time.Hour
 		old, seen := groupState.Windows[w.ID]
 		if !seen || old == nil {
 			groupState.Windows[w.ID] = &store.WindowState{
@@ -298,48 +342,57 @@ func (a *Alerts) ProcessGroup(ctx context.Context, st *store.State, g Group, now
 				Remaining:        w.Remaining,
 				Reset:            formatReset(w.Reset),
 				LastSeen:         now.Unix(),
+				Exhausted:        exhausted,
+				Long:             long,
 			}
 			continue
 		}
+		if long {
+			old.Long = true
+		}
+		sevenDay := SevenDayClass(w, old)
 		notified := old.NotifiedSeverity
 		if notified == "" {
 			notified = SeverityNormal
 		}
-		resetRecoveryFor := a.detectResetRecovery(old, w, now, current)
 
-		direction := ""
-		silentRecovery := false
 		switch {
 		case severityRank[current] > severityRank[notified]:
-			direction = "down"
+			changes = append(changes, change{window: w, to: current})
 		case severityRank[notified] > severityRank[current] && renewed(old, w):
-			if a.Cfg.NotifyRecovery {
-				direction = "up"
-			} else {
-				// Recovery notifications may be off, but the baseline still
-				// follows the recovered quota; otherwise an old exhausted
-				// state would suppress alerts in the next cycle.
-				silentRecovery = true
-			}
-		case a.Cfg.NotifyRecovery && resetRecoveryFor != "":
-			direction = "up"
+			// The baseline follows the recovered quota; otherwise an old
+			// exhausted state would suppress alerts in the next cycle.
+			old.NotifiedSeverity = current
 		}
-		if direction != "" {
-			c := change{window: w, to: current, down: direction == "down"}
-			if !c.down {
-				c.resetRecoveryFor = resetRecoveryFor
+
+		if cycleEnded(old, w, now) {
+			old.PendingRecovery = &store.PendingRecovery{At: now.Unix(), Previous: endedCycle(old, now), Exhausted: old.Exhausted}
+			old.Exhausted = false
+		}
+		if exhausted {
+			old.Exhausted = true
+		}
+		if p := old.PendingRecovery; p != nil {
+			mode := a.Cfg.RecoveryNotify.For(sevenDay)
+			switch {
+			case now.Sub(time.Unix(p.At, 0)) > pendingRecoveryAge,
+				mode == config.RecoveryOff,
+				mode == config.RecoveryAfterExhausted && !p.Exhausted:
+				old.PendingRecovery = nil
+			default:
+				recoveries = append(recoveries, recovery{window: w, previous: p.Previous})
 			}
-			changes = append(changes, c)
 		}
 
 		resetValue := formatReset(w.Reset)
-		if a.Cfg.NotifyResetReminders && resetValue != "" {
+		mode := a.Cfg.ResetReminder.For(sevenDay)
+		if resetValue != "" && mode != config.ReminderOff &&
+			(mode == config.ReminderAll || w.Remaining > math.Max(a.Cfg.CriticalThreshold, ExhaustedRemaining)) {
 			untilReset := w.Reset.Sub(now)
 			switch {
-			case untilReset > 0 && untilReset <= time.Hour && !SameResetCycle(old.ResetNotice1hFor, resetValue):
+			case !sevenDay && untilReset > 0 && untilReset <= time.Hour && !SameResetCycle(old.ResetNotice1hFor, resetValue):
 				reminders = append(reminders, reminder{window: w, reset: resetValue, stage: "1h"})
-			case quota.IsSevenDay(w) && untilReset > time.Hour && untilReset <= 24*time.Hour &&
-				!SameResetCycle(old.ResetNotice1dFor, resetValue):
+			case sevenDay && untilReset > 0 && untilReset <= 24*time.Hour && !SameResetCycle(old.ResetNotice1dFor, resetValue):
 				reminders = append(reminders, reminder{window: w, reset: resetValue, stage: "1d"})
 			}
 		}
@@ -348,30 +401,19 @@ func (a *Alerts) ProcessGroup(ctx context.Context, st *store.State, g Group, now
 		old.Remaining = w.Remaining
 		old.Reset = resetValue
 		old.LastSeen = now.Unix()
-		if silentRecovery {
-			old.NotifiedSeverity = current
-		}
-		if resetRecoveryFor != "" {
-			old.PendingResetRecoveryFor = resetRecoveryFor
-		}
 	}
 
 	if len(changes) > 0 {
-		msg := a.buildChangeMessage(g, changes, now)
-		if a.send(ctx, msg) {
-			worsening := false
+		if a.send(ctx, a.buildChangeMessage(g, changes, now)) {
 			for _, c := range changes {
-				if c.down {
-					worsening = true
-				}
+				groupState.Windows[c.window.ID].NotifiedSeverity = c.to
 			}
-			for _, c := range changes {
-				ws := groupState.Windows[c.window.ID]
-				ws.NotifiedSeverity = c.to
-				if c.resetRecoveryFor != "" && !worsening {
-					ws.ResetRecoveryFor = c.resetRecoveryFor
-					ws.PendingResetRecoveryFor = ""
-				}
+		}
+	}
+	if len(recoveries) > 0 {
+		if a.send(ctx, a.buildRecoveryMessage(g, recoveries, now)) {
+			for _, r := range recoveries {
+				groupState.Windows[r.window.ID].PendingRecovery = nil
 			}
 		}
 	}

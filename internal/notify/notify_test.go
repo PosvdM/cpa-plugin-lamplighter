@@ -141,11 +141,83 @@ func TestResetReminders(t *testing.T) {
 	if len(sender.sent) != 0 {
 		t.Fatal("reminders are off by default")
 	}
-	cfg.NotifyResetReminders = true
+	cfg.ResetReminder.FiveHour = config.ReminderAll
 	alerts(cfg, sender).ProcessGroup(context.Background(), st, soon, now)
 	alerts(cfg, sender).ProcessGroup(context.Background(), st, soon, now)
 	if len(sender.sent) != 1 || sender.sent[0].Title != "⏰ Claude · 5h 重置提醒" {
 		t.Fatalf("want one reminder, got %+v", sender.sent)
+	}
+}
+
+func TestResetReminderModesPerWindow(t *testing.T) {
+	now := time.Date(2026, 10, 4, 1, 0, 0, 0, time.UTC)
+	window := func(remaining float64, sevenDayIn time.Duration) Group {
+		return Group{Key: "g", Label: "Claude", Windows: []quota.Window{
+			{ID: quota.WindowFiveHour, Label: quota.LabelFiveHour, Remaining: remaining, Reset: now.Add(30 * time.Minute)},
+			{ID: quota.WindowSevenDay, Label: quota.LabelSevenDay, Remaining: remaining, Reset: now.Add(sevenDayIn)},
+		}}
+	}
+	cases := []struct {
+		name      string
+		modes     config.WindowModes
+		remaining float64
+		sevenDay  time.Duration
+		want      string
+	}{
+		{"5h only", config.WindowModes{FiveHour: config.ReminderAll, SevenDay: config.ReminderOff}, 50, 20 * time.Hour, "⏰ Claude · 5h 重置提醒"},
+		{"7d one day before", config.WindowModes{FiveHour: config.ReminderOff, SevenDay: config.ReminderAll}, 50, 20 * time.Hour, "⏰ Claude · 7d 重置提醒"},
+		{"7d not earlier", config.WindowModes{FiveHour: config.ReminderOff, SevenDay: config.ReminderAll}, 50, 30 * time.Hour, ""},
+		{"has remaining", config.WindowModes{FiveHour: config.ReminderHasRemaining, SevenDay: config.ReminderHasRemaining}, 11, 20 * time.Hour, "⏰ Claude · 5h / 7d 重置提醒"},
+		{"nothing left", config.WindowModes{FiveHour: config.ReminderHasRemaining, SevenDay: config.ReminderAll}, 10, 20 * time.Hour, "⏰ Claude · 7d 重置提醒"},
+	}
+	for _, tc := range cases {
+		cfg := config.Default()
+		cfg.ResetReminder = tc.modes
+		sender := &fakeSender{}
+		st := store.NewState()
+		a := alerts(cfg, sender)
+		g := window(tc.remaining, tc.sevenDay)
+		a.ProcessGroup(context.Background(), st, g, now)
+		a.ProcessGroup(context.Background(), st, g, now)
+		var titles []string
+		for _, msg := range sender.sent {
+			if strings.HasPrefix(msg.Title, "⏰") {
+				titles = append(titles, msg.Title)
+			}
+		}
+		got := strings.Join(titles, ",")
+		if got != tc.want {
+			t.Fatalf("%s: got %q, want %q", tc.name, got, tc.want)
+		}
+	}
+	// Seven-day windows are reminded once, a day before; not again at one hour.
+	cfg := config.Default()
+	cfg.ResetReminder.SevenDay = config.ReminderAll
+	sender := &fakeSender{}
+	st := store.NewState()
+	a := alerts(cfg, sender)
+	a.ProcessGroup(context.Background(), st, window(50, 20*time.Hour), now)
+	a.ProcessGroup(context.Background(), st, window(50, 20*time.Hour), now)
+	later := now.Add(19*time.Hour + 30*time.Minute)
+	a.ProcessGroup(context.Background(), st, window(50, 20*time.Hour), later)
+	if len(sender.sent) != 1 {
+		t.Fatalf("want one 7d reminder, got %+v", sender.sent)
+	}
+}
+
+func TestUnknownWindowKindFollowsItsResetDistance(t *testing.T) {
+	now := time.Date(2026, 10, 4, 1, 0, 0, 0, time.UTC)
+	ws := &store.WindowState{}
+	w := quota.Window{ID: "opus", Label: "Opus", Reset: now.Add(3 * time.Hour)}
+	if SevenDayClass(w, ws) || SevenDayClass(w, nil) {
+		t.Fatal("an unknown window counts as a 5-hour window until seen far from its reset")
+	}
+	ws.Long = true
+	if !SevenDayClass(w, ws) {
+		t.Fatal("an unknown window seen more than a day before its reset counts as a 7-day window")
+	}
+	if !SevenDayClass(quota.Window{ID: quota.WindowFable, Label: quota.LabelFable}, nil) {
+		t.Fatal("the Fable window is a 7-day window")
 	}
 }
 
@@ -369,11 +441,12 @@ func TestEnglishNotifications(t *testing.T) {
 	st := store.NewState()
 	now := time.Date(2026, 10, 4, 1, 0, 0, 0, time.UTC)
 	cfg := config.Default()
-	cfg.NotifyRecovery = true
+	cfg.RecoveryNotify.FiveHour = config.RecoveryAll
 	a := &Alerts{Cfg: cfg, Sender: sender, Lang: LangEN}
 	a.ProcessGroup(context.Background(), st, group(80, 80, now), now)
 	a.ProcessGroup(context.Background(), st, group(26, 80, now), now)
-	a.ProcessGroup(context.Background(), st, group(90, 80, now), now)
+	later := now.Add(5 * time.Hour)
+	a.ProcessGroup(context.Background(), st, group(100, 80, later), later)
 	if len(sender.sent) != 2 || !strings.HasPrefix(sender.sent[0].Body, "5h: 26% | 05h | ") || sender.sent[1].Title != "✅ ChatGPT#eg · 5h recovered" {
 		t.Fatalf("got %+v", sender.sent)
 	}
@@ -389,18 +462,18 @@ func TestEnglishNotifications(t *testing.T) {
 // Usage endpoints and response headers can differ by a point, so a reading
 // bounces around a threshold within one window.
 func TestThresholdBounceNotifiesOnce(t *testing.T) {
-	for _, recovery := range []bool{false, true} {
+	for _, recovery := range []string{config.RecoveryOff, config.RecoveryAll} {
 		sender := &fakeSender{}
 		st := store.NewState()
 		now := time.Date(2026, 10, 4, 1, 0, 0, 0, time.UTC)
 		cfg := config.Default()
-		cfg.NotifyRecovery = recovery
+		cfg.RecoveryNotify = config.WindowModes{FiveHour: recovery, SevenDay: recovery}
 		a := alerts(cfg, sender)
 		for _, v := range []float64{60, 50, 51, 50, 49, 21, 20, 21, 19.99, 20} {
 			a.ProcessGroup(context.Background(), st, group(v, 80, now), now)
 		}
 		if len(sender.sent) != 2 || !strings.HasPrefix(sender.sent[0].Title, "🟡") || !strings.HasPrefix(sender.sent[1].Title, "🔴") {
-			t.Fatalf("recovery=%v: want one yellow and one red alert, got %+v", recovery, sender.sent)
+			t.Fatalf("recovery=%s: want one yellow and one red alert, got %+v", recovery, sender.sent)
 		}
 	}
 }
@@ -426,5 +499,150 @@ func TestRecoveryNeedsNewWindowOrJump(t *testing.T) {
 	a.ProcessGroup(context.Background(), st, group(50, 80, later), later)
 	if len(sender.sent) != 3 {
 		t.Fatalf("want three alerts, got %+v", sender.sent)
+	}
+}
+
+// fiveHour returns a group with one 5-hour window resetting at reset.
+func fiveHour(remaining float64, reset time.Time) Group {
+	return Group{Key: "g", Label: "Claude", Windows: []quota.Window{
+		{ID: quota.WindowFiveHour, Label: quota.LabelFiveHour, Remaining: remaining, Reset: reset},
+	}}
+}
+
+func TestRecoveryAllNotifiesEveryResetWithPreviousCycle(t *testing.T) {
+	cfg := config.Default()
+	cfg.RecoveryNotify.FiveHour = config.RecoveryAll
+	sender := &fakeSender{}
+	st := store.NewState()
+	a := alerts(cfg, sender)
+	start := time.Date(2026, 10, 4, 1, 0, 0, 0, time.UTC)
+	reset := start.Add(time.Hour)
+	a.ProcessGroup(context.Background(), st, fiveHour(80, reset), start)
+	// The last reading before the reset, as the pre-reset query takes it.
+	a.ProcessGroup(context.Background(), st, fiveHour(63, reset), reset.Add(-2*time.Minute))
+	after := reset.Add(time.Minute)
+	a.ProcessGroup(context.Background(), st, fiveHour(100, after.Add(5*time.Hour)), after)
+	a.ProcessGroup(context.Background(), st, fiveHour(100, after.Add(5*time.Hour)), after.Add(5*time.Minute))
+	if len(sender.sent) != 1 {
+		t.Fatalf("want one recovery, got %+v", sender.sent)
+	}
+	msg := sender.sent[0]
+	if msg.Title != "✅ Claude · 5h 已恢复" || !strings.HasPrefix(msg.Body, "上周期剩余：5h 63%\n5h：100%") {
+		t.Fatalf("recovery %+v", msg)
+	}
+}
+
+func TestRecoveryOmitsStalePreviousCycle(t *testing.T) {
+	cfg := config.Default()
+	cfg.RecoveryNotify.FiveHour = config.RecoveryAll
+	sender := &fakeSender{}
+	st := store.NewState()
+	a := alerts(cfg, sender)
+	start := time.Date(2026, 10, 4, 1, 0, 0, 0, time.UTC)
+	reset := start.Add(time.Hour)
+	a.ProcessGroup(context.Background(), st, fiveHour(63, reset), start)
+	after := reset.Add(time.Minute)
+	a.ProcessGroup(context.Background(), st, fiveHour(100, after.Add(5*time.Hour)), after)
+	if len(sender.sent) != 1 || strings.Contains(sender.sent[0].Body, "上周期") {
+		t.Fatalf("a reading an hour before the reset is not the cycle's end: %+v", sender.sent)
+	}
+}
+
+func TestMovingResetOfAnUnusedWindowIsNoRecovery(t *testing.T) {
+	cfg := config.Default()
+	cfg.RecoveryNotify.FiveHour = config.RecoveryAll
+	sender := &fakeSender{}
+	st := store.NewState()
+	a := alerts(cfg, sender)
+	now := time.Date(2026, 10, 4, 1, 0, 0, 0, time.UTC)
+	for i := 0; i < 5; i++ {
+		at := now.Add(time.Duration(i) * 5 * time.Minute)
+		a.ProcessGroup(context.Background(), st, fiveHour(100, at.Add(5*time.Hour)), at)
+	}
+	if len(sender.sent) != 0 {
+		t.Fatalf("a reset time that moves with the query is no reset: %+v", sender.sent)
+	}
+}
+
+func TestRecoveryAfterExhaustedNotifiesOnlyAfterUsedUpCycle(t *testing.T) {
+	cfg := config.Default()
+	cfg.CriticalThreshold, cfg.LowThreshold, cfg.NoticeThreshold = 0, 0, 0
+	cfg.RecoveryNotify.FiveHour = config.RecoveryAfterExhausted
+	sender := &fakeSender{}
+	st := store.NewState()
+	a := alerts(cfg, sender)
+	at := time.Date(2026, 10, 4, 1, 0, 0, 0, time.UTC)
+	reset := at.Add(time.Hour)
+	a.ProcessGroup(context.Background(), st, fiveHour(40, reset), at)
+	// A cycle that ends with quota left is not notified.
+	at = reset.Add(time.Minute)
+	reset = at.Add(5 * time.Hour)
+	a.ProcessGroup(context.Background(), st, fiveHour(100, reset), at)
+	if len(sender.sent) != 0 {
+		t.Fatalf("no recovery after a cycle with quota left: %+v", sender.sent)
+	}
+	// This cycle is used up two hours before its reset.
+	a.ProcessGroup(context.Background(), st, fiveHour(0, reset), reset.Add(-2*time.Hour))
+	sent := len(sender.sent)
+	at = reset.Add(time.Minute)
+	reset = at.Add(5 * time.Hour)
+	a.ProcessGroup(context.Background(), st, fiveHour(100, reset), at)
+	if len(sender.sent) != sent+1 || !strings.HasPrefix(sender.sent[sent].Body, "上周期剩余：5h 0%") {
+		t.Fatalf("want a recovery after the used-up cycle, got %+v", sender.sent)
+	}
+	// The next cycle is not used up, so its reset is not notified.
+	at = reset.Add(time.Minute)
+	a.ProcessGroup(context.Background(), st, fiveHour(100, at.Add(5*time.Hour)), at)
+	if len(sender.sent) != sent+1 {
+		t.Fatalf("one recovery per used-up cycle: %+v", sender.sent)
+	}
+}
+
+func TestRecoveryModesArePerWindow(t *testing.T) {
+	cfg := config.Default()
+	cfg.RecoveryNotify = config.WindowModes{FiveHour: config.RecoveryOff, SevenDay: config.RecoveryAll}
+	sender := &fakeSender{}
+	st := store.NewState()
+	a := alerts(cfg, sender)
+	now := time.Date(2026, 10, 4, 1, 0, 0, 0, time.UTC)
+	g := Group{Key: "g", Label: "Claude", Windows: []quota.Window{
+		{ID: quota.WindowFiveHour, Label: quota.LabelFiveHour, Remaining: 70, Reset: now.Add(time.Minute)},
+		{ID: quota.WindowSevenDay, Label: quota.LabelSevenDay, Remaining: 70, Reset: now.Add(time.Minute)},
+	}}
+	a.ProcessGroup(context.Background(), st, g, now)
+	after := now.Add(2 * time.Minute)
+	g.Windows[0].Remaining, g.Windows[0].Reset = 100, after.Add(5*time.Hour)
+	g.Windows[1].Remaining, g.Windows[1].Reset = 100, after.Add(7*24*time.Hour)
+	a.ProcessGroup(context.Background(), st, g, after)
+	if len(sender.sent) != 1 || sender.sent[0].Title != "✅ Claude · 7d 已恢复" {
+		t.Fatalf("only the 7-day window is notified: %+v", sender.sent)
+	}
+}
+
+func TestRecoveryIsSentApartFromAlertAndRetried(t *testing.T) {
+	cfg := config.Default()
+	cfg.RecoveryNotify = config.WindowModes{FiveHour: config.RecoveryAll, SevenDay: config.RecoveryAll}
+	sender := &fakeSender{}
+	st := store.NewState()
+	a := alerts(cfg, sender)
+	now := time.Date(2026, 10, 4, 1, 0, 0, 0, time.UTC)
+	g := Group{Key: "g", Label: "Claude", Windows: []quota.Window{
+		{ID: quota.WindowFiveHour, Label: quota.LabelFiveHour, Remaining: 70, Reset: now.Add(time.Minute)},
+		{ID: quota.WindowSevenDay, Label: quota.LabelSevenDay, Remaining: 60, Reset: now.Add(3 * 24 * time.Hour)},
+	}}
+	a.ProcessGroup(context.Background(), st, g, now)
+	after := now.Add(2 * time.Minute)
+	g.Windows[0].Remaining, g.Windows[0].Reset = 100, after.Add(5*time.Hour)
+	g.Windows[1].Remaining = 45
+	sender.fail = true
+	a.ProcessGroup(context.Background(), st, g, after)
+	sender.fail = false
+	a.ProcessGroup(context.Background(), st, g, after.Add(5*time.Minute))
+	if len(sender.sent) != 2 || !strings.HasPrefix(sender.sent[0].Title, "🟡") || sender.sent[1].Title != "✅ Claude · 5h 已恢复" {
+		t.Fatalf("want the alert and the retried recovery, got %+v", sender.sent)
+	}
+	a.ProcessGroup(context.Background(), st, g, after.Add(10*time.Minute))
+	if len(sender.sent) != 2 {
+		t.Fatalf("a delivered recovery is not repeated: %+v", sender.sent)
 	}
 }

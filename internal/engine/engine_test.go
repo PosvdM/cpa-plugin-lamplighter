@@ -408,3 +408,34 @@ func TestLanguageReportedByThePageIsUsedForNotifications(t *testing.T) {
 		}
 	}
 }
+
+func TestPreResetQueryRunsOncePerReset(t *testing.T) {
+	start := time.Date(2026, 10, 4, 10, 0, 0, 0, shanghai)
+	c := &clock{t: start}
+	// The host's reset times follow a separate clock, so they stay fixed.
+	h := standardHost(&clock{t: start})
+	reset := start.Add(3 * time.Hour)
+	e, _ := newTestEngine(t, h, c)
+	ctx := context.Background()
+	e.poll(ctx, e.config(), c.t, "", false)
+	if due, next := e.probes(e.config(), c.t); len(due) != 0 || !next.IsZero() {
+		t.Fatalf("no pre-reset query while recovery notifications are off: %v %v", due, next)
+	}
+
+	cfg := e.config()
+	cfg.RecoveryNotify.FiveHour = config.RecoveryAll
+	e.Configure(cfg, nil)
+	if due, next := e.probes(cfg, c.t); len(due) != 0 || !next.Equal(reset.Add(-probeLead)) {
+		t.Fatalf("next pre-reset query: %v %v", due, next)
+	}
+	before := h.requestsTo(quota.ClaudeUsageURL)
+	c.t = reset.Add(-time.Minute)
+	e.runProbes(ctx, cfg, c.t)
+	e.runProbes(ctx, cfg, c.t)
+	if got := h.requestsTo(quota.ClaudeUsageURL) - before; got != 1 {
+		t.Fatalf("want one pre-reset Claude query, got %d", got)
+	}
+	if due, next := e.probes(cfg, c.t); len(due) != 0 || !next.IsZero() {
+		t.Fatalf("every window was probed: %v %v", due, next)
+	}
+}

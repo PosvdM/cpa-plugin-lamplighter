@@ -117,8 +117,8 @@ Claude 和 Codex 的额度无论主动还是被动获取，都精确到 1%；Ant
 | `notice_threshold` | `50` | 第一档提醒阈值（剩余百分比） |
 | `low_threshold` | `20` | 第二档提醒阈值 |
 | `critical_threshold` | `10` | 第三档提醒阈值 |
-| `notify_recovery` | `false` | 额度恢复时是否通知 |
-| `notify_reset_reminders` | `false` | 重置前是否提醒：任意窗口重置前 1 小时，7 天窗口重置前 1 天 |
+| `recovery_notify` | 全部 `off` | 额度恢复时通知，见下文 |
+| `reset_reminder` | 全部 `off` | 重置前提醒，见下文 |
 | `timezone` | 空 | 显示时间和点火时段使用的时区，如 `Asia/Shanghai`；为空时跟随 CPA 服务器的时区（官方 Docker 镜像由 `TZ` 设置） |
 | `timezone_offset_hours` | 空 | 固定的 UTC 偏移，例如 `8`；只在 `timezone` 为空时使用 |
 | `poll_interval_seconds` | `300` | 主动查询间隔，最小 60 |
@@ -129,6 +129,17 @@ Claude 和 Codex 的额度无论主动还是被动获取，都精确到 1%；Ant
 | `cpa_base_url` | `http://127.0.0.1:8317` | 插件访问 CPA 自身的地址；CPA 改了端口或开启 TLS 时需要同步修改 |
 | `history_retention_days` | `40` | 额度历史保留天数 |
 | `data_dir` | 插件目录下的 `data/lamplighter` | 状态和历史目录 |
+
+恢复通知和重置前提醒按窗口分别设置，`five_hour` 对应 5 小时窗口，`seven_day` 对应 7 天窗口：
+
+| 配置项 | 取值 | 说明 |
+| --- | --- | --- |
+| `recovery_notify` | `off`、`all`、`after_exhausted` | `all`：窗口每次重置都通知；`after_exhausted`：窗口用完后，只在下一次重置时通知一次 |
+| `reset_reminder` | `off`、`all`、`has_remaining` | 5 小时窗口在重置前 1 小时提醒，7 天窗口在重置前 1 天提醒；`has_remaining`：只在剩余高于 `critical_threshold` 时提醒 |
+
+恢复通知的第一行是上一周期结束时的剩余额度。`recovery_notify` 为 `all` 时，插件在重置前 2 分钟对这个账号多查询一次，取得这个值；最后 2 分钟内的用量不计入。找不到重置前 15 分钟内的读数时不显示这一行。既不是 5 小时也不是 7 天的窗口，曾在距离重置超过 1 天时出现过的按 7 天窗口处理，其余按 5 小时窗口处理。
+
+`notify_recovery: true` 和 `notify_reset_reminders: true` 分别等同于对应配置的两个窗口都设为 `all`，只在没有写 `recovery_notify` 或 `reset_reminder` 时生效；在管理页面保存设置时会换成新的写法。
 
 点火相关设置在 `ignition` 下：
 

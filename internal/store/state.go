@@ -14,15 +14,32 @@ import (
 
 // WindowState is the notification baseline of one quota window.
 type WindowState struct {
-	Severity                string  `json:"severity,omitempty"`
-	NotifiedSeverity        string  `json:"notified_severity,omitempty"`
-	Remaining               float64 `json:"remaining"`
-	Reset                   string  `json:"reset,omitempty"`
-	LastSeen                int64   `json:"last_seen,omitempty"`
-	ResetNotice1hFor        string  `json:"reset_notice_1h_for,omitempty"`
-	ResetNotice1dFor        string  `json:"reset_notice_1d_for,omitempty"`
-	ResetRecoveryFor        string  `json:"reset_recovery_for,omitempty"`
-	PendingResetRecoveryFor string  `json:"pending_reset_recovery_for,omitempty"`
+	Severity         string  `json:"severity,omitempty"`
+	NotifiedSeverity string  `json:"notified_severity,omitempty"`
+	Remaining        float64 `json:"remaining"`
+	Reset            string  `json:"reset,omitempty"`
+	LastSeen         int64   `json:"last_seen,omitempty"`
+	ResetNotice1hFor string  `json:"reset_notice_1h_for,omitempty"`
+	ResetNotice1dFor string  `json:"reset_notice_1d_for,omitempty"`
+	// Exhausted is set when the window was seen used up in its current cycle.
+	Exhausted bool `json:"exhausted,omitempty"`
+	// Long is set once the window was seen more than a day before its
+	// reset, which makes a window of unknown kind count as a 7-day window.
+	Long bool `json:"long,omitempty"`
+	// PendingRecovery is a recovery notification not delivered yet.
+	PendingRecovery *PendingRecovery `json:"pending_recovery,omitempty"`
+}
+
+// PendingRecovery is a detected reset of one window, kept until its
+// notification is delivered.
+type PendingRecovery struct {
+	// At is when the reset was detected, in Unix seconds.
+	At int64 `json:"at"`
+	// Previous is the last remaining percentage of the ended cycle, or nil
+	// when no reading close enough to the reset exists.
+	Previous *float64 `json:"previous,omitempty"`
+	// Exhausted is set when the ended cycle was used up.
+	Exhausted bool `json:"exhausted,omitempty"`
 }
 
 // GroupState holds the notification baselines of one quota group.
