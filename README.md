@@ -154,7 +154,7 @@ Claude 和 Codex 的额度无论主动还是被动获取，都精确到 1%；Ant
 | `groups` | 仅 Antigravity：允许点火的额度组，默认 `["Gemini"]` |
 | `models` | 仅 Antigravity：按额度组指定模型，例如 `{"Gemini": "gemini-3.5-flash-lite"}` |
 
-`codex_reset_updates` 控制 Did Codex Reset 转发：`enabled`（默认 `false`）、`poll_seconds`（默认 `300`，最小 300）、`notify_current_pending`（默认 `true`，第一次开启时推送当前尚未生效的排期）。Did Codex Reset 是第三方监测站，它的信号不代表 OpenAI 官方确认。
+`codex_reset_updates` 控制 Did Codex Reset 转发：`enabled`（默认 `false`）、`poll_seconds`（默认 `300`，最小 300）、`notify_current_pending`（默认 `true`，第一次开启时推送当前尚未生效的排期）。只转发尚未到期的排期和 48 小时内的完成记录，同一次排期只推送一次；排期时间按本地时区显示，只给出日期的排期显示为时间段。Did Codex Reset 是第三方监测站，它的信号不代表 OpenAI 官方确认。
 
 完整示例：
 

@@ -212,6 +212,10 @@ Notification texts are in `internal/notify/text.go`, one column each for Chinese
 
 Did Codex Reset is read every `poll_seconds` seconds (at least 300, aligned to time boundaries), 10 latest records at a time. Records are deduplicated by ID, except `manual:` records, whose IDs can change and which are deduplicated by content; up to 100 seen keys are kept. The first run marks existing records as seen and notifies only the pending schedule when `notify_current_pending` is on.
 
+Only records that are still news are sent; the rest are marked as seen. A schedule must have `scheduleState = pending` and a window that has not ended; a completed reset must be at most 48 hours old, measured from the latest of `completedAt`, `effectiveAt` and `announcedAt`. A fulfilled schedule leaves the `kind=all` list and comes back as `elapsed` when it loses its completion link, so old records can appear at any time. Every X post is one record, and a post and its reply each create a record for the same schedule, so schedules are also deduplicated by `event:reset type|window start|window end` and each window is sent once.
+
+The schedule time comes from `scheduleWindow`, or `effectiveAt` without one, shown in the plugin time zone: one time when start and end match, "by end" when `scheduleConstraint = deadline`, and "start–end" otherwise (date-level schedules). A date-level window covers a whole day in the source time zone and usually starts before the announcement, so its start alone reads as a time already past.
+
 ## Data
 
 The data directory defaults to `data/lamplighter` in the plugin directory. On Linux and macOS, `datadir_unix.go` finds the library path with `dladdr`; when the library sits in `<plugins>/<goos>/<goarch>/`, those two levels are removed. On Windows CPA loads a copy of the DLL from the temp directory, so the library path does not point to the plugin directory; `datadir_windows.go` reads `plugins.dir` from CPA's `config.yaml` instead (default `plugins`, relative to CPA's working directory).
