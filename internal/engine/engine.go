@@ -88,8 +88,8 @@ type Engine struct {
 	// fableSeen marks credentials whose passive Fable window was logged.
 	fableSeen map[string]bool
 	activeAt  map[string]time.Time
-	// probed holds the reset times each credential was queried for before,
-	// until those resets pass.
+	// probed holds the times around resets each credential was queried
+	// for, until probeLate after them.
 	probed      map[string][]time.Time
 	lastSample  map[string]sampleMark
 	pendingSamp map[string]store.Record
