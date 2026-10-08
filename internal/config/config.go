@@ -154,8 +154,8 @@ func Default() Config {
 		NoticeThreshold:       50,
 		LowThreshold:          20,
 		CriticalThreshold:     10,
-		RecoveryNotify:        WindowModes{FiveHour: RecoveryOff, SevenDay: RecoveryOff},
-		ResetReminder:         WindowModes{FiveHour: ReminderOff, SevenDay: ReminderOff},
+		RecoveryNotify:        WindowModes{FiveHour: RecoveryAfterExhausted, SevenDay: RecoveryAll},
+		ResetReminder:         WindowModes{FiveHour: ReminderOff, SevenDay: ReminderHasRemaining},
 		PollIntervalSeconds:   300,
 		RequestTimeoutSeconds: 20,
 		PassiveSkipSeconds:    60,
@@ -198,11 +198,17 @@ func Parse(raw []byte) (Config, error) {
 		if err := yaml.Unmarshal(raw, &overlay); err != nil {
 			return Default(), fmt.Errorf("parse plugin config: %w", err)
 		}
-		if overlay.RecoveryNotify == nil && cfg.LegacyNotifyRecovery != nil && *cfg.LegacyNotifyRecovery {
-			cfg.RecoveryNotify = WindowModes{FiveHour: RecoveryAll, SevenDay: RecoveryAll}
+		if overlay.RecoveryNotify == nil && cfg.LegacyNotifyRecovery != nil {
+			cfg.RecoveryNotify = WindowModes{FiveHour: RecoveryOff, SevenDay: RecoveryOff}
+			if *cfg.LegacyNotifyRecovery {
+				cfg.RecoveryNotify = WindowModes{FiveHour: RecoveryAll, SevenDay: RecoveryAll}
+			}
 		}
-		if overlay.ResetReminder == nil && cfg.LegacyResetReminders != nil && *cfg.LegacyResetReminders {
-			cfg.ResetReminder = WindowModes{FiveHour: ReminderAll, SevenDay: ReminderAll}
+		if overlay.ResetReminder == nil && cfg.LegacyResetReminders != nil {
+			cfg.ResetReminder = WindowModes{FiveHour: ReminderOff, SevenDay: ReminderOff}
+			if *cfg.LegacyResetReminders {
+				cfg.ResetReminder = WindowModes{FiveHour: ReminderAll, SevenDay: ReminderAll}
+			}
 		}
 		// Each provider block starts from its own defaults so that a partial
 		// block such as {ignite: true} keeps the other keys.

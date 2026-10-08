@@ -417,6 +417,9 @@ func TestPreResetQueryRunsOncePerReset(t *testing.T) {
 	reset := start.Add(3 * time.Hour)
 	e, _ := newTestEngine(t, h, c)
 	ctx := context.Background()
+	off := e.config()
+	off.RecoveryNotify = config.WindowModes{FiveHour: config.RecoveryOff, SevenDay: config.RecoveryOff}
+	e.Configure(off, nil)
 	e.poll(ctx, e.config(), c.t, "", false)
 	if due, next := e.probes(e.config(), c.t); len(due) != 0 || !next.IsZero() {
 		t.Fatalf("no pre-reset query while recovery notifications are off: %v %v", due, next)

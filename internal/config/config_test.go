@@ -106,8 +106,9 @@ func TestNotificationModes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.RecoveryNotify.FiveHour != RecoveryOff || cfg.ResetReminder.SevenDay != ReminderOff {
-		t.Fatalf("modes are off by default: %+v %+v", cfg.RecoveryNotify, cfg.ResetReminder)
+	if cfg.RecoveryNotify != (WindowModes{FiveHour: RecoveryAfterExhausted, SevenDay: RecoveryAll}) ||
+		cfg.ResetReminder != (WindowModes{FiveHour: ReminderOff, SevenDay: ReminderHasRemaining}) {
+		t.Fatalf("default modes: %+v %+v", cfg.RecoveryNotify, cfg.ResetReminder)
 	}
 	cfg, err = Parse([]byte("recovery_notify:\n  five_hour: after_exhausted\n  seven_day: bogus\nreset_reminder:\n  seven_day: has_remaining\n"))
 	if err != nil {
@@ -116,8 +117,16 @@ func TestNotificationModes(t *testing.T) {
 	if cfg.RecoveryNotify != (WindowModes{FiveHour: RecoveryAfterExhausted, SevenDay: RecoveryOff}) {
 		t.Fatalf("recovery_notify %+v", cfg.RecoveryNotify)
 	}
+	// A key missing from a partial block keeps its default.
 	if cfg.ResetReminder != (WindowModes{FiveHour: ReminderOff, SevenDay: ReminderHasRemaining}) {
 		t.Fatalf("reset_reminder %+v", cfg.ResetReminder)
+	}
+	cfg, err = Parse([]byte("reset_reminder:\n  five_hour: all\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ResetReminder != (WindowModes{FiveHour: ReminderAll, SevenDay: ReminderHasRemaining}) {
+		t.Fatalf("partial reset_reminder %+v", cfg.ResetReminder)
 	}
 }
 
@@ -134,7 +143,15 @@ func TestLegacyNotificationSwitches(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.RecoveryNotify != (WindowModes{FiveHour: RecoveryOff, SevenDay: RecoveryAfterExhausted}) {
+	if cfg.RecoveryNotify != (WindowModes{FiveHour: RecoveryAfterExhausted, SevenDay: RecoveryAfterExhausted}) {
 		t.Fatalf("the new key wins over the legacy switch: %+v", cfg.RecoveryNotify)
+	}
+	cfg, err = Parse([]byte("notify_recovery: false\nnotify_reset_reminders: false\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.RecoveryNotify != (WindowModes{FiveHour: RecoveryOff, SevenDay: RecoveryOff}) ||
+		cfg.ResetReminder != (WindowModes{FiveHour: ReminderOff, SevenDay: ReminderOff}) {
+		t.Fatalf("legacy switches set to false keep both windows off: %+v %+v", cfg.RecoveryNotify, cfg.ResetReminder)
 	}
 }

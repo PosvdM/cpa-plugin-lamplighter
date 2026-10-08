@@ -101,12 +101,14 @@ func TestQuietRecoveryResetsBaseline(t *testing.T) {
 	sender := &fakeSender{}
 	st := store.NewState()
 	now := time.Now()
-	a := alerts(config.Default(), sender)
+	cfg := config.Default()
+	cfg.RecoveryNotify = config.WindowModes{FiveHour: config.RecoveryOff, SevenDay: config.RecoveryOff}
+	a := alerts(cfg, sender)
 	a.ProcessGroup(context.Background(), st, group(80, 80, now), now)
 	a.ProcessGroup(context.Background(), st, group(0, 80, now), now)
 	a.ProcessGroup(context.Background(), st, group(100, 80, now), now)
 	if len(sender.sent) != 1 {
-		t.Fatalf("recovery notifications are off by default: %+v", sender.sent)
+		t.Fatalf("recovery notifications are off: %+v", sender.sent)
 	}
 	a.ProcessGroup(context.Background(), st, group(40, 80, now), now)
 	if len(sender.sent) != 2 {
@@ -139,7 +141,7 @@ func TestResetReminders(t *testing.T) {
 	alerts(cfg, sender).ProcessGroup(context.Background(), st, soon, now)
 	alerts(cfg, sender).ProcessGroup(context.Background(), st, soon, now)
 	if len(sender.sent) != 0 {
-		t.Fatal("reminders are off by default")
+		t.Fatal("5-hour reminders are off by default")
 	}
 	cfg.ResetReminder.FiveHour = config.ReminderAll
 	alerts(cfg, sender).ProcessGroup(context.Background(), st, soon, now)

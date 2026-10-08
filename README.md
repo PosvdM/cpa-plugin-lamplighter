@@ -117,8 +117,8 @@ Claude 和 Codex 的额度无论主动还是被动获取，都精确到 1%；Ant
 | `notice_threshold` | `50` | 第一档提醒阈值（剩余百分比） |
 | `low_threshold` | `20` | 第二档提醒阈值 |
 | `critical_threshold` | `10` | 第三档提醒阈值 |
-| `recovery_notify` | 全部 `off` | 额度恢复时通知，见下文 |
-| `reset_reminder` | 全部 `off` | 重置前提醒，见下文 |
+| `recovery_notify` | 5 小时 `after_exhausted`，7 天 `all` | 额度恢复时通知，见下文 |
+| `reset_reminder` | 5 小时 `off`，7 天 `has_remaining` | 重置前提醒，见下文 |
 | `timezone` | 空 | 显示时间和点火时段使用的时区，如 `Asia/Shanghai`；为空时跟随 CPA 服务器的时区（官方 Docker 镜像由 `TZ` 设置） |
 | `timezone_offset_hours` | 空 | 固定的 UTC 偏移，例如 `8`；只在 `timezone` 为空时使用 |
 | `poll_interval_seconds` | `300` | 主动查询间隔，最小 60 |
@@ -139,7 +139,7 @@ Claude 和 Codex 的额度无论主动还是被动获取，都精确到 1%；Ant
 
 恢复通知的第一行是上一周期结束时的剩余额度。`recovery_notify` 为 `all` 时，插件在重置前 30 秒对这个账号多查询一次，取得这个值；最后 30 秒内的用量不计入。找不到重置前 15 分钟内的读数时不显示这一行。上一周期从没用过（重置前仍是 100%）时不通知。既不是 5 小时也不是 7 天的窗口，曾在距离重置超过 1 天时出现过的按 7 天窗口处理，其余按 5 小时窗口处理。
 
-`notify_recovery: true` 和 `notify_reset_reminders: true` 分别等同于对应配置的两个窗口都设为 `all`，只在没有写 `recovery_notify` 或 `reset_reminder` 时生效；在管理页面保存设置时会换成新的写法。
+`notify_recovery` 和 `notify_reset_reminders` 为 `true` 时等同于对应配置的两个窗口都设为 `all`，为 `false` 时都设为 `off`，只在没有写 `recovery_notify` 或 `reset_reminder` 时生效；在管理页面保存设置时会换成新的写法。
 
 点火相关设置在 `ignition` 下：
 

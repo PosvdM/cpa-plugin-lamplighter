@@ -115,8 +115,8 @@ All settings live under `plugins.configs.lamplighter` in `config.yaml`, and can 
 | `notice_threshold` | `50` | First alert level (remaining percent) |
 | `low_threshold` | `20` | Second alert level |
 | `critical_threshold` | `10` | Third alert level |
-| `recovery_notify` | `off` for both | Recovery notifications, see below |
-| `reset_reminder` | `off` for both | Reset reminders, see below |
+| `recovery_notify` | 5-hour `after_exhausted`, 7-day `all` | Recovery notifications, see below |
+| `reset_reminder` | 5-hour `off`, 7-day `has_remaining` | Reset reminders, see below |
 | `timezone` | empty | Time zone for displayed times and the ignition window, such as `Asia/Shanghai`; empty follows the CPA server (set by `TZ` in the official Docker image) |
 | `timezone_offset_hours` | empty | Fixed UTC offset such as `8`; used only when `timezone` is empty |
 | `poll_interval_seconds` | `300` | Active query interval, at least 60 |
@@ -137,7 +137,7 @@ Recovery notifications and reset reminders are set per window: `five_hour` for 5
 
 The first line of a recovery notification is what was left when the previous cycle ended. With `recovery_notify` set to `all`, the plugin queries the account once more 30 seconds before the reset to get this value; usage in those last 30 seconds is not counted. Without a reading from the last 15 minutes before the reset, the line is left out. A cycle that was never used (still 100% before the reset) is not notified. A window that is neither a 5-hour nor a 7-day window counts as a 7-day window once it was seen more than a day before its reset, and as a 5-hour window otherwise.
 
-`notify_recovery: true` and `notify_reset_reminders: true` set both windows of the matching key to `all`. They apply only when `recovery_notify` or `reset_reminder` is absent; saving the settings on the management page replaces them with the new keys.
+`notify_recovery` and `notify_reset_reminders` set both windows of the matching key to `all` when `true` and to `off` when `false`. They apply only when `recovery_notify` or `reset_reminder` is absent; saving the settings on the management page replaces them with the new keys.
 
 Ignition settings live under `ignition`:
 
