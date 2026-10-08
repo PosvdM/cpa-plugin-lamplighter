@@ -202,17 +202,20 @@ func records() []ResetRecord {
 	}
 }
 
+// resetNow is before the pending schedule in records.
+var resetNow = time.Date(2026, 10, 4, 0, 0, 0, 0, time.UTC)
+
 func TestResetFeedFirstRunOnlyNotifiesPending(t *testing.T) {
 	sender := &fakeSender{}
 	st := store.NewState()
-	sent := ProcessResetRecords(context.Background(), st, records(), true, sender, time.UTC, LangZH, time.Now())
+	sent := ProcessResetRecords(context.Background(), st, records(), true, sender, time.UTC, LangZH, resetNow)
 	if sent != 1 || sender.sent[0].Title != "📅 Codex 全局重置已排期" {
 		t.Fatalf("got %d %+v", sent, sender.sent)
 	}
 	if sender.sent[0].JumpURL != "https://didcodexreset.com/zh/history/1791028800000.html" {
 		t.Fatalf("jump url %q", sender.sent[0].JumpURL)
 	}
-	if again := ProcessResetRecords(context.Background(), st, records(), true, sender, time.UTC, LangZH, time.Now()); again != 0 {
+	if again := ProcessResetRecords(context.Background(), st, records(), true, sender, time.UTC, LangZH, resetNow); again != 0 {
 		t.Fatal("seen records must not be sent again")
 	}
 }
@@ -221,18 +224,75 @@ func TestResetFeedNewRecordAndManualIDRotation(t *testing.T) {
 	sender := &fakeSender{}
 	st := store.NewState()
 	manual := ResetRecord{"id": "manual:a", "kind": "reset_completed", "resetType": "banked", "announcedAt": "2026-09-01T00:00:00Z"}
-	ProcessResetRecords(context.Background(), st, append(records(), manual), false, sender, time.UTC, LangZH, time.Now())
+	ProcessResetRecords(context.Background(), st, append(records(), manual), false, sender, time.UTC, LangZH, resetNow)
 	if len(sender.sent) != 0 {
 		t.Fatal("first run without pending notification sends nothing")
 	}
 	rotated := ResetRecord{"id": "manual:b", "kind": "reset_completed", "resetType": "banked", "announcedAt": "2026-09-01T00:00:00Z"}
 	fresh := ResetRecord{"id": "r4", "kind": "reset_completed", "resetType": "global", "effectiveAt": "2026-10-06T00:00:00Z"}
 	next := append([]ResetRecord{fresh}, append(records(), rotated)...)
-	if sent := ProcessResetRecords(context.Background(), st, next, false, sender, time.UTC, LangZH, time.Now()); sent != 1 {
+	if sent := ProcessResetRecords(context.Background(), st, next, false, sender, time.UTC, LangZH, resetNow); sent != 1 {
 		t.Fatalf("only the new record is sent, got %d: %+v", sent, sender.sent)
 	}
 	if sender.sent[0].Title != "✅ Codex 全局重置已完成" {
 		t.Fatalf("title %q", sender.sent[0].Title)
+	}
+}
+
+func bankedSchedule(id, state, start, end string) ResetRecord {
+	return ResetRecord{
+		"id": id, "kind": "reset_scheduled", "resetType": "banked", "scheduleState": state,
+		"announcedAt": "2026-10-07T19:19:17Z", "effectiveAt": start, "schedulePrecision": "date",
+		"scheduleWindow": map[string]any{"startAt": start, "endAt": end},
+		"scope":          map[string]any{"plans": []any{"all"}},
+	}
+}
+
+// One reset announced by a post and its reply is sent once; schedules that
+// are no longer pending and old completed resets are not sent.
+func TestResetFeedSkipsStaleAndRepeatedSchedules(t *testing.T) {
+	sender := &fakeSender{}
+	st := store.NewState()
+	now := time.Date(2026, 10, 7, 19, 20, 0, 0, time.UTC)
+	ProcessResetRecords(context.Background(), st, nil, false, sender, time.UTC, LangZH, now)
+	shanghai := time.FixedZone("CST", 8*3600)
+	next := []ResetRecord{
+		bankedSchedule("post", "pending", "2026-10-07T07:00:00Z", "2026-10-08T07:00:00Z"),
+		bankedSchedule("reply", "pending", "2026-10-07T07:00:00Z", "2026-10-08T07:00:00Z"),
+		bankedSchedule("elapsed", "elapsed", "2026-09-25T07:00:00Z", "2026-09-26T07:00:00Z"),
+		bankedSchedule("fulfilled", "fulfilled", "2026-10-02T07:00:00Z", "2026-10-03T07:00:00Z"),
+		{"id": "old", "kind": "reset_completed", "resetType": "global", "announcedAt": "2026-10-03T04:26:28Z"},
+	}
+	if sent := ProcessResetRecords(context.Background(), st, next, false, sender, shanghai, LangZH, now); sent != 1 {
+		t.Fatalf("one notification per pending event, got %d: %+v", sent, sender.sent)
+	}
+	if want := "预计：10/07 15:00～10/08 15:00"; !strings.HasPrefix(sender.sent[0].Body, want) {
+		t.Fatalf("body %q, want prefix %q", sender.sent[0].Body, want)
+	}
+	again := append([]ResetRecord{bankedSchedule("quote", "pending", "2026-10-07T07:00:00Z", "2026-10-08T07:00:00Z")}, next...)
+	if sent := ProcessResetRecords(context.Background(), st, again, false, sender, shanghai, LangZH, now.Add(10*time.Minute)); sent != 0 {
+		t.Fatalf("a later post about the same event is not sent, got %+v", sender.sent)
+	}
+}
+
+func TestScheduleText(t *testing.T) {
+	exact := bankedSchedule("a", "pending", "2026-10-09T07:00:00Z", "2026-10-09T07:00:00Z")
+	deadline := bankedSchedule("b", "pending", "2026-10-07T19:00:00Z", "2026-10-08T07:00:00Z")
+	deadline["scheduleConstraint"] = "deadline"
+	noWindow := ResetRecord{"kind": "reset_scheduled", "effectiveAt": "2026-10-09T07:00:00Z"}
+	for _, c := range []struct {
+		r          ResetRecord
+		lang, want string
+	}{
+		{exact, LangZH, "10/09 07:00"},
+		{deadline, LangZH, "10/08 07:00 前"},
+		{deadline, LangEN, "by 10/08 07:00"},
+		{bankedSchedule("c", "pending", "2026-10-07T07:00:00Z", "2026-10-08T07:00:00Z"), LangEN, "10/07 07:00–10/08 07:00"},
+		{noWindow, LangZH, "10/09 07:00"},
+	} {
+		if got := scheduleText(c.r, time.UTC, c.lang); got != c.want {
+			t.Fatalf("scheduleText(%v) = %q, want %q", c.r["id"], got, c.want)
+		}
 	}
 }
 

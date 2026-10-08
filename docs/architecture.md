@@ -212,6 +212,10 @@ Bark 请求为 `GET {bark_url}/{标题}/{正文}?group&level&icon&url`，标题�
 
 Did Codex Reset 每 `poll_seconds` 秒（最少 300 秒，对齐时间边界）读取最新 10 条记录。非 `manual:` 记录按 ID 去重，`manual:` 记录的 ID 可能变化，按内容去重；最多保留 100 个已见记录。第一次运行把现有记录标为已见，只在 `notify_current_pending` 开启时推送当前待生效的排期。
 
+只推送仍有意义的记录，其余只标为已见：排期必须是 `scheduleState = pending` 且窗口尚未结束；完成记录的时间（`completedAt`、`effectiveAt`、`announcedAt` 中最晚的一个）不能早于 48 小时前。已兑现的排期会离开 `kind=all` 列表，失去关联后又会以 `elapsed` 回到列表，旧记录因此可能在任意时间出现。每条 X 帖子是一条记录，主帖和回复会给同一次排期各建一条，所以排期另按 `event:重置种类|窗口起点|窗口终点` 去重，同一窗口只推送一次。
+
+排期时间取 `scheduleWindow`，没有时取 `effectiveAt`，按插件时区显示：起止相同时显示时刻，`scheduleConstraint = deadline` 时显示“终点 前”，其余（日期级排期）显示“起点～终点”。日期级窗口覆盖来源时区的一整天，起点通常早于公布时间，只显示起点会被误读为已经过去的时刻。
+
 ## 数据
 
 数据目录默认是插件目录下的 `data/lamplighter`。Linux 和 macOS 上，`datadir_unix.go` 用 `dladdr` 找到动态库路径，动态库位于 `<插件目录>/<goos>/<goarch>/` 时去掉这两层。Windows 上 CPA 从临时目录加载 DLL 的副本，动态库路径不指向插件目录，所以 `datadir_windows.go` 从 CPA 的 `config.yaml` 读取 `plugins.dir`（默认 `plugins`，相对路径以 CPA 的工作目录为准）。

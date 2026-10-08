@@ -152,7 +152,7 @@ Per-service settings live under `providers`, keyed `codex`, `claude` and `antigr
 | `groups` | Antigravity only: quota groups to ignite, default `["Gemini"]` |
 | `models` | Antigravity only: model per quota group, for example `{"Gemini": "gemini-3.5-flash-lite"}` |
 
-`codex_reset_updates` controls Did Codex Reset forwarding: `enabled` (default `false`), `poll_seconds` (default `300`, at least 300) and `notify_current_pending` (default `true`: on first enable, notify the pending scheduled reset). Did Codex Reset is a third-party monitor; its signals are not official OpenAI announcements.
+`codex_reset_updates` controls Did Codex Reset forwarding: `enabled` (default `false`), `poll_seconds` (default `300`, at least 300) and `notify_current_pending` (default `true`: on first enable, notify the pending scheduled reset). Only schedules that have not passed and resets completed in the last 48 hours are forwarded, each schedule once; schedule times are shown in the local time zone, and date-only schedules as a time range. Did Codex Reset is a third-party monitor; its signals are not official OpenAI announcements.
 
 Full example:
 
