@@ -99,6 +99,81 @@ func RecordKey(r ResetRecord) string {
 	return "manual:" + strings.Join(parts, "|")
 }
 
+// maxRecordAge is how old a completed reset can be and still be sent. An old
+// record can enter the latest 10 late, for example when a schedule loses its
+// completion link and returns to the list.
+const maxRecordAge = 48 * time.Hour
+
+// scheduleWindow returns the UTC window of a scheduled reset. A date-level
+// schedule covers a whole day in the source time zone; an exact time has the
+// same start and end.
+func scheduleWindow(r ResetRecord) (start, end time.Time) {
+	if window, ok := r["scheduleWindow"].(map[string]any); ok {
+		start, end = quota.ParseTime(window["startAt"]), quota.ParseTime(window["endAt"])
+	}
+	if start.IsZero() {
+		start = quota.ParseTime(r.str("effectiveAt"))
+	}
+	if end.Before(start) {
+		end = start
+	}
+	return start, end
+}
+
+// eventKey identifies a scheduled reset across records. Every X post is its
+// own record, so a reply that repeats a schedule describes the same event.
+func eventKey(r ResetRecord) string {
+	if strings.ToLower(r.str("kind")) != "reset_scheduled" {
+		return ""
+	}
+	start, end := scheduleWindow(r)
+	if start.IsZero() {
+		return ""
+	}
+	return "event:" + strings.ToLower(r.str("resetType")) + "|" + start.UTC().Format(time.RFC3339) + "|" + end.UTC().Format(time.RFC3339)
+}
+
+// notifiable reports whether a record is still news. Only pending schedules
+// whose window has not ended are sent; elapsed, fulfilled and unknown
+// schedules are history, and so are completed resets older than maxRecordAge.
+func notifiable(r ResetRecord, now time.Time) bool {
+	if strings.ToLower(r.str("kind")) == "reset_scheduled" {
+		_, end := scheduleWindow(r)
+		return r.str("scheduleState") == "pending" && (end.IsZero() || end.After(now))
+	}
+	var latest time.Time
+	for _, key := range []string{"completedAt", "effectiveAt", "announcedAt"} {
+		if t := quota.ParseTime(r.str(key)); t.After(latest) {
+			latest = t
+		}
+	}
+	return latest.IsZero() || now.Sub(latest) <= maxRecordAge
+}
+
+func markSeen(seen map[string]bool, r ResetRecord) {
+	seen[RecordKey(r)] = true
+	if key := eventKey(r); key != "" {
+		seen[key] = true
+	}
+}
+
+// scheduleText formats when a scheduled reset is expected, in loc. A
+// date-level window is shown as its start and end; a deadline shows only its
+// end.
+func scheduleText(r ResetRecord, loc *time.Location, lang string) string {
+	const layout = "01/02 15:04"
+	start, end := scheduleWindow(r)
+	switch {
+	case start.IsZero():
+		return ""
+	case !end.After(start):
+		return start.In(loc).Format(layout)
+	case strings.ToLower(r.str("scheduleConstraint")) == "deadline":
+		return T(lang, "schedule_before", end.In(loc).Format(layout))
+	}
+	return T(lang, "schedule_range", start.In(loc).Format(layout), end.In(loc).Format(layout))
+}
+
 func resetTypeLabel(value, lang string) string {
 	switch strings.ToLower(value) {
 	case "global":
@@ -152,7 +227,7 @@ func ResetMessage(r ResetRecord, loc *time.Location, lang string) Message {
 	var lines []string
 	if strings.ToLower(r.str("kind")) == "reset_scheduled" {
 		title = T(lang, "reset_scheduled", resetType)
-		if text := formatTime(r.str("effectiveAt")); text != "" {
+		if text := scheduleText(r, loc, lang); text != "" {
 			lines = append(lines, T(lang, "line_expected", text))
 		}
 	} else {
@@ -184,7 +259,9 @@ func ResetMessage(r ResetRecord, loc *time.Location, lang string) Message {
 
 // ProcessResetRecords sends notifications for unseen records and returns how
 // many were sent. On the first run only the current pending schedule is sent
-// (when notifyPending is set); older records are marked as seen.
+// (when notifyPending is set); older records are marked as seen. Records that
+// are no longer news are marked as seen without a notification, and a
+// schedule is sent once per event even when several posts announce it.
 func ProcessResetRecords(ctx context.Context, st *store.State, records []ResetRecord, notifyPending bool, sender Sender, loc *time.Location, lang string, now time.Time) int {
 	if st.CodexReset == nil {
 		st.CodexReset = &store.CodexResetState{}
@@ -200,7 +277,7 @@ func ProcessResetRecords(ctx context.Context, st *store.State, records []ResetRe
 		pendingKey := ""
 		if notifyPending {
 			for _, r := range records {
-				if r.str("kind") == "reset_scheduled" && r.str("scheduleState") == "pending" {
+				if r.str("kind") == "reset_scheduled" && notifiable(r, now) {
 					pendingKey = RecordKey(r)
 					candidates = append(candidates, r)
 					break
@@ -208,14 +285,20 @@ func ProcessResetRecords(ctx context.Context, st *store.State, records []ResetRe
 			}
 		}
 		for _, r := range records {
-			if key := RecordKey(r); key != pendingKey {
-				seen[key] = true
+			if RecordKey(r) != pendingKey {
+				markSeen(seen, r)
 			}
 		}
 	} else {
 		for i := len(records) - 1; i >= 0; i-- {
-			if !seen[RecordKey(records[i])] {
-				candidates = append(candidates, records[i])
+			r := records[i]
+			if seen[RecordKey(r)] {
+				continue
+			}
+			if notifiable(r, now) {
+				candidates = append(candidates, r)
+			} else {
+				markSeen(seen, r)
 			}
 		}
 	}
@@ -225,8 +308,12 @@ func ProcessResetRecords(ctx context.Context, st *store.State, records []ResetRe
 		if sender == nil {
 			break
 		}
-		if err := sender.Send(ctx, ResetMessage(r, loc, lang)); err == nil {
+		if key := eventKey(r); key != "" && seen[key] {
 			seen[RecordKey(r)] = true
+			continue
+		}
+		if err := sender.Send(ctx, ResetMessage(r, loc, lang)); err == nil {
+			markSeen(seen, r)
 			sent++
 		}
 	}
@@ -234,9 +321,11 @@ func ProcessResetRecords(ctx context.Context, st *store.State, records []ResetRe
 	var ordered []string
 	added := map[string]bool{}
 	for _, r := range records {
-		if key := RecordKey(r); seen[key] && !added[key] {
-			ordered = append(ordered, key)
-			added[key] = true
+		for _, key := range []string{RecordKey(r), eventKey(r)} {
+			if key != "" && seen[key] && !added[key] {
+				ordered = append(ordered, key)
+				added[key] = true
+			}
 		}
 	}
 	for _, key := range root.SeenKeys {
