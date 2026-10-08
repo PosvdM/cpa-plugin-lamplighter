@@ -468,7 +468,10 @@ func (e *Engine) run() {
 			}
 		}
 		if enabled {
-			if _, probe := e.probes(cfg, e.now()); !probe.IsZero() && probe.Before(wakeAt) {
+			// A query that came due while this round ran is run right away.
+			if due, probe := e.probes(cfg, e.now()); len(due) > 0 {
+				wakeAt = e.now()
+			} else if !probe.IsZero() && probe.Before(wakeAt) {
 				wakeAt = probe
 			}
 		}

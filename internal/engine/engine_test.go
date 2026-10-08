@@ -457,3 +457,30 @@ func TestPreResetQueryRunsOncePerReset(t *testing.T) {
 		t.Fatalf("a jittered reset time must not repeat the query, got %d", got)
 	}
 }
+
+func TestPassiveRelativeResetCountsFromTheRequest(t *testing.T) {
+	c := &clock{t: time.Date(2026, 10, 4, 10, 0, 0, 0, shanghai)}
+	h := standardHost(c)
+	e, _ := newTestEngine(t, h, c)
+	ctx := context.Background()
+	e.poll(ctx, e.config(), c.t, "", false)
+	requested := c.t
+	c.add(3 * time.Minute)
+	e.applyUsage(ctx, usageEvent{provider: "codex", authIndex: "1", at: requested, header: http.Header{
+		"X-Codex-Primary-Used-Percent":        {"70"},
+		"X-Codex-Primary-Reset-After-Seconds": {"600"},
+		"X-Codex-Primary-Window-Minutes":      {"300"},
+	}})
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for _, g := range e.groups {
+		if g.AuthIndex != "1" {
+			continue
+		}
+		if w, ok := g.fiveHour(); !ok || !w.Reset.Equal(requested.Add(10*time.Minute)) {
+			t.Fatalf("reset %v, want %v", w.Reset, requested.Add(10*time.Minute))
+		}
+		return
+	}
+	t.Fatal("no Codex group")
+}

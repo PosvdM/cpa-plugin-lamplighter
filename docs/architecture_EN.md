@@ -125,7 +125,7 @@ CPA passes the upstream response headers in `ResponseHeaders` of the usage recor
 | Claude | `Anthropic-Ratelimit-Unified-7d_oi-Utilization` / `-7d_oi-Reset` | Fable's 7-day window, written to the same Fable quota group as the usage API (`quota.FableGroupKey`). CPA also treats `7d_oi` as the Fable-specific window. Regular (non-Fable) requests do not carry these headers; whether Fable requests do has not been verified on an account that can use Fable. The plugin logs the first one it reads after each start |
 | Codex | `X-Codex-Primary-Used-Percent`, `-Reset-At`, `-Reset-After-Seconds`, `-Window-Minutes`, same for `Secondary` | Classified by window length: 300 minutes is 5-hour, 10080 is 7-day |
 
-Passive data only updates the windows present in the headers; an active result replaces the whole group.
+Passive data only updates the windows present in the headers; an active result replaces the whole group. `-Reset-After-Seconds` counts from `RequestedAt` of the usage record: the record arrives when the request completes, and counting from processing time would push the old cycle's reset time of a long request past the reset.
 
 Skip rule (`shouldSkipActive`): a scheduled query is skipped when passive data arrived within `passive_skip_seconds` before it and the last active query is less than `passive_skip_max_minutes` old. Because only a short span before the slot counts, the longest gap between two data points is the interval plus `passive_skip_seconds`. Manual refreshes never skip.
 
