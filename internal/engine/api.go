@@ -521,7 +521,7 @@ func (e *Engine) notified(group string, msg notify.Message) {
 	e.addEventDetail("info", "notify", group, msg.Label, msg.Title, msg.Title, map[string]string{"title": msg.Title})
 }
 
-// notifyFailed records a notification that Bark did not accept.
+// notifyFailed records a notification that no channel accepted.
 func (e *Engine) notifyFailed(group string, msg notify.Message, err error) {
 	e.addEventDetail("warn", "notify_failed", group, msg.Label, fmt.Sprintf("%s：%v", msg.Title, err),
 		fmt.Sprintf("推送失败 %s：%v", msg.Title, err), map[string]string{"title": msg.Title, "error": err.Error()})

@@ -193,7 +193,7 @@ func managementRegistration() map[string]any {
 			{Method: http.MethodGet, Path: apiBase + "/history", Description: "Lamplighter quota history"},
 			{Method: http.MethodPost, Path: apiBase + "/refresh", Description: "Query quota now"},
 			{Method: http.MethodPost, Path: apiBase + "/ignite", Description: "Ignite one quota window now"},
-			{Method: http.MethodPost, Path: apiBase + "/test-bark", Description: "Send a Bark test notification"},
+			{Method: http.MethodPost, Path: apiBase + "/test-bark", Description: "Send a test notification to every configured channel"},
 			{Method: http.MethodPost, Path: apiBase + "/language", Description: "Set the notification language"},
 		},
 		"resources": []resource{

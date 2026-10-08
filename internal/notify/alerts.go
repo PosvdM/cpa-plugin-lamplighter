@@ -42,7 +42,7 @@ type Group struct {
 	Windows []quota.Window
 }
 
-// Alerts turns quota changes into Bark notifications.
+// Alerts turns quota changes into notifications.
 type Alerts struct {
 	Cfg    config.Config
 	Sender Sender
