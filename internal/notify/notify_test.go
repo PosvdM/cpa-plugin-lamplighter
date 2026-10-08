@@ -519,7 +519,7 @@ func TestRecoveryAllNotifiesEveryResetWithPreviousCycle(t *testing.T) {
 	reset := start.Add(time.Hour)
 	a.ProcessGroup(context.Background(), st, fiveHour(80, reset), start)
 	// The last reading before the reset, as the pre-reset query takes it.
-	a.ProcessGroup(context.Background(), st, fiveHour(63, reset), reset.Add(-2*time.Minute))
+	a.ProcessGroup(context.Background(), st, fiveHour(63, reset), reset.Add(-30*time.Second))
 	after := reset.Add(time.Minute)
 	a.ProcessGroup(context.Background(), st, fiveHour(100, after.Add(5*time.Hour)), after)
 	a.ProcessGroup(context.Background(), st, fiveHour(100, after.Add(5*time.Hour)), after.Add(5*time.Minute))
@@ -644,5 +644,70 @@ func TestRecoveryIsSentApartFromAlertAndRetried(t *testing.T) {
 	a.ProcessGroup(context.Background(), st, g, after.Add(10*time.Minute))
 	if len(sender.sent) != 2 {
 		t.Fatalf("a delivered recovery is not repeated: %+v", sender.sent)
+	}
+}
+
+func TestLateReadingOfAnEndedCycleIsIgnored(t *testing.T) {
+	for _, mode := range []string{config.RecoveryAll, config.RecoveryAfterExhausted} {
+		cfg := config.Default()
+		cfg.RecoveryNotify.FiveHour = mode
+		sender := &fakeSender{}
+		st := store.NewState()
+		a := alerts(cfg, sender)
+		start := time.Date(2026, 10, 4, 1, 0, 0, 0, time.UTC)
+		r1 := start.Add(time.Hour)
+		r2 := r1.Add(5 * time.Hour)
+		a.ProcessGroup(context.Background(), st, fiveHour(0, r1), r1.Add(-30*time.Second))
+		a.ProcessGroup(context.Background(), st, fiveHour(100, r2), r1.Add(time.Minute))
+		sent := len(sender.sent)
+		// Headers of a request that started before the reset arrive late.
+		a.ProcessGroup(context.Background(), st, fiveHour(0, r1), r1.Add(3*time.Minute))
+		a.ProcessGroup(context.Background(), st, fiveHour(99, r2), r1.Add(5*time.Minute))
+		// Claude reports no reset time for an unused window.
+		a.ProcessGroup(context.Background(), st, fiveHour(100, time.Time{}), r1.Add(6*time.Minute))
+		a.ProcessGroup(context.Background(), st, fiveHour(0, r1), r1.Add(7*time.Minute))
+		a.ProcessGroup(context.Background(), st, fiveHour(100, time.Time{}), r1.Add(8*time.Minute))
+		var recoveries int
+		for _, msg := range sender.sent[sent:] {
+			if strings.HasPrefix(msg.Title, "✅") {
+				recoveries++
+			}
+		}
+		if recoveries != 0 {
+			t.Fatalf("%s: a late reading must not cause another recovery: %+v", mode, sender.sent)
+		}
+	}
+}
+
+func TestPreviousCycleIgnoresReadingsAfterTheReset(t *testing.T) {
+	cfg := config.Default()
+	cfg.RecoveryNotify.FiveHour = config.RecoveryAll
+	sender := &fakeSender{}
+	st := store.NewState()
+	a := alerts(cfg, sender)
+	start := time.Date(2026, 10, 4, 1, 0, 0, 0, time.UTC)
+	r1 := start.Add(time.Hour)
+	a.ProcessGroup(context.Background(), st, fiveHour(63, r1), r1.Add(-30*time.Second))
+	// The provider still reports the passed reset time with the new value.
+	a.ProcessGroup(context.Background(), st, fiveHour(100, r1), r1.Add(time.Minute))
+	a.ProcessGroup(context.Background(), st, fiveHour(100, r1.Add(5*time.Hour)), r1.Add(2*time.Minute))
+	if len(sender.sent) != 1 || !strings.HasPrefix(sender.sent[0].Body, "上周期剩余：5h 63%") {
+		t.Fatalf("want 63%% from before the reset, got %+v", sender.sent)
+	}
+}
+
+func TestUnusedCycleIsNoRecovery(t *testing.T) {
+	cfg := config.Default()
+	cfg.RecoveryNotify.FiveHour = config.RecoveryAll
+	sender := &fakeSender{}
+	st := store.NewState()
+	a := alerts(cfg, sender)
+	start := time.Date(2026, 10, 4, 1, 0, 0, 0, time.UTC)
+	// Codex moves the reset of an unused window; the plugin was off for six hours.
+	a.ProcessGroup(context.Background(), st, fiveHour(100, start.Add(5*time.Hour)), start)
+	later := start.Add(6 * time.Hour)
+	a.ProcessGroup(context.Background(), st, fiveHour(100, later.Add(5*time.Hour)), later)
+	if len(sender.sent) != 0 {
+		t.Fatalf("an unused window did not recover: %+v", sender.sent)
 	}
 }

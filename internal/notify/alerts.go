@@ -267,6 +267,22 @@ func cycleEnded(old *store.WindowState, w quota.Window, now time.Time) bool {
 	return passed || rose
 }
 
+// staleReading reports whether w reports a reset time that already passed
+// and belongs to a cycle that ended or was followed by a later one. Usage
+// records arrive when a request completes, so a long request started before
+// a reset delivers the old cycle's headers after it.
+func staleReading(old *store.WindowState, w quota.Window, now time.Time) bool {
+	if w.Reset.IsZero() || now.Before(w.Reset) {
+		return false
+	}
+	reset := formatReset(w.Reset)
+	if SameResetCycle(reset, old.EndedReset) {
+		return true
+	}
+	oldReset := parseReset(old.Reset)
+	return !oldReset.IsZero() && w.Reset.Before(oldReset.Add(-resetTolerance))
+}
+
 // previousReadingAge is how old the last reading of an ended cycle may be,
 // measured at the reset, to be reported as what was left of that cycle.
 const previousReadingAge = 15 * time.Minute
@@ -276,21 +292,36 @@ const previousReadingAge = 15 * time.Minute
 const pendingRecoveryAge = time.Hour
 
 // endedCycle returns the last remaining percentage of the cycle that ended
-// before w, or nil when the last reading is too old to tell. A used-up
+// before w, or nil when no reading close enough to its end exists. With a
+// known reset time only readings taken before it count; a provider may keep
+// reporting the passed reset time with the new cycle's value. A used-up
 // window stays used up until its reset, so that reading never gets old.
 func endedCycle(old *store.WindowState, now time.Time) *float64 {
-	previous := old.Remaining
+	previous, seen, end := old.Remaining, old.LastSeen, now
+	if reset := parseReset(old.Reset); !reset.IsZero() {
+		if !SameResetCycle(old.CycleReset, old.Reset) {
+			return nil
+		}
+		previous, seen = old.CycleRemaining, old.CycleSeen
+		if reset.Before(now) {
+			end = reset
+		}
+	}
 	if previous <= ExhaustedRemaining {
 		return &previous
 	}
-	end := now
-	if reset := parseReset(old.Reset); !reset.IsZero() && reset.Before(now) {
-		end = reset
-	}
-	if old.LastSeen == 0 || end.Sub(time.Unix(old.LastSeen, 0)) > previousReadingAge {
+	if seen == 0 || end.Sub(time.Unix(seen, 0)) > previousReadingAge {
 		return nil
 	}
 	return &previous
+}
+
+// unusedCycle reports whether the cycle that ended before w was never used:
+// its last reading before the reset still showed full quota. Codex moves
+// the reset time of an unused window forward, so after a gap longer than
+// the window its reset looks like a recovery.
+func unusedCycle(old *store.WindowState) bool {
+	return old.Reset != "" && SameResetCycle(old.CycleReset, old.Reset) && roundPercent(old.CycleRemaining) >= 100
 }
 
 // renewed reports whether w really recovered since the previous reading:
@@ -345,6 +376,13 @@ func (a *Alerts) ProcessGroup(ctx context.Context, st *store.State, g Group, now
 				Exhausted:        exhausted,
 				Long:             long,
 			}
+			if !w.Reset.IsZero() && now.Before(w.Reset) {
+				ws := groupState.Windows[w.ID]
+				ws.CycleReset, ws.CycleRemaining, ws.CycleSeen = ws.Reset, w.Remaining, now.Unix()
+			}
+			continue
+		}
+		if staleReading(old, w, now) {
 			continue
 		}
 		if long {
@@ -366,7 +404,12 @@ func (a *Alerts) ProcessGroup(ctx context.Context, st *store.State, g Group, now
 		}
 
 		if cycleEnded(old, w, now) {
-			old.PendingRecovery = &store.PendingRecovery{At: now.Unix(), Previous: endedCycle(old, now), Exhausted: old.Exhausted}
+			if !unusedCycle(old) {
+				old.PendingRecovery = &store.PendingRecovery{At: now.Unix(), Previous: endedCycle(old, now), Exhausted: old.Exhausted}
+			}
+			if old.Reset != "" {
+				old.EndedReset = old.Reset
+			}
 			old.Exhausted = false
 		}
 		if exhausted {
@@ -401,6 +444,9 @@ func (a *Alerts) ProcessGroup(ctx context.Context, st *store.State, g Group, now
 		old.Remaining = w.Remaining
 		old.Reset = resetValue
 		old.LastSeen = now.Unix()
+		if !w.Reset.IsZero() && now.Before(w.Reset) {
+			old.CycleReset, old.CycleRemaining, old.CycleSeen = resetValue, w.Remaining, now.Unix()
+		}
 	}
 
 	if len(changes) > 0 {

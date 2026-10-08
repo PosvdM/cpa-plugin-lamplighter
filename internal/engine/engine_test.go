@@ -429,7 +429,11 @@ func TestPreResetQueryRunsOncePerReset(t *testing.T) {
 		t.Fatalf("next pre-reset query: %v %v", due, next)
 	}
 	before := h.requestsTo(quota.ClaudeUsageURL)
-	c.t = reset.Add(-time.Minute)
+	c.t = reset.Add(-20 * time.Second)
+	// Computing the next wake-up does not use up a due query.
+	if due, _ := e.probes(cfg, c.t); len(due) == 0 {
+		t.Fatal("pre-reset queries are due 30 seconds before the reset")
+	}
 	e.runProbes(ctx, cfg, c.t)
 	e.runProbes(ctx, cfg, c.t)
 	if got := h.requestsTo(quota.ClaudeUsageURL) - before; got != 1 {
@@ -437,5 +441,19 @@ func TestPreResetQueryRunsOncePerReset(t *testing.T) {
 	}
 	if due, next := e.probes(cfg, c.t); len(due) != 0 || !next.IsZero() {
 		t.Fatalf("every window was probed: %v %v", due, next)
+	}
+
+	// A reset time a few seconds off is the same reset and is not queried again.
+	e.mu.Lock()
+	for _, g := range e.groups {
+		for i := range g.Windows {
+			g.Windows[i].Reset = g.Windows[i].Reset.Add(5 * time.Second)
+			g.Windows[i].ObservedAt = c.t.Add(-time.Minute)
+		}
+	}
+	e.mu.Unlock()
+	e.runProbes(ctx, cfg, c.t)
+	if got := h.requestsTo(quota.ClaudeUsageURL) - before; got != 1 {
+		t.Fatalf("a jittered reset time must not repeat the query, got %d", got)
 	}
 }

@@ -137,7 +137,7 @@ Claude 和 Codex 的额度无论主动还是被动获取，都精确到 1%；Ant
 | `recovery_notify` | `off`、`all`、`after_exhausted` | `all`：窗口每次重置都通知；`after_exhausted`：窗口用完后，只在下一次重置时通知一次 |
 | `reset_reminder` | `off`、`all`、`has_remaining` | 5 小时窗口在重置前 1 小时提醒，7 天窗口在重置前 1 天提醒；`has_remaining`：只在剩余高于 `critical_threshold` 时提醒 |
 
-恢复通知的第一行是上一周期结束时的剩余额度。`recovery_notify` 为 `all` 时，插件在重置前 2 分钟对这个账号多查询一次，取得这个值；最后 2 分钟内的用量不计入。找不到重置前 15 分钟内的读数时不显示这一行。既不是 5 小时也不是 7 天的窗口，曾在距离重置超过 1 天时出现过的按 7 天窗口处理，其余按 5 小时窗口处理。
+恢复通知的第一行是上一周期结束时的剩余额度。`recovery_notify` 为 `all` 时，插件在重置前 30 秒对这个账号多查询一次，取得这个值；最后 30 秒内的用量不计入。找不到重置前 15 分钟内的读数时不显示这一行。上一周期从没用过（重置前仍是 100%）时不通知。既不是 5 小时也不是 7 天的窗口，曾在距离重置超过 1 天时出现过的按 7 天窗口处理，其余按 5 小时窗口处理。
 
 `notify_recovery: true` 和 `notify_reset_reminders: true` 分别等同于对应配置的两个窗口都设为 `all`，只在没有写 `recovery_notify` 或 `reset_reminder` 时生效；在管理页面保存设置时会换成新的写法。
 

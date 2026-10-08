@@ -26,6 +26,15 @@ type WindowState struct {
 	// Long is set once the window was seen more than a day before its
 	// reset, which makes a window of unknown kind count as a 7-day window.
 	Long bool `json:"long,omitempty"`
+	// CycleReset, CycleRemaining and CycleSeen are the last reading taken
+	// before the reset time it reported, kept to tell what was left when
+	// that cycle ended.
+	CycleReset     string  `json:"cycle_reset,omitempty"`
+	CycleRemaining float64 `json:"cycle_remaining,omitempty"`
+	CycleSeen      int64   `json:"cycle_seen,omitempty"`
+	// EndedReset is the reset time of the last cycle that ended. Readings
+	// that still report it arrive late and are ignored.
+	EndedReset string `json:"ended_reset,omitempty"`
 	// PendingRecovery is a recovery notification not delivered yet.
 	PendingRecovery *PendingRecovery `json:"pending_recovery,omitempty"`
 }

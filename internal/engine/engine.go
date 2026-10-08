@@ -88,9 +88,9 @@ type Engine struct {
 	// fableSeen marks credentials whose passive Fable window was logged.
 	fableSeen map[string]bool
 	activeAt  map[string]time.Time
-	// probed holds the pre-reset queries already run, keyed by credential
-	// and reset time, until that reset passes.
-	probed      map[string]time.Time
+	// probed holds the reset times each credential was queried for before,
+	// until those resets pass.
+	probed      map[string][]time.Time
 	lastSample  map[string]sampleMark
 	pendingSamp map[string]store.Record
 	lock        *store.Lock
@@ -124,7 +124,7 @@ func New(opts Options) *Engine {
 		pollErrs:       map[string]string{},
 		passiveAt:      map[string]time.Time{},
 		activeAt:       map[string]time.Time{},
-		probed:         map[string]time.Time{},
+		probed:         map[string][]time.Time{},
 		lastSample:     map[string]sampleMark{},
 		pendingSamp:    map[string]store.Record{},
 		lister:         &models.Lister{},
