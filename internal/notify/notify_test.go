@@ -249,8 +249,8 @@ func bankedSchedule(id, state, announced, start, end string, confidence float64)
 }
 
 // Of the posts about one schedule, only the latest is sent, as on Did Codex
-// Reset; a later post is sent as an update. Schedules that are no longer
-// pending and old completed resets are not sent.
+// Reset; a later post that changes the schedule is sent as an update.
+// Schedules that are no longer pending and old completed resets are not sent.
 func TestResetFeedSendsLatestPostPerSchedule(t *testing.T) {
 	const start, end = "2026-10-07T07:00:00Z", "2026-10-08T07:00:00Z"
 	sender := &fakeSender{}
@@ -274,8 +274,67 @@ func TestResetFeedSendsLatestPostPerSchedule(t *testing.T) {
 	late := bankedSchedule("late", "pending", "2026-10-07T19:00:00Z", start, end, 0.9)
 	update := bankedSchedule("update", "pending", "2026-10-07T20:00:00Z", start, end, 0.95)
 	again := append([]ResetRecord{late, update}, next...)
-	if sent := ProcessResetRecords(context.Background(), st, again, false, sender, shanghai, LangZH, now.Add(time.Hour)); sent != 1 || !strings.Contains(sender.sent[1].Body, "95%") {
-		t.Fatalf("a later post is sent and an earlier one is not, got %+v", sender.sent)
+	if sent := ProcessResetRecords(context.Background(), st, again, false, sender, shanghai, LangZH, now.Add(time.Hour)); sent != 1 ||
+		sender.sent[1].Title != "📅 Codex 重置卡排期更新" || !strings.Contains(sender.sent[1].Body, "95%") {
+		t.Fatalf("a later post is sent as an update and an earlier one is not, got %+v", sender.sent)
+	}
+}
+
+// A reply can enter the latest 10 in a later poll. It is sent only when it
+// changes the schedule.
+func TestResetFeedReplyInLaterPoll(t *testing.T) {
+	const start, end = "2026-10-07T07:00:00Z", "2026-10-08T07:00:00Z"
+	sender := &fakeSender{}
+	st := store.NewState()
+	now := time.Date(2026, 10, 7, 19, 20, 0, 0, time.UTC)
+	ProcessResetRecords(context.Background(), st, nil, false, sender, time.UTC, LangZH, now)
+	post := bankedSchedule("post", "pending", "2026-10-07T19:19:17Z", start, end, 0.93)
+	repeat := bankedSchedule("repeat", "pending", "2026-10-07T19:19:33Z", start, end, 0.93)
+	reply := bankedSchedule("reply", "pending", "2026-10-07T19:19:50Z", start, end, 0.82)
+	ProcessResetRecords(context.Background(), st, []ResetRecord{post}, false, sender, time.UTC, LangZH, now)
+	ProcessResetRecords(context.Background(), st, []ResetRecord{repeat, post}, false, sender, time.UTC, LangZH, now.Add(10*time.Minute))
+	if len(sender.sent) != 1 {
+		t.Fatalf("a reply with the same content must not be sent, got %+v", sender.sent)
+	}
+	ProcessResetRecords(context.Background(), st, []ResetRecord{reply, repeat, post}, false, sender, time.UTC, LangZH, now.Add(20*time.Minute))
+	if len(sender.sent) != 2 || !strings.Contains(sender.sent[1].Body, "82%") {
+		t.Fatalf("a reply with a new confidence is sent as an update, got %+v", sender.sent)
+	}
+}
+
+func TestResetFeedSupersedeRules(t *testing.T) {
+	const start, end = "2026-10-07T07:00:00Z", "2026-10-08T07:00:00Z"
+	now := time.Date(2026, 10, 7, 19, 20, 0, 0, time.UTC)
+	run := func(records ...ResetRecord) []Message {
+		sender := &fakeSender{}
+		st := store.NewState()
+		ProcessResetRecords(context.Background(), st, nil, false, sender, time.UTC, LangZH, now)
+		ProcessResetRecords(context.Background(), st, records, false, sender, time.UTC, LangZH, now)
+		return sender.sent
+	}
+	pending := bankedSchedule("a", "pending", "2026-10-07T19:00:00Z", start, end, 0.9)
+	unknown := bankedSchedule("b", "unknown", "2026-10-07T19:10:00Z", start, end, 0.9)
+	if got := run(unknown, pending); len(got) != 1 {
+		t.Fatalf("a later post that is not sent must not suppress a pending one, got %+v", got)
+	}
+	tie := bankedSchedule("c", "pending", "2026-10-07T19:00:00Z", start, end, 0.9)
+	if got := run(tie, pending); len(got) != 1 {
+		t.Fatalf("posts with the same announcedAt are sent once, got %+v", got)
+	}
+	pro := bankedSchedule("d", "pending", "2026-10-07T19:10:00Z", start, end, 0.9)
+	pro["scope"] = map[string]any{"plans": []any{"pro"}}
+	if got := run(pro, pending); len(got) != 2 {
+		t.Fatalf("schedules for different plans are sent separately, got %+v", got)
+	}
+}
+
+func TestResetFeedFirstRunIgnoresKindCase(t *testing.T) {
+	r := bankedSchedule("a", "pending", "2026-10-07T19:00:00Z", "2026-10-07T07:00:00Z", "2026-10-08T07:00:00Z", 0.9)
+	r["kind"] = "RESET_SCHEDULED"
+	sender := &fakeSender{}
+	now := time.Date(2026, 10, 7, 19, 20, 0, 0, time.UTC)
+	if sent := ProcessResetRecords(context.Background(), store.NewState(), []ResetRecord{r}, true, sender, time.UTC, LangZH, now); sent != 1 {
+		t.Fatalf("got %d", sent)
 	}
 }
 
