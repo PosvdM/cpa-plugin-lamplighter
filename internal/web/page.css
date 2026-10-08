@@ -342,6 +342,7 @@ form label.inline { flex-direction: row; align-items: center; gap: 8px; font-wei
 form label.inline-input { flex-direction: row; align-items: center; gap: 6px; font-weight: 500; color: var(--text-primary); }
 .inline-input input { width: 72px; text-align: right; font-family: var(--font-mono); }
 .checks { display: flex; flex-wrap: wrap; gap: 8px 24px; }
+.notify-modes { display: grid; grid-template-columns: auto minmax(0, 200px) minmax(0, 200px); gap: 8px 18px; align-items: center; justify-content: start; }
 .hint, form .hint { font-size: 12px; font-weight: 400; color: var(--text-tertiary); margin: 0; }
 table.services th, table.services td { padding: 8px 10px; }
 table.services td:nth-child(2), table.services td:nth-child(3), table.services th:nth-child(2), table.services th:nth-child(3) { width: 84px; text-align: center; }

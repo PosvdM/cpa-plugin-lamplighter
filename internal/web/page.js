@@ -112,8 +112,13 @@
       test_bark: "测试推送", test_bark_hint: "按已保存的设置发送，修改地址后先保存",
       thresholds: "提醒阈值", remaining_le: "剩余 ≤",
       thresholds_hint: "额度降到每一档时推送一次，耗尽时再推送一次",
-      notify_recovery: "额度恢复时通知",
-      notify_reset_reminders: "重置前提醒（5 小时窗口前 1 小时，7 天窗口前 1 天）",
+      window_5h: "5 小时窗口", window_7d: "7 天窗口",
+      recovery_notify: "额度恢复时通知", reset_reminder: "重置前提醒",
+      recovery_notify_5h: "额度恢复时通知 · 5 小时窗口", recovery_notify_7d: "额度恢复时通知 · 7 天窗口",
+      reset_reminder_5h: "重置前提醒 · 5 小时窗口", reset_reminder_7d: "重置前提醒 · 7 天窗口",
+      mode_off: "关闭", recovery_all: "每次重置", recovery_after_exhausted: "用完后的下一次重置",
+      reminder_all: "每次", reminder_has_remaining: "有余量时",
+      notify_modes_hint: "重置前提醒在 5 小时窗口重置前 1 小时、7 天窗口重置前 1 天发送；“有余量时”指剩余高于第三档阈值。恢复通知附带上一周期的剩余额度，选“每次重置”时插件在重置前 30 秒多查询一次。",
       quota_queries: "额度查询",
       models_api_key: "模型列表 API key",
       models_api_key_hint: "在 CPA 的 access.api-keys 中新建一个专用 key，用于读取模型列表、选择点火模型",
@@ -218,8 +223,13 @@
       test_bark: "Send test", test_bark_hint: "Uses the saved settings; save after changing the URL",
       thresholds: "Alert thresholds", remaining_le: "Remaining ≤",
       thresholds_hint: "One notification when quota drops to each threshold, and one more when it runs out",
-      notify_recovery: "Notify when quota recovers",
-      notify_reset_reminders: "Remind before resets (1 hour before a 5-hour window, 1 day before a 7-day window)",
+      window_5h: "5-hour window", window_7d: "7-day window",
+      recovery_notify: "Notify when quota recovers", reset_reminder: "Remind before resets",
+      recovery_notify_5h: "Notify when quota recovers · 5-hour window", recovery_notify_7d: "Notify when quota recovers · 7-day window",
+      reset_reminder_5h: "Remind before resets · 5-hour window", reset_reminder_7d: "Remind before resets · 7-day window",
+      mode_off: "Off", recovery_all: "Every reset", recovery_after_exhausted: "Next reset after running out",
+      reminder_all: "Always", reminder_has_remaining: "When quota is left",
+      notify_modes_hint: "Reminders are sent 1 hour before a 5-hour window resets and 1 day before a 7-day window resets; \"When quota is left\" means more than the third threshold remains. Recovery notifications include what was left of the ended cycle; with \"Every reset\" the plugin queries once more 30 seconds before the reset.",
       quota_queries: "Quota queries",
       models_api_key: "Model list API key",
       models_api_key_hint: "Create a dedicated key in CPA's access.api-keys; the plugin reads the model list with it to pick ignition models",
@@ -1535,6 +1545,9 @@
     ).map(function (input) { return input.getAttribute("data-ag-group"); });
     // A fixed offset from older versions is removed so the time zone follows CPA.
     if (rawConfig.timezone_offset_hours !== undefined) patch.timezone_offset_hours = null;
+    // The single switches are replaced by recovery_notify and reset_reminder.
+    if (rawConfig.notify_recovery !== undefined) patch.notify_recovery = null;
+    if (rawConfig.notify_reset_reminders !== undefined) patch.notify_reset_reminders = null;
     var button = form.querySelector("button[type=submit]");
     button.disabled = true;
     api("PATCH", CONFIG_API, patch).then(function () {

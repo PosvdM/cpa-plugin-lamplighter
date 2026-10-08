@@ -100,3 +100,41 @@ func TestPluginsDir(t *testing.T) {
 		t.Fatalf("home: got %q", got)
 	}
 }
+
+func TestNotificationModes(t *testing.T) {
+	cfg, err := Parse(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.RecoveryNotify.FiveHour != RecoveryOff || cfg.ResetReminder.SevenDay != ReminderOff {
+		t.Fatalf("modes are off by default: %+v %+v", cfg.RecoveryNotify, cfg.ResetReminder)
+	}
+	cfg, err = Parse([]byte("recovery_notify:\n  five_hour: after_exhausted\n  seven_day: bogus\nreset_reminder:\n  seven_day: has_remaining\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.RecoveryNotify != (WindowModes{FiveHour: RecoveryAfterExhausted, SevenDay: RecoveryOff}) {
+		t.Fatalf("recovery_notify %+v", cfg.RecoveryNotify)
+	}
+	if cfg.ResetReminder != (WindowModes{FiveHour: ReminderOff, SevenDay: ReminderHasRemaining}) {
+		t.Fatalf("reset_reminder %+v", cfg.ResetReminder)
+	}
+}
+
+func TestLegacyNotificationSwitches(t *testing.T) {
+	cfg, err := Parse([]byte("notify_recovery: true\nnotify_reset_reminders: true\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.RecoveryNotify != (WindowModes{FiveHour: RecoveryAll, SevenDay: RecoveryAll}) ||
+		cfg.ResetReminder != (WindowModes{FiveHour: ReminderAll, SevenDay: ReminderAll}) {
+		t.Fatalf("legacy switches map to all: %+v %+v", cfg.RecoveryNotify, cfg.ResetReminder)
+	}
+	cfg, err = Parse([]byte("notify_recovery: true\nrecovery_notify:\n  seven_day: after_exhausted\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.RecoveryNotify != (WindowModes{FiveHour: RecoveryOff, SevenDay: RecoveryAfterExhausted}) {
+		t.Fatalf("the new key wins over the legacy switch: %+v", cfg.RecoveryNotify)
+	}
+}

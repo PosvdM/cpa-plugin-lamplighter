@@ -125,7 +125,7 @@ CPA 在用量记录的 `ResponseHeaders` 中提供上游响应头：
 | Claude | `Anthropic-Ratelimit-Unified-7d_oi-Utilization` / `-7d_oi-Reset` | Fable 的 7 天窗口，写入与主动查询相同的 Fable 额度组（`quota.FableGroupKey`）。CPA 也把 `7d_oi` 当作 Fable 专用窗口。普通（非 Fable）请求的响应头里没有这组；Fable 请求时是否返回，还没有在能用 Fable 的账号上验证过。插件每次启动后第一次读到时记一条日志 |
 | Codex | `X-Codex-Primary-Used-Percent`、`-Reset-At`、`-Reset-After-Seconds`、`-Window-Minutes`，`Secondary` 同理 | 按窗口长度区分，300 分钟为 5 小时，10080 分钟为 7 天 |
 
-被动数据只更新响应头里有的窗口，主动查询结果替换整个额度组。
+被动数据只更新响应头里有的窗口，主动查询结果替换整个额度组。`-Reset-After-Seconds` 从用量记录的 `RequestedAt` 起算：用量记录在请求结束时才到达，从处理时刻起算会把长请求带回的上一周期重置时间推到重置之后。
 
 跳过规则（`shouldSkipActive`）：查询时刻前 `passive_skip_seconds` 秒内有被动数据，且距上次主动查询不足 `passive_skip_max_minutes` 分钟时跳过。只看查询时刻之前的一小段时间，最坏情况下两次数据间隔为查询间隔加 `passive_skip_seconds`。手动刷新不跳过。
 
@@ -199,9 +199,13 @@ CPA 本地冷却带有 `reset_seconds` 且不超过 10 分钟时（`ignite.Coold
 `notify.Alerts.ProcessGroup` 比较每个窗口当前剩余额度和已通知等级：
 
 - 等级为 normal、notice（≤50%）、low（≤20%）、critical（≤10%）、exhausted（≤0.01%）。等级变差时推送；critical 和 exhausted 使用 `timeSensitive`。
-- 只有真正恢复才算等级变好：重置时间换到了新窗口，或者比上次读数高出 5 个百分点及以上（`RecoveryJump`）。主动查询和响应头的数值可能差 1 个百分点，同一窗口内的小幅回升不改变已通知等级，所以读数在阈值附近来回跳时只提醒一次。
-- 等级变好时，开启 `notify_recovery` 才推送；关闭时静默更新基线，否则下一轮的下降不会再提醒。
-- 开启 `notify_reset_reminders` 时，任意窗口重置前 1 小时、7 天窗口重置前 1 天各提醒一次。
+- 只有真正恢复才算等级变好：重置时间换到了新窗口，或者比上次读数高出 5 个百分点及以上（`RecoveryJump`）。主动查询和响应头的数值可能差 1 个百分点，同一窗口内的小幅回升不改变已通知等级，所以读数在阈值附近来回跳时只提醒一次。等级变好时只静默更新基线，否则下一轮的下降不会再提醒。
+- 恢复通知和重置前提醒按窗口类别取 `recovery_notify`、`reset_reminder` 中的模式。`notify.SevenDayClass` 按标签识别 5 小时和 7 天窗口；其他窗口在距离重置超过 1 天时被看到过（`state.json` 的 `long`）就算 7 天窗口，否则算 5 小时窗口。
+- 恢复通知只看周期切换（`cycleEnded`）：两个重置时间都已知时，重置时间必须换到新周期，并且旧重置时间已过或额度回升了 `RecoveryJump`。Codex 未使用的窗口每次查询都返回向后顺延的重置时间，只看重置时间是否变化会把每次查询都当成重置。新读数没有重置时间时，旧重置时间已过或额度回升 `RecoveryJump` 即算切换。
+- 用量记录在请求结束时才到达，重置前开始的长请求会在重置后带回上一周期的响应头。重置时间已过、并且属于已结束周期（`ended_reset`）或早于当前周期的读数直接忽略，否则会把状态拉回上一周期并再次触发恢复。
+- 检测到切换时记下待发送的恢复（`pending_recovery`），连同上一周期最后的读数和该周期是否用完（`exhausted`）。上一周期的读数取重置时间之前的最后一次读数（`cycle_reset`、`cycle_remaining`、`cycle_seen`），因为有的服务在重置后一段时间内仍返回旧的重置时间和新周期的数值。这个读数距离重置超过 15 分钟时不报告，用完的窗口到重置前都是 0，读数不会过期。上一周期重置前仍是 100% 时不推送：插件停止超过一个窗口后，Codex 未使用窗口顺延的重置时间看起来也已过期。`after_exhausted` 模式下只发送用完的周期。推送失败时下一次检查重试，1 小时后放弃。恢复与额度下降分别推送。
+- `engine.probes` 为 `recovery_notify` 为 `all` 的窗口在重置前 30 秒（`probeLead`）主动查询一次对应账号，每个账号每个重置时间只查一次，相差不超过 10 秒的重置时间视为同一个；之后已有读数时跳过。`probes` 只计算，不做标记，主循环用它计算唤醒时间；只有 `runProbes` 在查询时记录。
+- 重置前提醒：5 小时类窗口在重置前 1 小时提醒一次（`reset_notice_1h_for`），7 天类窗口在重置前 1 天提醒一次（`reset_notice_1d_for`）。`has_remaining` 模式只在剩余高于 `critical_threshold` 时提醒。
 - 两个重置时间相差不超过 10 秒视为同一周期。
 - 第一次看到某个窗口只记录基线，不推送。
 - 推送失败时不更新已通知等级，下一次检查会重试。

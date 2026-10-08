@@ -51,16 +51,58 @@ type CodexResetUpdates struct {
 	NotifyCurrentPending bool `yaml:"notify_current_pending" json:"notify_current_pending"`
 }
 
+// Recovery notification modes.
+const (
+	// RecoveryOff sends no recovery notification.
+	RecoveryOff = "off"
+	// RecoveryAll notifies every time a window resets.
+	RecoveryAll = "all"
+	// RecoveryAfterExhausted notifies when a window resets after it was used up.
+	RecoveryAfterExhausted = "after_exhausted"
+)
+
+// Reset reminder modes.
+const (
+	// ReminderOff sends no reminder.
+	ReminderOff = "off"
+	// ReminderAll reminds before every reset.
+	ReminderAll = "all"
+	// ReminderHasRemaining reminds only when more than critical_threshold is left.
+	ReminderHasRemaining = "has_remaining"
+)
+
+// WindowModes holds one notification mode for 5-hour windows and one for
+// 7-day windows.
+type WindowModes struct {
+	FiveHour string `yaml:"five_hour" json:"five_hour"`
+	SevenDay string `yaml:"seven_day" json:"seven_day"`
+}
+
+// For returns the mode for a 7-day window when sevenDay is true and for a
+// 5-hour window otherwise.
+func (m WindowModes) For(sevenDay bool) string {
+	if sevenDay {
+		return m.SevenDay
+	}
+	return m.FiveHour
+}
+
 // Config is the effective plugin configuration.
 type Config struct {
-	BarkURL              string  `yaml:"bark_url" json:"bark_url"`
-	BarkGroup            string  `yaml:"bark_group" json:"bark_group"`
-	BarkIcon             string  `yaml:"bark_icon" json:"bark_icon"`
-	NoticeThreshold      float64 `yaml:"notice_threshold" json:"notice_threshold"`
-	LowThreshold         float64 `yaml:"low_threshold" json:"low_threshold"`
-	CriticalThreshold    float64 `yaml:"critical_threshold" json:"critical_threshold"`
-	NotifyRecovery       bool    `yaml:"notify_recovery" json:"notify_recovery"`
-	NotifyResetReminders bool    `yaml:"notify_reset_reminders" json:"notify_reset_reminders"`
+	BarkURL           string  `yaml:"bark_url" json:"bark_url"`
+	BarkGroup         string  `yaml:"bark_group" json:"bark_group"`
+	BarkIcon          string  `yaml:"bark_icon" json:"bark_icon"`
+	NoticeThreshold   float64 `yaml:"notice_threshold" json:"notice_threshold"`
+	LowThreshold      float64 `yaml:"low_threshold" json:"low_threshold"`
+	CriticalThreshold float64 `yaml:"critical_threshold" json:"critical_threshold"`
+	// RecoveryNotify and ResetReminder hold one mode per window kind.
+	RecoveryNotify WindowModes `yaml:"recovery_notify" json:"recovery_notify"`
+	ResetReminder  WindowModes `yaml:"reset_reminder" json:"reset_reminder"`
+	// LegacyNotifyRecovery and LegacyResetReminders are the switches that
+	// RecoveryNotify and ResetReminder replace. Parse maps them when the new
+	// key is absent.
+	LegacyNotifyRecovery *bool `yaml:"notify_recovery,omitempty" json:"-"`
+	LegacyResetReminders *bool `yaml:"notify_reset_reminders,omitempty" json:"-"`
 	// Timezone is an IANA name such as Asia/Shanghai. When both Timezone and
 	// TimezoneOffsetHours are empty, the plugin uses the time zone of the CPA
 	// process.
@@ -112,8 +154,8 @@ func Default() Config {
 		NoticeThreshold:       50,
 		LowThreshold:          20,
 		CriticalThreshold:     10,
-		NotifyRecovery:        false,
-		NotifyResetReminders:  false,
+		RecoveryNotify:        WindowModes{FiveHour: RecoveryOff, SevenDay: RecoveryOff},
+		ResetReminder:         WindowModes{FiveHour: ReminderOff, SevenDay: ReminderOff},
 		PollIntervalSeconds:   300,
 		RequestTimeoutSeconds: 20,
 		PassiveSkipSeconds:    60,
@@ -149,10 +191,18 @@ func Parse(raw []byte) (Config, error) {
 			return Default(), fmt.Errorf("parse plugin config: %w", err)
 		}
 		var overlay struct {
-			Providers map[string]yaml.Node `yaml:"providers"`
+			Providers      map[string]yaml.Node `yaml:"providers"`
+			RecoveryNotify *yaml.Node           `yaml:"recovery_notify"`
+			ResetReminder  *yaml.Node           `yaml:"reset_reminder"`
 		}
 		if err := yaml.Unmarshal(raw, &overlay); err != nil {
 			return Default(), fmt.Errorf("parse plugin config: %w", err)
+		}
+		if overlay.RecoveryNotify == nil && cfg.LegacyNotifyRecovery != nil && *cfg.LegacyNotifyRecovery {
+			cfg.RecoveryNotify = WindowModes{FiveHour: RecoveryAll, SevenDay: RecoveryAll}
+		}
+		if overlay.ResetReminder == nil && cfg.LegacyResetReminders != nil && *cfg.LegacyResetReminders {
+			cfg.ResetReminder = WindowModes{FiveHour: ReminderAll, SevenDay: ReminderAll}
 		}
 		// Each provider block starts from its own defaults so that a partial
 		// block such as {ignite: true} keeps the other keys.
@@ -181,6 +231,18 @@ func clamp(value, minimum, maximum int) int {
 		return maximum
 	}
 	return value
+}
+
+// mode returns value when it is one of allowed and allowed[0], the off
+// mode, otherwise.
+func mode(value string, allowed ...string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	for _, candidate := range allowed {
+		if value == candidate {
+			return value
+		}
+	}
+	return allowed[0]
 }
 
 func (c *Config) normalize() {
@@ -214,6 +276,10 @@ func (c *Config) normalize() {
 	c.Ignition.PostSuccessHoldSeconds = clamp(c.Ignition.PostSuccessHoldSeconds, 15, 0)
 	c.CodexResetUpdates.PollSeconds = clamp(c.CodexResetUpdates.PollSeconds, 300, 0)
 	c.HistoryRetentionDays = clamp(c.HistoryRetentionDays, 1, 365)
+	c.RecoveryNotify.FiveHour = mode(c.RecoveryNotify.FiveHour, RecoveryOff, RecoveryAll, RecoveryAfterExhausted)
+	c.RecoveryNotify.SevenDay = mode(c.RecoveryNotify.SevenDay, RecoveryOff, RecoveryAll, RecoveryAfterExhausted)
+	c.ResetReminder.FiveHour = mode(c.ResetReminder.FiveHour, ReminderOff, ReminderAll, ReminderHasRemaining)
+	c.ResetReminder.SevenDay = mode(c.ResetReminder.SevenDay, ReminderOff, ReminderAll, ReminderHasRemaining)
 	for name, provider := range c.Providers {
 		provider.Model = strings.TrimSpace(provider.Model)
 		c.Providers[name] = provider

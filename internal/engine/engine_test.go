@@ -408,3 +408,79 @@ func TestLanguageReportedByThePageIsUsedForNotifications(t *testing.T) {
 		}
 	}
 }
+
+func TestPreResetQueryRunsOncePerReset(t *testing.T) {
+	start := time.Date(2026, 10, 4, 10, 0, 0, 0, shanghai)
+	c := &clock{t: start}
+	// The host's reset times follow a separate clock, so they stay fixed.
+	h := standardHost(&clock{t: start})
+	reset := start.Add(3 * time.Hour)
+	e, _ := newTestEngine(t, h, c)
+	ctx := context.Background()
+	e.poll(ctx, e.config(), c.t, "", false)
+	if due, next := e.probes(e.config(), c.t); len(due) != 0 || !next.IsZero() {
+		t.Fatalf("no pre-reset query while recovery notifications are off: %v %v", due, next)
+	}
+
+	cfg := e.config()
+	cfg.RecoveryNotify.FiveHour = config.RecoveryAll
+	e.Configure(cfg, nil)
+	if due, next := e.probes(cfg, c.t); len(due) != 0 || !next.Equal(reset.Add(-probeLead)) {
+		t.Fatalf("next pre-reset query: %v %v", due, next)
+	}
+	before := h.requestsTo(quota.ClaudeUsageURL)
+	c.t = reset.Add(-20 * time.Second)
+	// Computing the next wake-up does not use up a due query.
+	if due, _ := e.probes(cfg, c.t); len(due) == 0 {
+		t.Fatal("pre-reset queries are due 30 seconds before the reset")
+	}
+	e.runProbes(ctx, cfg, c.t)
+	e.runProbes(ctx, cfg, c.t)
+	if got := h.requestsTo(quota.ClaudeUsageURL) - before; got != 1 {
+		t.Fatalf("want one pre-reset Claude query, got %d", got)
+	}
+	if due, next := e.probes(cfg, c.t); len(due) != 0 || !next.IsZero() {
+		t.Fatalf("every window was probed: %v %v", due, next)
+	}
+
+	// A reset time a few seconds off is the same reset and is not queried again.
+	e.mu.Lock()
+	for _, g := range e.groups {
+		for i := range g.Windows {
+			g.Windows[i].Reset = g.Windows[i].Reset.Add(5 * time.Second)
+			g.Windows[i].ObservedAt = c.t.Add(-time.Minute)
+		}
+	}
+	e.mu.Unlock()
+	e.runProbes(ctx, cfg, c.t)
+	if got := h.requestsTo(quota.ClaudeUsageURL) - before; got != 1 {
+		t.Fatalf("a jittered reset time must not repeat the query, got %d", got)
+	}
+}
+
+func TestPassiveRelativeResetCountsFromTheRequest(t *testing.T) {
+	c := &clock{t: time.Date(2026, 10, 4, 10, 0, 0, 0, shanghai)}
+	h := standardHost(c)
+	e, _ := newTestEngine(t, h, c)
+	ctx := context.Background()
+	e.poll(ctx, e.config(), c.t, "", false)
+	requested := c.t
+	c.add(3 * time.Minute)
+	e.applyUsage(ctx, usageEvent{provider: "codex", authIndex: "1", at: requested, header: http.Header{
+		"X-Codex-Primary-Used-Percent":        {"70"},
+		"X-Codex-Primary-Reset-After-Seconds": {"600"},
+		"X-Codex-Primary-Window-Minutes":      {"300"},
+	}})
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for _, g := range e.groups {
+		if g.AuthIndex != "1" {
+			continue
+		}
+		if w, ok := g.fiveHour(); !ok || !w.Reset.Equal(requested.Add(10*time.Minute)) {
+			t.Fatalf("reset %v, want %v", w.Reset, requested.Add(10*time.Minute))
+		}
+		return
+	}
+	t.Fatal("no Codex group")
+}
