@@ -6,7 +6,7 @@
 
 > 名字来自《小王子》里的点灯人：他的星球每分钟转一圈，他就每分钟点一次灯、熄一次灯，从不误点。这个插件做的也是按时点灯：每个 5 小时额度窗口一重置，就点亮下一个窗口。
 
-Lamplighter（点灯人）是 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI)（CPA）的原生插件。它监控 ChatGPT（Codex）、Claude 和 Antigravity 账号的额度，通过 [Bark](https://github.com/Finb/Bark) 推送提醒，并在 5 小时额度窗口重置后发送一个极小的请求，让下一个窗口立即开始计时。
+Lamplighter（点灯人）是 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI)（CPA）的原生插件。它监控 ChatGPT（Codex）、Claude 和 Antigravity 账号的额度，通过 [Bark](https://github.com/Finb/Bark) 或飞书自定义机器人推送提醒，并在 5 小时额度窗口重置后发送一个极小的请求，让下一个窗口立即开始计时。
 
 ![管理页面：各账号额度和自动点火计划](./docs/images/overview.png)
 
@@ -17,7 +17,7 @@ Lamplighter（点灯人）是 [CLIProxyAPI](https://github.com/router-for-me/CLI
 ## 功能
 
 - **额度监控**：定时主动查询额度，同时读取 CPA 处理真实请求时上游返回的额度信息。
-- **Bark 通知**：剩余额度降到 50%、20%、10% 和耗尽时提醒；可选的恢复通知和重置前提醒；可选转发 [Did Codex Reset](https://didcodexreset.com/zh.html) 的重置信号。
+- **推送通知**：剩余额度降到 50%、20%、10% 和耗尽时提醒；可选的恢复通知和重置前提醒；可选转发 [Did Codex Reset](https://didcodexreset.com/zh.html) 的重置信号。Bark 和飞书自定义机器人两种渠道可以单独或同时启用。
 - **自动点火**：每天 07:00 起，在每次 5 小时窗口重置后 3 秒发送最小请求，最晚到 22:30。请求经过 CPA 自己的模型执行器，并锁定到指定账号。
 - **管理页面**：在 CPA 管理中心查看各账号额度、点火计划、事件和额度变化图表，并修改设置。
 
@@ -33,7 +33,7 @@ Lamplighter（点灯人）是 [CLIProxyAPI](https://github.com/router-for-me/CLI
 
 - CPA v8.0.4 或更新版本，并开启插件（`plugins.enabled: true`）。插件提供 Linux amd64/arm64、macOS amd64/arm64 和 Windows amd64 版本；macOS 版本只在 CI 中构建和测试，还没有在实际运行的 CPA 上验证。
 - 一个专门给 Lamplighter 用的 CPA API key。插件用它读取模型列表来选择点火模型。
-- 需要通知时，一台装有 Bark 的 iPhone。
+- 需要通知时，一台装有 Bark 的 iPhone，或一个飞书自定义机器人。
 
 ## 安装
 
@@ -105,6 +105,8 @@ Claude 和 Codex 的额度无论主动还是被动获取，都精确到 1%；Ant
 
 标题前的图标：🟡 剩余降到第一档（默认 50%），🔴 降到第二档（默认 20%）及以下，✅ 额度恢复，⏰ 重置提醒，⚠️ 点火暂停、CPA 冷却未解除等需要处理的问题。正文每行依次是：窗口、剩余额度、距离重置的时间、重置时间。第一次看到某个额度窗口时只记录当前状态，不推送。
 
+飞书收到的是交互卡片：标题栏按等级着色（🟡 黄、🔴 红、✅ 绿、⚠️ 橙），正文的额度行显示为并排字段，脚注是发送时间。卡片被飞书拒绝时改发纯文本。
+
 ## 配置
 
 所有配置都写在 `config.yaml` 的 `plugins.configs.lamplighter` 下，也可以在管理页面的“设置”中修改。页面上的设置改动后自动保存：开关和勾选框点击后保存，文本和数字在离开输入框或按回车时保存。配置修改后插件自动应用，不需要重启。
@@ -114,6 +116,8 @@ Claude 和 Codex 的额度无论主动还是被动获取，都精确到 1%；Ant
 | `bark_url` | 空 | Bark 推送地址，写到 device key 为止；为空时不推送 |
 | `bark_group` | `CPA` | Bark 通知分组 |
 | `bark_icon` | Lamplighter 图标 | 通知图标 |
+| `feishu_webhook` | 空 | 飞书自定义机器人 Webhook 地址；为空时不通过飞书推送 |
+| `feishu_secret` | 空 | 机器人开启签名校验时的密钥；为空时不签名 |
 | `notice_threshold` | `50` | 第一档提醒阈值（剩余百分比） |
 | `low_threshold` | `20` | 第二档提醒阈值 |
 | `critical_threshold` | `10` | 第三档提醒阈值 |
@@ -129,6 +133,8 @@ Claude 和 Codex 的额度无论主动还是被动获取，都精确到 1%；Ant
 | `cpa_base_url` | `http://127.0.0.1:8317` | 插件访问 CPA 自身的地址；CPA 改了端口或开启 TLS 时需要同步修改 |
 | `history_retention_days` | `40` | 额度历史保留天数 |
 | `data_dir` | 插件目录下的 `data/lamplighter` | 状态和历史目录 |
+
+通知渠道有 Bark 和飞书自定义机器人两个，都填时每条通知分别发送，一个渠道失败不影响另一个；都不填时不推送，告警会保留到配置渠道后补发。Bark 地址在 Bark App 中获取。飞书地址在群设置的“群机器人”里添加“自定义机器人”后获得，形如 `https://open.feishu.cn/open-apis/bot/v2/hook/...`；添加时勾选了“签名校验”就把密钥填进 `feishu_secret`。
 
 恢复通知和重置前提醒按窗口分别设置，`five_hour` 对应 5 小时窗口，`seven_day` 对应 7 天窗口：
 
@@ -175,6 +181,7 @@ plugins:
     lamplighter:
       enabled: true
       bark_url: "https://api.day.app/你的device_key"
+      feishu_webhook: "https://open.feishu.cn/open-apis/bot/v2/hook/你的地址"
       models_api_key: "给 Lamplighter 新建的 key"
       ignition:
         enabled: true
@@ -207,7 +214,7 @@ plugins:
 ## 安全与风险
 
 - 插件只在内存中读取凭证文件里的 access token 用于查询额度，不写入日志或磁盘。管理页面和接口都需要 CPA 管理密钥。
-- `bark_url` 和 `models_api_key` 以明文保存在 CPA 的 `config.yaml` 中，有管理密钥的人可以看到。
+- `bark_url`、`feishu_webhook`、`feishu_secret` 和 `models_api_key` 以明文保存在 CPA 的 `config.yaml` 中，有管理密钥的人可以看到。
 - 各服务对第三方工具使用订阅账号有不同限制。通过 CPA 使用账号、定时发送点火请求和查询额度，都可能带来账号风险，请自行判断。
 
 ## 开发

@@ -18,7 +18,7 @@ Lamplighter 是用 Go 编写、以 `-buildmode=c-shared` 构建的 CPA 原生插
 | `internal/egress` | 选择额度请求的网络出口 |
 | `internal/models` | 读取 CPA 模型列表，排列点火候选模型 |
 | `internal/ignite` | 点火时间计算、滑动重置判断、失败分类和失败保护 |
-| `internal/notify` | Bark 发送、额度提醒、Did Codex Reset 转发 |
+| `internal/notify` | Bark 和飞书发送、额度提醒、Did Codex Reset 转发 |
 | `internal/store` | `state.json`、额度历史和实例锁 |
 | `internal/web` | 管理页面，HTML、CSS、JS 分文件编辑，运行时合成一个文档 |
 
@@ -37,7 +37,7 @@ Lamplighter 是用 Go 编写、以 `-buildmode=c-shared` 构建的 CPA 原生插
 | `GET /v0/management/lamplighter/history?range=1h\|3h\|6h\|12h\|24h\|26h\|4d\|8d\|15d\|1mo\|36d` | 额度历史和点火事件，默认 `24h`。5 小时额度按小时、7 天额度按天，依次是：1 个单位；半个窗口加 1（`3h`、`4d`）；一个窗口加 1（`6h`、`8d`）；半天或半月，能完整显示两个窗口（`12h`、`15d`）；一天或一个月（`24h`、`1mo`）；五个窗口加 1（`26h`、`36d`）。`1mo` 从插件时区上个月的同一日期（该月没有这一天时取最后一天）到现在 |
 | `POST /v0/management/lamplighter/refresh` | 立即主动查询，`{"auth_index": "..."}` 只查一个账号 |
 | `POST /v0/management/lamplighter/ignite` | 立即点火，`{"target": "<额度组 key>"}` |
-| `POST /v0/management/lamplighter/test-bark` | 发送测试通知 |
+| `POST /v0/management/lamplighter/test-bark` | 向所有已配置渠道发送测试通知 |
 | `POST /v0/management/lamplighter/language` | 记录通知语言，`{"language": "zh-CN"}`；中文的各种写法记为 `zh`，其他语言记为 `en` |
 
 页面注册为资源 `GET /v0/resource/plugins/lamplighter/page`，菜单名为 `Lamplighter`。资源本身不需要认证，页面中的数据请求都带管理密钥。页面从管理中心保存在 `localStorage` 的 `cli-proxy-auth` 中读取密钥（管理中心用主机名和 User-Agent 做了可逆混淆），读不到时让用户输入并只保存在 `sessionStorage`。设置通过 CPA 的 `PATCH /v0/management/plugins/lamplighter/config` 自动保存：表单的 `change` 事件触发保存，每次只提交改动字段所在的顶层键。该接口只合并顶层键，所以 `ignition`、`providers`、`recovery_notify` 等对象以已保存的对象为基础整体提交。保存依次进行，后一次以前一次写入的配置为基础；数字不满足输入框的范围或步长时不保存。最后一次保存 3 秒后，页面重新读取状态，把保存过的字段填成插件应用后的值，正在编辑的字段不回填；保存失败时恢复为已保存的值。测试推送等待未完成的保存后再发送。
@@ -200,7 +200,7 @@ CPA 本地冷却带有 `reset_seconds` 且不超过 10 分钟时（`ignite.Coold
 
 **过期的 CPA 冷却**：CPA 收到账号级 429 后，把凭证冷却到上游报告的重置时间（7 天额度用完时可达数天），额度提前恢复（如重置卡）时不会自动解除。每轮查询后，`engine.checkCooldowns` 检查每个凭证：CPA 冷却还剩 10 分钟以上，且某个带 5 小时窗口的额度组在最近 15 分钟内的数据显示所有窗口都没有用完，就认为冷却已过期。每个冷却结束时间只推送一次（`state.json` 的 `cooldown_notices`），并记录 `cooldown_stale` 事件；状态接口的账号带 `cooldown_until` 和 `stale_cooldown`。插件不替用户清除冷却，因为那需要 CPA 管理密钥，并且会改变 CPA 的路由状态。
 
-暂停时推送一次 Bark（`circuit_notified_until_epoch` 防止重复），成功或看到固定的未来重置时间后清空失败状态。
+暂停时推送一次通知（`circuit_notified_until_epoch` 防止重复），成功或看到固定的未来重置时间后清空失败状态。
 
 ## 通知
 
@@ -218,7 +218,11 @@ CPA 本地冷却带有 `reset_seconds` 且不超过 10 分钟时（`ignite.Coold
 - 第一次看到某个窗口只记录基线，不推送。
 - 推送失败时不更新已通知等级，下一次检查会重试。
 
+`engine.notificationSenders` 按配置各建一个 sender：`bark_url` 非空时加上 `notify.Bark`，`feishu_webhook` 非空且通过 `validateFeishuWebhook`（必须是 http(s) 地址，路径含 `/hook/`）时加上 `notify.Feishu`。两者都没有时得到空的多渠道发送器，它返回 `ErrNoChannel`，告警保持待发。有多个渠道时逐个发送，一个渠道失败不影响其他渠道，但只有全部成功才更新已通知等级：部分成功时下一次重试会让已成功的渠道重复收到同一条通知。
+
 Bark 请求为 `GET {bark_url}/{标题}/{正文}?group&level&icon&url`，标题和正文除 RFC 3986 非保留字符外全部百分号编码，返回 JSON 中 `code` 不为 200 视为失败。`icon` 默认使用仓库中的 `assets/logo.png`；配置中的 `bark_icon` 仍为旧默认值（CPA Management Center 图标）时，载入时替换为该默认值。
+
+飞书请求为 `POST {feishu_webhook}`，正文是 JSON：`msg_type` 为 `interactive` 的交互卡片，或卡片被拒时 `msg_type` 为 `text` 的纯文本。HTTP 状态码不在 2xx 内，或返回 JSON 的 `code` 不为 0，视为失败。卡片标题是 `plain_text`，标题栏颜色按等级取 `yellow`、`orange`、`red`、`green`；正文中形如 `标签：值` 且标签不超过 16 个字符（`feishuLabelMax`）的行渲染为并排字段，其余按普通文本，末尾是分隔线和内容为 `Lamplighter · MM/DD HH:MM` 的脚注。`feishu_secret` 为空时不签名，否则附加 Unix 秒的 `timestamp` 和 `sign`；`sign` 是对空内容做 HMAC-SHA256 再 Base64，HMAC 的密钥是 `timestamp + "\n" + secret`，与常见的 key 和 message 分工相反。
 
 通知文字在 `internal/notify/text.go` 中，中文和英文各一列，按 `state.json` 的 `language` 选择。语言由管理页面上报：Bark 推送时没有打开的页面，所以使用最近一次上报的语言，没有上报过时使用中文。窗口名在通知中始终写作 `5h`、`7d`。Did Codex Reset 的跳转链接按语言指向中文版或英文版的历史页面。
 
@@ -246,6 +250,6 @@ Did Codex Reset 每 `poll_seconds` 秒（最少 300 秒，对齐时间边界）�
 
 - 点火只通过 `host.model.execute` 发送，并锁定到具体凭证；不要在插件中拼装服务的模型请求。
 - 额度请求的出口必须与 CPA 模型请求一致；出口无法确定时跳过请求，不能退回直连。
-- 不在日志、事件、状态接口或磁盘中输出 access token、`bark_url` 和 `models_api_key`。
+- 不在日志、事件、状态接口或磁盘中输出 access token、`bark_url`、`feishu_webhook`、`feishu_secret` 和 `models_api_key`。
 - 宿主回调的 JSON 字段以 CPA v8.0.4 的 `sdk/pluginapi` 和 `internal/pluginhost` 为准；修改前对照 CPA 源码。
 - 修改 `state.json` 结构时保持向后兼容：新字段使用缺省值，旧字段缺失时继续运行。
