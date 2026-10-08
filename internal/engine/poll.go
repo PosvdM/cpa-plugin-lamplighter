@@ -117,7 +117,9 @@ func (e *Engine) drainUsage(ctx context.Context) {
 
 func (e *Engine) applyUsage(ctx context.Context, ev usageEvent) {
 	now := e.now()
-	groups := quota.ParsePassive(ev.provider, ev.header, now)
+	// Relative reset times count from the request, not from when the usage
+	// record is processed; a long request delivers its record late.
+	groups := quota.ParsePassive(ev.provider, ev.header, ev.at)
 	if len(groups) == 0 {
 		return
 	}

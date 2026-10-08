@@ -86,8 +86,11 @@ type Engine struct {
 	alerts    *notify.Alerts
 	passiveAt map[string]time.Time
 	// fableSeen marks credentials whose passive Fable window was logged.
-	fableSeen   map[string]bool
-	activeAt    map[string]time.Time
+	fableSeen map[string]bool
+	activeAt  map[string]time.Time
+	// probed holds the reset times each credential was queried for before,
+	// until those resets pass.
+	probed      map[string][]time.Time
 	lastSample  map[string]sampleMark
 	pendingSamp map[string]store.Record
 	lock        *store.Lock
@@ -121,6 +124,7 @@ func New(opts Options) *Engine {
 		pollErrs:       map[string]string{},
 		passiveAt:      map[string]time.Time{},
 		activeAt:       map[string]time.Time{},
+		probed:         map[string][]time.Time{},
 		lastSample:     map[string]sampleMark{},
 		pendingSamp:    map[string]store.Record{},
 		lister:         &models.Lister{},
@@ -433,6 +437,7 @@ func (e *Engine) run() {
 				e.poll(ctx, cfg, nextPoll, "", false)
 				nextPoll = alignedAfter(e.now(), cfg.PollInterval())
 			}
+			e.runProbes(ctx, cfg, e.now())
 			if cfg.Ignition.Enabled {
 				e.performDue(ctx, cfg)
 			}
@@ -460,6 +465,14 @@ func (e *Engine) run() {
 		if enabled && cfg.Ignition.Enabled {
 			if due := e.nextDue(cfg); !due.IsZero() && due.Before(wakeAt) {
 				wakeAt = due
+			}
+		}
+		if enabled {
+			// A query that came due while this round ran is run right away.
+			if due, probe := e.probes(cfg, e.now()); len(due) > 0 {
+				wakeAt = e.now()
+			} else if !probe.IsZero() && probe.Before(wakeAt) {
+				wakeAt = probe
 			}
 		}
 		if len(e.pendingSamp) > 0 {
@@ -498,7 +511,7 @@ func sameRuntimeConfig(a, b config.Config) bool {
 	return a.BarkURL == b.BarkURL && a.BarkGroup == b.BarkGroup && a.BarkIcon == b.BarkIcon &&
 		a.RequestTimeoutSeconds == b.RequestTimeoutSeconds && a.NoticeThreshold == b.NoticeThreshold &&
 		a.LowThreshold == b.LowThreshold && a.CriticalThreshold == b.CriticalThreshold &&
-		a.NotifyRecovery == b.NotifyRecovery && a.NotifyResetReminders == b.NotifyResetReminders &&
+		a.RecoveryNotify == b.RecoveryNotify && a.ResetReminder == b.ResetReminder &&
 		a.Location().String() == b.Location().String() && a.PollIntervalSeconds == b.PollIntervalSeconds
 }
 
