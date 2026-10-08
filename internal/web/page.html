@@ -103,7 +103,11 @@
         <div class="bark-row">
           <label><span data-i18n="bark_url">Bark 推送地址</span><input name="bark_url" type="text" autocomplete="off" placeholder="https://api.day.app/device_key"></label>
           <label><span data-i18n="bark_group">Bark 分组</span><input name="bark_group" type="text"></label>
-          <button id="test-bark" class="btn btn-secondary" type="button" title="按插件已应用的设置发送，修改地址后等几秒再测试" data-i18n="test_bark" data-i18n-title="test_bark_hint">测试推送</button>
+        </div>
+        <div class="bark-row">
+          <label><span data-i18n="feishu_webhook">飞书机器人 Webhook</span><input name="feishu_webhook" type="text" autocomplete="off" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/..."></label>
+          <label><span data-i18n="feishu_secret">飞书签名密钥（可选）</span><input name="feishu_secret" type="text" autocomplete="off"></label>
+          <button id="test-bark" class="btn btn-secondary" type="button" title="按插件已应用的设置发送到所有已配置的渠道，修改后等几秒再测试" data-i18n="test_bark" data-i18n-title="test_bark_hint">测试推送</button>
         </div>
         <div class="field">
           <span class="field-label" data-i18n="thresholds">提醒阈值</span>

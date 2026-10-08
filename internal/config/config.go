@@ -89,9 +89,14 @@ func (m WindowModes) For(sevenDay bool) string {
 
 // Config is the effective plugin configuration.
 type Config struct {
-	BarkURL           string  `yaml:"bark_url" json:"bark_url"`
-	BarkGroup         string  `yaml:"bark_group" json:"bark_group"`
-	BarkIcon          string  `yaml:"bark_icon" json:"bark_icon"`
+	BarkURL   string `yaml:"bark_url" json:"bark_url"`
+	BarkGroup string `yaml:"bark_group" json:"bark_group"`
+	BarkIcon  string `yaml:"bark_icon" json:"bark_icon"`
+	// FeishuWebhook is a Feishu custom bot webhook URL and FeishuSecret its
+	// optional sign key. Bark and Feishu may both be set, in which case every
+	// configured channel gets a copy of each notification.
+	FeishuWebhook     string  `yaml:"feishu_webhook" json:"feishu_webhook"`
+	FeishuSecret      string  `yaml:"feishu_secret" json:"feishu_secret"`
 	NoticeThreshold   float64 `yaml:"notice_threshold" json:"notice_threshold"`
 	LowThreshold      float64 `yaml:"low_threshold" json:"low_threshold"`
 	CriticalThreshold float64 `yaml:"critical_threshold" json:"critical_threshold"`
@@ -258,6 +263,8 @@ func (c *Config) normalize() {
 	if c.BarkIcon == oldBarkIcon {
 		c.BarkIcon = DefaultBarkIcon
 	}
+	c.FeishuWebhook = strings.TrimSpace(c.FeishuWebhook)
+	c.FeishuSecret = strings.TrimSpace(c.FeishuSecret)
 	c.CPABaseURL = strings.TrimRight(strings.TrimSpace(c.CPABaseURL), "/")
 	if c.CPABaseURL == "" {
 		c.CPABaseURL = "http://127.0.0.1:8317"

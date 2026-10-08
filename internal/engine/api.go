@@ -161,7 +161,7 @@ func (e *Engine) runCommand(ctx context.Context, cmd command) {
 		}
 	case "test_bark":
 		if e.alerts == nil || e.alerts.Sender == nil {
-			err = notify.ErrNotConfigured
+			err = notify.ErrNoChannel
 			break
 		}
 		lang := e.language()
@@ -257,6 +257,12 @@ func (e *Engine) Status() Status {
 	cfg := e.cfg
 	if cfg.BarkURL != "" {
 		cfg.BarkURL = "已设置"
+	}
+	if cfg.FeishuWebhook != "" {
+		cfg.FeishuWebhook = "已设置"
+	}
+	if cfg.FeishuSecret != "" {
+		cfg.FeishuSecret = "已设置"
 	}
 	if cfg.ModelsAPIKey != "" {
 		cfg.ModelsAPIKey = "已设置"

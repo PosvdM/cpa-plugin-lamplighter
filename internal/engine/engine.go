@@ -8,11 +8,14 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"time"
 
@@ -366,19 +369,65 @@ func (e *Engine) saveState() {
 
 func (e *Engine) applyRuntimeConfig(cfg config.Config) {
 	e.egress.Timeout = cfg.RequestTimeout()
+	senders, err := notificationSenders(cfg, e.version)
+	if err != nil {
+		e.logf("warn", "通知渠道配置有误：%v", err)
+	}
 	e.alerts = &notify.Alerts{
-		Cfg:  cfg,
-		Lang: e.language(),
-		Sender: &notify.Bark{
-			URL:       cfg.BarkURL,
-			Group:     cfg.BarkGroup,
-			Icon:      cfg.BarkIcon,
-			UserAgent: "cpa-plugin-lamplighter/" + e.version,
-			Client:    &http.Client{Timeout: cfg.RequestTimeout()},
-		},
+		Cfg:     cfg,
+		Lang:    e.language(),
+		Sender:  senders,
 		OnSent:  func(msg notify.Message) { e.notified("", msg) },
 		OnError: func(msg notify.Message, err error) { e.notifyFailed("", msg, err) },
 	}
+}
+
+// notificationSenders builds one sender per configured channel. The result is
+// always non-nil so Alerts keeps retrying an undeliverable alert until a
+// channel is configured; an empty Multi reports ErrNoChannel.
+func notificationSenders(cfg config.Config, version string) (notify.Multi, error) {
+	senders := notify.Multi{}
+	var errs []error
+	if cfg.BarkURL != "" {
+		senders = append(senders, &notify.Bark{
+			URL:       cfg.BarkURL,
+			Group:     cfg.BarkGroup,
+			Icon:      cfg.BarkIcon,
+			UserAgent: "cpa-plugin-lamplighter/" + version,
+			Client:    &http.Client{Timeout: cfg.RequestTimeout()},
+		})
+	}
+	if cfg.FeishuWebhook != "" {
+		if err := validateFeishuWebhook(cfg.FeishuWebhook); err != nil {
+			errs = append(errs, err)
+		} else {
+			senders = append(senders, &notify.Feishu{
+				Webhook:   cfg.FeishuWebhook,
+				Secret:    cfg.FeishuSecret,
+				UserAgent: "cpa-plugin-lamplighter/" + version,
+				Client:    &http.Client{Timeout: cfg.RequestTimeout()},
+				Loc:       cfg.Location(),
+			})
+		}
+	}
+	return senders, errors.Join(errs...)
+}
+
+// validateFeishuWebhook rejects the common misconfiguration of pasting
+// something that is not a webhook URL, which would otherwise only surface as
+// a failed push.
+func validateFeishuWebhook(webhook string) error {
+	parsed, err := url.Parse(webhook)
+	if err != nil {
+		return fmt.Errorf("feishu_webhook 不是合法 URL：%w", err)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return fmt.Errorf("feishu_webhook 需要 http(s) 地址，收到 %q", parsed.Scheme)
+	}
+	if !strings.Contains(parsed.Path, "/hook/") {
+		return errors.New("feishu_webhook 看起来不是机器人地址（路径里没有 /hook/），请检查是否复制完整")
+	}
+	return nil
 }
 
 func alignedAfter(t time.Time, interval time.Duration) time.Time {
@@ -517,10 +566,11 @@ func (e *Engine) run() {
 	e.saveState()
 }
 
-// sameRuntimeConfig reports whether the settings used to build the Bark
-// sender and HTTP clients are unchanged.
+// sameRuntimeConfig reports whether the settings used to build the
+// notification senders and HTTP clients are unchanged.
 func sameRuntimeConfig(a, b config.Config) bool {
 	return a.BarkURL == b.BarkURL && a.BarkGroup == b.BarkGroup && a.BarkIcon == b.BarkIcon &&
+		a.FeishuWebhook == b.FeishuWebhook && a.FeishuSecret == b.FeishuSecret &&
 		a.RequestTimeoutSeconds == b.RequestTimeoutSeconds && a.NoticeThreshold == b.NoticeThreshold &&
 		a.LowThreshold == b.LowThreshold && a.CriticalThreshold == b.CriticalThreshold &&
 		a.RecoveryNotify == b.RecoveryNotify && a.ResetReminder == b.ResetReminder &&

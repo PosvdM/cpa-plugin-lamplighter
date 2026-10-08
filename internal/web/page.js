@@ -109,7 +109,8 @@
       settings: "设置",
       notifications: "通知",
       bark_url: "Bark 推送地址", bark_group: "Bark 分组",
-      test_bark: "测试推送", test_bark_hint: "按插件已应用的设置发送，修改地址后等几秒再测试",
+      feishu_webhook: "飞书机器人 Webhook", feishu_secret: "飞书签名密钥（可选）",
+      test_bark: "测试推送", test_bark_hint: "按插件已应用的设置发送到所有已配置的渠道，修改后等几秒再测试",
       thresholds: "提醒阈值", remaining_le: "剩余 ≤",
       thresholds_hint: "额度降到每一档时推送一次，耗尽时再推送一次",
       window_5h: "5 小时窗口", window_7d: "7 天窗口",
@@ -150,7 +151,7 @@
       last_poll: "上次查询 {0}（{1}）", next_poll: "下次 {0}（{1}）",
       config_error: "配置无法解析，仍在使用上一份配置：{0}",
       models_error: "模型列表不可用：{0}",
-      no_bark: "未设置 Bark 推送地址，通知不会发送。",
+      no_channel: "未设置 Bark 或飞书推送地址，通知不会发送。",
       no_models_key: "未设置模型列表 API key，自动点火无法选择模型。",
       remaining_aria: "{0} {1} 剩余",
       source_passive: "被动", source_active: "主动", updated: "更新于 {0}",
@@ -223,7 +224,8 @@
       settings: "Settings",
       notifications: "Notifications",
       bark_url: "Bark push URL", bark_group: "Bark group",
-      test_bark: "Send test", test_bark_hint: "Uses the settings the plugin has applied; after changing the URL, wait a few seconds",
+      feishu_webhook: "Feishu bot webhook", feishu_secret: "Feishu sign key (optional)",
+      test_bark: "Send test", test_bark_hint: "Uses the applied settings for every configured channel; after changing them, wait a few seconds",
       thresholds: "Alert thresholds", remaining_le: "Remaining ≤",
       thresholds_hint: "One notification when quota drops to each threshold, and one more when it runs out",
       window_5h: "5-hour window", window_7d: "7-day window",
@@ -264,7 +266,7 @@
       last_poll: "last query {0} ({1})", next_poll: "next {0} ({1})",
       config_error: "The config cannot be parsed; the previous config stays in use: {0}",
       models_error: "Model list unavailable: {0}",
-      no_bark: "No Bark push URL is set, so no notifications are sent.",
+      no_channel: "Neither a Bark nor a Feishu push URL is set, so no notifications are sent.",
       no_models_key: "No model list API key is set, so ignition cannot pick a model.",
       remaining_aria: "{0} {1} remaining",
       source_passive: "passive", source_active: "active", updated: "updated {0}",
@@ -564,7 +566,7 @@
     if (status.lock_error) box.appendChild(notice(status.lock_error));
     if (status.list_error) box.appendChild(notice(status.list_error));
     if (status.models_error) box.appendChild(notice(translate("models_error", status.models_error)));
-    if (status.config && !status.config.bark_url) box.appendChild(notice(translate("no_bark")));
+    if (status.config && !status.config.bark_url && !status.config.feishu_webhook) box.appendChild(notice(translate("no_channel")));
     if (status.config && status.config.ignition && status.config.ignition.enabled && !status.config.models_api_key) {
       box.appendChild(notice(translate("no_models_key")));
     }
@@ -1548,6 +1550,8 @@
     var effective = JSON.parse(JSON.stringify(status.config || {}));
     effective.bark_url = rawConfig.bark_url || "";
     effective.models_api_key = rawConfig.models_api_key || "";
+    effective.feishu_webhook = rawConfig.feishu_webhook || "";
+    effective.feishu_secret = rawConfig.feishu_secret || "";
     return effective;
   }
 
