@@ -5,13 +5,12 @@ import (
 	"time"
 
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/config"
-	"github.com/PosvdM/cpa-plugin-lamplighter/internal/notify"
-	"github.com/PosvdM/cpa-plugin-lamplighter/internal/store"
 )
 
-// probeLead is how long before a reset the engine queries the credential
-// once more, so that the recovery notification reports what was left of
-// the ending cycle. Usage in the last probeLead is not counted.
+// probeLead is how long before every reset the engine queries the
+// credential once more, so that the history and the recovery notification
+// show what was left of the ending cycle. Usage in the last probeLead is not
+// counted.
 const probeLead = 30 * time.Second
 
 // probeTolerance treats two reset times of one credential as the same
@@ -24,14 +23,10 @@ type probe struct {
 }
 
 // probes returns the pre-reset queries due at now and the time of the next
-// one, zero when there is none. A window is probed when its recovery mode is
-// all, once per reset, unless a reading at or after the probe time already
-// exists. In after_exhausted mode the ended cycle is used up by definition,
-// so no probe is needed. probes does not mark anything; runProbes does.
-func (e *Engine) probes(cfg config.Config, now time.Time) (due []probe, next time.Time) {
-	if e.state == nil {
-		return nil, time.Time{}
-	}
+// one, zero when there is none. Every window with a reset time is probed
+// once per reset, unless a reading at or after the probe time already
+// exists. probes does not mark anything; runProbes does.
+func (e *Engine) probes(now time.Time) (due []probe, next time.Time) {
 	e.mu.Lock()
 	groups := make([]GroupView, 0, len(e.groups))
 	for _, g := range e.groups {
@@ -42,15 +37,8 @@ func (e *Engine) probes(cfg config.Config, now time.Time) (due []probe, next tim
 	e.mu.Unlock()
 
 	for _, g := range groups {
-		var states map[string]*store.WindowState
-		if gs := e.state.Groups[g.Key]; gs != nil {
-			states = gs.Windows
-		}
 		for _, w := range g.Windows {
 			if w.Reset.IsZero() || !now.Before(w.Reset) {
-				continue
-			}
-			if cfg.RecoveryNotify.For(notify.SevenDayClass(w.Window, states[w.ID])) != config.RecoveryAll {
 				continue
 			}
 			at := w.Reset.Add(-probeLead)
@@ -100,7 +88,7 @@ func (e *Engine) runProbes(ctx context.Context, cfg config.Config, now time.Time
 			e.probed[authIndex] = kept
 		}
 	}
-	due, _ := e.probes(cfg, now)
+	due, _ := e.probes(now)
 	queried := map[string]bool{}
 	for _, p := range due {
 		e.probed[p.authIndex] = append(e.probed[p.authIndex], p.reset)
