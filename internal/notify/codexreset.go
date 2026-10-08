@@ -150,11 +150,21 @@ func notifiable(r ResetRecord, now time.Time) bool {
 	return latest.IsZero() || now.Sub(latest) <= maxRecordAge
 }
 
-func markSeen(seen map[string]bool, r ResetRecord) {
-	seen[RecordKey(r)] = true
-	if key := eventKey(r); key != "" {
-		seen[key] = true
+// superseded reports whether a later post in records announces the same
+// scheduled reset. Did Codex Reset shows the latest post for a window, so only
+// that one is sent.
+func superseded(r ResetRecord, records []ResetRecord) bool {
+	key := eventKey(r)
+	if key == "" {
+		return false
 	}
+	announced := quota.ParseTime(r.str("announcedAt"))
+	for _, other := range records {
+		if eventKey(other) == key && quota.ParseTime(other.str("announcedAt")).After(announced) {
+			return true
+		}
+	}
+	return false
 }
 
 // scheduleText formats when a scheduled reset is expected, in loc. A
@@ -260,8 +270,8 @@ func ResetMessage(r ResetRecord, loc *time.Location, lang string) Message {
 // ProcessResetRecords sends notifications for unseen records and returns how
 // many were sent. On the first run only the current pending schedule is sent
 // (when notifyPending is set); older records are marked as seen. Records that
-// are no longer news are marked as seen without a notification, and a
-// schedule is sent once per event even when several posts announce it.
+// are no longer news, and schedules superseded by a later post about the same
+// window, are marked as seen without a notification.
 func ProcessResetRecords(ctx context.Context, st *store.State, records []ResetRecord, notifyPending bool, sender Sender, loc *time.Location, lang string, now time.Time) int {
 	if st.CodexReset == nil {
 		st.CodexReset = &store.CodexResetState{}
@@ -277,7 +287,7 @@ func ProcessResetRecords(ctx context.Context, st *store.State, records []ResetRe
 		pendingKey := ""
 		if notifyPending {
 			for _, r := range records {
-				if r.str("kind") == "reset_scheduled" && notifiable(r, now) {
+				if r.str("kind") == "reset_scheduled" && notifiable(r, now) && !superseded(r, records) {
 					pendingKey = RecordKey(r)
 					candidates = append(candidates, r)
 					break
@@ -285,8 +295,8 @@ func ProcessResetRecords(ctx context.Context, st *store.State, records []ResetRe
 			}
 		}
 		for _, r := range records {
-			if RecordKey(r) != pendingKey {
-				markSeen(seen, r)
+			if key := RecordKey(r); key != pendingKey {
+				seen[key] = true
 			}
 		}
 	} else {
@@ -295,10 +305,10 @@ func ProcessResetRecords(ctx context.Context, st *store.State, records []ResetRe
 			if seen[RecordKey(r)] {
 				continue
 			}
-			if notifiable(r, now) {
+			if notifiable(r, now) && !superseded(r, records) {
 				candidates = append(candidates, r)
 			} else {
-				markSeen(seen, r)
+				seen[RecordKey(r)] = true
 			}
 		}
 	}
@@ -308,12 +318,8 @@ func ProcessResetRecords(ctx context.Context, st *store.State, records []ResetRe
 		if sender == nil {
 			break
 		}
-		if key := eventKey(r); key != "" && seen[key] {
-			seen[RecordKey(r)] = true
-			continue
-		}
 		if err := sender.Send(ctx, ResetMessage(r, loc, lang)); err == nil {
-			markSeen(seen, r)
+			seen[RecordKey(r)] = true
 			sent++
 		}
 	}
@@ -321,11 +327,9 @@ func ProcessResetRecords(ctx context.Context, st *store.State, records []ResetRe
 	var ordered []string
 	added := map[string]bool{}
 	for _, r := range records {
-		for _, key := range []string{RecordKey(r), eventKey(r)} {
-			if key != "" && seen[key] && !added[key] {
-				ordered = append(ordered, key)
-				added[key] = true
-			}
+		if key := RecordKey(r); seen[key] && !added[key] {
+			ordered = append(ordered, key)
+			added[key] = true
 		}
 	}
 	for _, key := range root.SeenKeys {
