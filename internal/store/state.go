@@ -55,11 +55,23 @@ type TargetState struct {
 	CircuitNotifiedUntilEpoch float64      `json:"circuit_notified_until_epoch,omitempty"`
 }
 
+// SentEvent is the last notification sent for one scheduled reset.
+type SentEvent struct {
+	Key string `json:"key"`
+	// AnnouncedAt is the announcedAt of the sent post, in Unix seconds.
+	AnnouncedAt int64 `json:"announced_at,omitempty"`
+	// Content is the notification body in UTC and English, used to tell
+	// whether a later post changes anything.
+	Content string `json:"content"`
+}
+
 // CodexResetState deduplicates Did Codex Reset records.
 type CodexResetState struct {
-	Initialized    bool     `json:"initialized,omitempty"`
-	SeenKeys       []string `json:"seen_keys,omitempty"`
-	LastCheckEpoch int64    `json:"last_check_epoch,omitempty"`
+	Initialized bool     `json:"initialized,omitempty"`
+	SeenKeys    []string `json:"seen_keys,omitempty"`
+	// SentEvents lists the scheduled resets already notified, newest first.
+	SentEvents     []SentEvent `json:"sent_events,omitempty"`
+	LastCheckEpoch int64       `json:"last_check_epoch,omitempty"`
 }
 
 // State is the content of state.json.
