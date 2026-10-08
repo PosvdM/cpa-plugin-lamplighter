@@ -62,7 +62,7 @@ The plugin keeps its state and quota history in `data/lamplighter/` under the pl
 
 ## How quota is read
 
-**Active queries** run every 5 minutes by default, at minutes `00 / 05 / 10 / ... / 55` of each hour. In addition, 30 seconds before each quota window resets, the plugin queries the account once more to record what is left at the end of the cycle; it skips this query when a newer reading already exists. Queries use the same URLs and headers as the quota page of the CPA Management Center.
+**Active queries** run every 5 minutes by default, at minutes `00 / 05 / 10 / ... / 55` of each hour. In addition, the plugin queries the account once 30 seconds before and once 30 seconds after each quota window resets: the first records what is left at the end of the cycle, the second confirms the new cycle and sends the recovery notification without waiting for the next poll. A query is skipped when a newer reading already exists. Queries use the same URLs and headers as the quota page of the CPA Management Center.
 
 **Passive data**: when a Claude or Codex model request passes through CPA, the provider returns the current quota in the response, and the plugin uses it without an extra request. Antigravity returns no such data and is only queried actively.
 

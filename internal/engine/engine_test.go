@@ -409,7 +409,7 @@ func TestLanguageReportedByThePageIsUsedForNotifications(t *testing.T) {
 	}
 }
 
-func TestPreResetQueryRunsOncePerReset(t *testing.T) {
+func TestQueriesAroundResetRunOncePerReset(t *testing.T) {
 	start := time.Date(2026, 10, 4, 10, 0, 0, 0, shanghai)
 	c := &clock{t: start}
 	// The host's reset times follow a separate clock, so they stay fixed.
@@ -417,12 +417,12 @@ func TestPreResetQueryRunsOncePerReset(t *testing.T) {
 	reset := start.Add(3 * time.Hour)
 	e, _ := newTestEngine(t, h, c)
 	ctx := context.Background()
-	// The query runs whatever the notification settings are.
+	// The queries run whatever the notification settings are.
 	cfg := e.config()
 	cfg.RecoveryNotify = config.WindowModes{FiveHour: config.RecoveryOff, SevenDay: config.RecoveryOff}
 	e.Configure(cfg, nil)
 	e.poll(ctx, cfg, c.t, "", false)
-	if due, next := e.probes(c.t); len(due) != 0 || !next.Equal(reset.Add(-probeLead)) {
+	if due, next := e.probes(c.t); len(due) != 0 || !next.Equal(reset.Add(-probeOffset)) {
 		t.Fatalf("next pre-reset query: %v %v", due, next)
 	}
 	before := h.requestsTo(quota.ClaudeUsageURL)
@@ -436,22 +436,50 @@ func TestPreResetQueryRunsOncePerReset(t *testing.T) {
 	if got := h.requestsTo(quota.ClaudeUsageURL) - before; got != 1 {
 		t.Fatalf("want one pre-reset Claude query, got %d", got)
 	}
-	if due, next := e.probes(c.t); len(due) != 0 || !next.After(reset) {
-		t.Fatalf("the 5-hour windows were probed; the next query belongs to a 7-day window: %v %v", due, next)
-	}
 
 	// A reset time a few seconds off is the same reset and is not queried again.
 	e.mu.Lock()
 	for _, g := range e.groups {
 		for i := range g.Windows {
-			g.Windows[i].Reset = g.Windows[i].Reset.Add(5 * time.Second)
-			g.Windows[i].ObservedAt = c.t.Add(-time.Minute)
+			if g.Windows[i].Reset.Sub(reset).Abs() < time.Minute {
+				g.Windows[i].Reset = g.Windows[i].Reset.Add(5 * time.Second)
+				g.Windows[i].ObservedAt = c.t.Add(-time.Minute)
+			}
 		}
 	}
 	e.mu.Unlock()
 	e.runProbes(ctx, cfg, c.t)
 	if got := h.requestsTo(quota.ClaudeUsageURL) - before; got != 1 {
 		t.Fatalf("a jittered reset time must not repeat the query, got %d", got)
+	}
+
+	// The query after the reset comes next.
+	if due, next := e.probes(c.t); len(due) != 0 || next.Sub(reset.Add(probeOffset)).Abs() > probeTolerance {
+		t.Fatalf("next query after the reset: %v %v", due, next)
+	}
+	c.t = reset.Add(40 * time.Second)
+	e.runProbes(ctx, cfg, c.t)
+	e.runProbes(ctx, cfg, c.t)
+	if got := h.requestsTo(quota.ClaudeUsageURL) - before; got != 2 {
+		t.Fatalf("want one Claude query after the reset, got %d", got-1)
+	}
+	if due, next := e.probes(c.t); len(due) != 0 || next.Before(reset.Add(time.Hour)) {
+		t.Fatalf("both queries ran; the next one belongs to a 7-day window: %v %v", due, next)
+	}
+
+	// A reset older than probeLate is left to the next poll.
+	c.t = reset.Add(probeLate + time.Minute)
+	e.mu.Lock()
+	for _, g := range e.groups {
+		for i := range g.Windows {
+			g.Windows[i].Reset = reset
+			g.Windows[i].ObservedAt = reset.Add(-time.Hour)
+		}
+	}
+	e.mu.Unlock()
+	e.probed = map[string][]time.Time{}
+	if due, _ := e.probes(c.t); len(due) != 0 {
+		t.Fatalf("a long-passed reset is not queried: %v", due)
 	}
 }
 

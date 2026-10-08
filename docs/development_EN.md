@@ -25,7 +25,7 @@ Coverage:
 - ignition timing, rolling-reset detection, error classes and failure protection;
 - candidate model order and model list reading;
 - quota alerts, per-window recovery notifications and reset reminders, the Bark request format, and Did Codex Reset deduplication, filtering and schedule times;
-- the engine: account suffixes, the passive skip rule, pre-reset queries, ignition confirmation, retry with the next model, pause notifications and history sampling;
+- the engine: account suffixes, the passive skip rule, queries around resets, ignition confirmation, retry with the next model, pause notifications and history sampling;
 - plugin RPC: registration, management routes, the page, and that the status contains no secrets;
 - the instance lock being exclusive, and reading the plugin directory from the CPA config.
 
