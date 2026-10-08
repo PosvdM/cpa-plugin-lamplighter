@@ -114,33 +114,37 @@
           </div>
         </div>
         <div class="notify-modes">
-          <span></span>
+          <span class="mode-corner"></span>
           <span class="field-label" data-i18n="window_5h">5 小时窗口</span>
           <span class="field-label" data-i18n="window_7d">7 天窗口</span>
-          <span class="field-label" data-i18n="recovery_notify">额度恢复时通知</span>
-          <select name="recovery_notify.five_hour" aria-label="额度恢复时通知 · 5 小时窗口" data-i18n-aria-label="recovery_notify_5h">
-            <option value="off" data-i18n="mode_off">关闭</option>
-            <option value="all" data-i18n="recovery_all">每次重置</option>
-            <option value="after_exhausted" data-i18n="recovery_after_exhausted">用完后的下一次重置</option>
-          </select>
-          <select name="recovery_notify.seven_day" aria-label="额度恢复时通知 · 7 天窗口" data-i18n-aria-label="recovery_notify_7d">
-            <option value="off" data-i18n="mode_off">关闭</option>
-            <option value="all" data-i18n="recovery_all">每次重置</option>
-            <option value="after_exhausted" data-i18n="recovery_after_exhausted">用完后的下一次重置</option>
-          </select>
-          <span class="field-label" data-i18n="reset_reminder">重置前提醒</span>
-          <select name="reset_reminder.five_hour" aria-label="重置前提醒 · 5 小时窗口" data-i18n-aria-label="reset_reminder_5h">
-            <option value="off" data-i18n="mode_off">关闭</option>
-            <option value="all" data-i18n="reminder_all">每次</option>
-            <option value="has_remaining" data-i18n="reminder_has_remaining">有余量时</option>
-          </select>
-          <select name="reset_reminder.seven_day" aria-label="重置前提醒 · 7 天窗口" data-i18n-aria-label="reset_reminder_7d">
-            <option value="off" data-i18n="mode_off">关闭</option>
-            <option value="all" data-i18n="reminder_all">每次</option>
-            <option value="has_remaining" data-i18n="reminder_has_remaining">有余量时</option>
-          </select>
+          <span class="field-label mode-row" data-i18n="recovery_notify">额度恢复时通知</span>
+          <div class="mode-switch" role="radiogroup" aria-label="额度恢复时通知 · 5 小时窗口" data-i18n-aria-label="recovery_notify_5h">
+            <span class="mode-thumb" aria-hidden="true"></span>
+            <label class="mode-option" title="关闭" data-i18n-title="mode_off_title"><input type="radio" name="recovery_notify.five_hour" value="off"><span data-i18n="mode_off">关闭</span></label>
+            <label class="mode-option" title="每次重置都通知" data-i18n-title="recovery_all_title"><input type="radio" name="recovery_notify.five_hour" value="all"><span data-i18n="recovery_all">每次</span></label>
+            <label class="mode-option" title="窗口用完后，在下一次重置时通知一次" data-i18n-title="recovery_after_exhausted_title"><input type="radio" name="recovery_notify.five_hour" value="after_exhausted"><span data-i18n="recovery_after_exhausted">用完后</span></label>
+          </div>
+          <div class="mode-switch" role="radiogroup" aria-label="额度恢复时通知 · 7 天窗口" data-i18n-aria-label="recovery_notify_7d">
+            <span class="mode-thumb" aria-hidden="true"></span>
+            <label class="mode-option" title="关闭" data-i18n-title="mode_off_title"><input type="radio" name="recovery_notify.seven_day" value="off"><span data-i18n="mode_off">关闭</span></label>
+            <label class="mode-option" title="每次重置都通知" data-i18n-title="recovery_all_title"><input type="radio" name="recovery_notify.seven_day" value="all"><span data-i18n="recovery_all">每次</span></label>
+            <label class="mode-option" title="窗口用完后，在下一次重置时通知一次" data-i18n-title="recovery_after_exhausted_title"><input type="radio" name="recovery_notify.seven_day" value="after_exhausted"><span data-i18n="recovery_after_exhausted">用完后</span></label>
+          </div>
+          <span class="field-label mode-row" data-i18n="reset_reminder">重置前提醒</span>
+          <div class="mode-switch" role="radiogroup" aria-label="重置前提醒 · 5 小时窗口" data-i18n-aria-label="reset_reminder_5h">
+            <span class="mode-thumb" aria-hidden="true"></span>
+            <label class="mode-option" title="关闭" data-i18n-title="mode_off_title"><input type="radio" name="reset_reminder.five_hour" value="off"><span data-i18n="mode_off">关闭</span></label>
+            <label class="mode-option" title="每次重置前都提醒" data-i18n-title="reminder_all_title"><input type="radio" name="reset_reminder.five_hour" value="all"><span data-i18n="reminder_all">每次</span></label>
+            <label class="mode-option" title="剩余高于第三档阈值时才提醒" data-i18n-title="reminder_has_remaining_title"><input type="radio" name="reset_reminder.five_hour" value="has_remaining"><span data-i18n="reminder_has_remaining">有余量</span></label>
+          </div>
+          <div class="mode-switch" role="radiogroup" aria-label="重置前提醒 · 7 天窗口" data-i18n-aria-label="reset_reminder_7d">
+            <span class="mode-thumb" aria-hidden="true"></span>
+            <label class="mode-option" title="关闭" data-i18n-title="mode_off_title"><input type="radio" name="reset_reminder.seven_day" value="off"><span data-i18n="mode_off">关闭</span></label>
+            <label class="mode-option" title="每次重置前都提醒" data-i18n-title="reminder_all_title"><input type="radio" name="reset_reminder.seven_day" value="all"><span data-i18n="reminder_all">每次</span></label>
+            <label class="mode-option" title="剩余高于第三档阈值时才提醒" data-i18n-title="reminder_has_remaining_title"><input type="radio" name="reset_reminder.seven_day" value="has_remaining"><span data-i18n="reminder_has_remaining">有余量</span></label>
+          </div>
         </div>
-        <p class="hint" data-i18n="notify_modes_hint">重置前提醒在 5 小时窗口重置前 1 小时、7 天窗口重置前 1 天发送；“有余量时”指剩余高于第三档阈值。恢复通知附带上一周期的剩余额度，选“每次重置”时插件在重置前 30 秒多查询一次。</p>
+        <p class="hint" data-i18n="notify_modes_hint">“用完后”：窗口用完后，在下一次重置时通知一次。“有余量”：剩余高于第三档阈值时才提醒。重置前提醒在 5 小时窗口重置前 1 小时、7 天窗口重置前 1 天发送。恢复通知附带上一周期的剩余额度，选“每次”时插件在重置前 30 秒多查询一次。</p>
         <p class="hint" id="timezone-note"></p>
         <p class="hint" id="language-note"></p>
       </fieldset>

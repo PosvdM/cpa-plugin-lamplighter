@@ -116,9 +116,11 @@
       recovery_notify: "额度恢复时通知", reset_reminder: "重置前提醒",
       recovery_notify_5h: "额度恢复时通知 · 5 小时窗口", recovery_notify_7d: "额度恢复时通知 · 7 天窗口",
       reset_reminder_5h: "重置前提醒 · 5 小时窗口", reset_reminder_7d: "重置前提醒 · 7 天窗口",
-      mode_off: "关闭", recovery_all: "每次重置", recovery_after_exhausted: "用完后的下一次重置",
-      reminder_all: "每次", reminder_has_remaining: "有余量时",
-      notify_modes_hint: "重置前提醒在 5 小时窗口重置前 1 小时、7 天窗口重置前 1 天发送；“有余量时”指剩余高于第三档阈值。恢复通知附带上一周期的剩余额度，选“每次重置”时插件在重置前 30 秒多查询一次。",
+      mode_off: "关闭", recovery_all: "每次", recovery_after_exhausted: "用完后",
+      reminder_all: "每次", reminder_has_remaining: "有余量",
+      mode_off_title: "关闭", recovery_all_title: "每次重置都通知", recovery_after_exhausted_title: "窗口用完后，在下一次重置时通知一次",
+      reminder_all_title: "每次重置前都提醒", reminder_has_remaining_title: "剩余高于第三档阈值时才提醒",
+      notify_modes_hint: "“用完后”：窗口用完后，在下一次重置时通知一次。“有余量”：剩余高于第三档阈值时才提醒。重置前提醒在 5 小时窗口重置前 1 小时、7 天窗口重置前 1 天发送。恢复通知附带上一周期的剩余额度，选“每次”时插件在重置前 30 秒多查询一次。",
       quota_queries: "额度查询",
       models_api_key: "模型列表 API key",
       models_api_key_hint: "在 CPA 的 access.api-keys 中新建一个专用 key，用于读取模型列表、选择点火模型",
@@ -227,9 +229,11 @@
       recovery_notify: "Notify when quota recovers", reset_reminder: "Remind before resets",
       recovery_notify_5h: "Notify when quota recovers · 5-hour window", recovery_notify_7d: "Notify when quota recovers · 7-day window",
       reset_reminder_5h: "Remind before resets · 5-hour window", reset_reminder_7d: "Remind before resets · 7-day window",
-      mode_off: "Off", recovery_all: "Every reset", recovery_after_exhausted: "Next reset after running out",
-      reminder_all: "Always", reminder_has_remaining: "When quota is left",
-      notify_modes_hint: "Reminders are sent 1 hour before a 5-hour window resets and 1 day before a 7-day window resets; \"When quota is left\" means more than the third threshold remains. Recovery notifications include what was left of the ended cycle; with \"Every reset\" the plugin queries once more 30 seconds before the reset.",
+      mode_off: "Off", recovery_all: "Always", recovery_after_exhausted: "After out",
+      reminder_all: "Always", reminder_has_remaining: "If left",
+      mode_off_title: "Off", recovery_all_title: "Notify at every reset", recovery_after_exhausted_title: "After the window runs out, notify once at its next reset",
+      reminder_all_title: "Remind before every reset", reminder_has_remaining_title: "Remind only when more than the third threshold is left",
+      notify_modes_hint: "\"After out\": after the window runs out, notify once at its next reset. \"If left\": remind only when more than the third threshold is left. Reminders are sent 1 hour before a 5-hour window resets and 1 day before a 7-day window resets. Recovery notifications include what was left of the ended cycle; with \"Always\" the plugin queries once more 30 seconds before the reset.",
       quota_queries: "Quota queries",
       models_api_key: "Model list API key",
       models_api_key_hint: "Create a dedicated key in CPA's access.api-keys; the plugin reads the model list with it to pick ignition models",
@@ -1515,11 +1519,32 @@
       if (!input.name) return;
       var value = getPath(effective, input.name);
       if (input.type === "checkbox") input.checked = !!value;
+      else if (input.type === "radio") input.checked = input.value === value;
       else input.value = value === undefined || value === null ? "" : value;
     });
+    Array.prototype.forEach.call(document.querySelectorAll(".mode-switch"), function (box) { placeThumb(box, false); });
     renderGroupChecks(getPath(effective, "providers.antigravity.groups"));
     $("timezone-note").textContent = timezoneText();
   }
+
+  // Mode switches: the thumb slides under the checked option. bounce plays
+  // the squash animation; filling the form places it without one.
+  function placeThumb(box, bounce) {
+    var options = box.querySelectorAll("input");
+    var index = 0;
+    Array.prototype.forEach.call(options, function (input, i) { if (input.checked) index = i; });
+    box.style.setProperty("--index", index);
+    box.classList.toggle("on", options[index] && options[index].value !== "off");
+    if (!bounce) return;
+    var thumb = box.querySelector(".mode-thumb");
+    thumb.classList.remove("bounce");
+    void thumb.offsetWidth; // restart the animation
+    thumb.classList.add("bounce");
+  }
+
+  Array.prototype.forEach.call(document.querySelectorAll(".mode-switch"), function (box) {
+    box.addEventListener("change", function () { placeThumb(box, true); });
+  });
 
   function saveSettings(event) {
     event.preventDefault();
@@ -1534,7 +1559,10 @@
       if (!input.name) return;
       var value;
       if (input.type === "checkbox") value = input.checked;
-      else if (input.type === "number") {
+      else if (input.type === "radio") {
+        if (!input.checked) return;
+        value = input.value;
+      } else if (input.type === "number") {
         if (input.value === "") return;
         value = Number(input.value);
       } else value = input.value.trim();
