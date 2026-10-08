@@ -417,24 +417,18 @@ func TestPreResetQueryRunsOncePerReset(t *testing.T) {
 	reset := start.Add(3 * time.Hour)
 	e, _ := newTestEngine(t, h, c)
 	ctx := context.Background()
-	off := e.config()
-	off.RecoveryNotify = config.WindowModes{FiveHour: config.RecoveryOff, SevenDay: config.RecoveryOff}
-	e.Configure(off, nil)
-	e.poll(ctx, e.config(), c.t, "", false)
-	if due, next := e.probes(e.config(), c.t); len(due) != 0 || !next.IsZero() {
-		t.Fatalf("no pre-reset query while recovery notifications are off: %v %v", due, next)
-	}
-
+	// The query runs whatever the notification settings are.
 	cfg := e.config()
-	cfg.RecoveryNotify.FiveHour = config.RecoveryAll
+	cfg.RecoveryNotify = config.WindowModes{FiveHour: config.RecoveryOff, SevenDay: config.RecoveryOff}
 	e.Configure(cfg, nil)
-	if due, next := e.probes(cfg, c.t); len(due) != 0 || !next.Equal(reset.Add(-probeLead)) {
+	e.poll(ctx, cfg, c.t, "", false)
+	if due, next := e.probes(c.t); len(due) != 0 || !next.Equal(reset.Add(-probeLead)) {
 		t.Fatalf("next pre-reset query: %v %v", due, next)
 	}
 	before := h.requestsTo(quota.ClaudeUsageURL)
 	c.t = reset.Add(-20 * time.Second)
 	// Computing the next wake-up does not use up a due query.
-	if due, _ := e.probes(cfg, c.t); len(due) == 0 {
+	if due, _ := e.probes(c.t); len(due) == 0 {
 		t.Fatal("pre-reset queries are due 30 seconds before the reset")
 	}
 	e.runProbes(ctx, cfg, c.t)
@@ -442,8 +436,8 @@ func TestPreResetQueryRunsOncePerReset(t *testing.T) {
 	if got := h.requestsTo(quota.ClaudeUsageURL) - before; got != 1 {
 		t.Fatalf("want one pre-reset Claude query, got %d", got)
 	}
-	if due, next := e.probes(cfg, c.t); len(due) != 0 || !next.IsZero() {
-		t.Fatalf("every window was probed: %v %v", due, next)
+	if due, next := e.probes(c.t); len(due) != 0 || !next.After(reset) {
+		t.Fatalf("the 5-hour windows were probed; the next query belongs to a 7-day window: %v %v", due, next)
 	}
 
 	// A reset time a few seconds off is the same reset and is not queried again.

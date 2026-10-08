@@ -62,7 +62,7 @@ The plugin keeps its state and quota history in `data/lamplighter/` under the pl
 
 ## How quota is read
 
-**Active queries** run every 5 minutes by default, at minutes `00 / 05 / 10 / ... / 55` of each hour. They use the same URLs and headers as the quota page of the CPA Management Center.
+**Active queries** run every 5 minutes by default, at minutes `00 / 05 / 10 / ... / 55` of each hour. In addition, 30 seconds before each quota window resets, the plugin queries the account once more to record what is left at the end of the cycle; it skips this query when a newer reading already exists. Queries use the same URLs and headers as the quota page of the CPA Management Center.
 
 **Passive data**: when a Claude or Codex model request passes through CPA, the provider returns the current quota in the response, and the plugin uses it without an extra request. Antigravity returns no such data and is only queried actively.
 
@@ -135,7 +135,7 @@ Recovery notifications and reset reminders are set per window: `five_hour` for 5
 | `recovery_notify` | `off`, `all`, `after_exhausted` | `all`: notify every time the window resets; `after_exhausted`: after the window runs out, notify once at its next reset |
 | `reset_reminder` | `off`, `all`, `has_remaining` | 5-hour windows are reminded 1 hour before the reset, 7-day windows 1 day before; `has_remaining`: remind only when more than `critical_threshold` is left |
 
-The first line of a recovery notification is what was left when the previous cycle ended. With `recovery_notify` set to `all`, the plugin queries the account once more 30 seconds before the reset to get this value; usage in those last 30 seconds is not counted. Without a reading from the last 15 minutes before the reset, the line is left out. A cycle that was never used (still 100% before the reset) is not notified. A window that is neither a 5-hour nor a 7-day window counts as a 7-day window once it was seen more than a day before its reset, and as a 5-hour window otherwise.
+The first line of a recovery notification is what was left when the previous cycle ended. This value comes from the active query 30 seconds before the reset; usage in those last 30 seconds is not counted. Without a reading from the last 15 minutes before the reset, the line is left out. A cycle that was never used (still 100% before the reset) is not notified. A window that is neither a 5-hour nor a 7-day window counts as a 7-day window once it was seen more than a day before its reset, and as a 5-hour window otherwise.
 
 `notify_recovery` and `notify_reset_reminders` set both windows of the matching key to `all` when `true` and to `off` when `false`. They apply only when `recovery_notify` or `reset_reminder` is absent; saving the settings on the management page replaces them with the new keys.
 
