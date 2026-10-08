@@ -212,7 +212,7 @@ Bark 请求为 `GET {bark_url}/{标题}/{正文}?group&level&icon&url`，标题�
 
 Did Codex Reset 每 `poll_seconds` 秒（最少 300 秒，对齐时间边界）读取最新 10 条记录。非 `manual:` 记录按 ID 去重，`manual:` 记录的 ID 可能变化，按内容去重；最多保留 100 个已见记录。第一次运行把现有记录标为已见，只在 `notify_current_pending` 开启时推送当前待生效的排期。
 
-只推送仍有意义的记录，其余只标为已见：排期必须是 `scheduleState = pending` 且窗口尚未结束；完成记录的时间（`completedAt`、`effectiveAt`、`announcedAt` 中最晚的一个）不能早于 48 小时前。已兑现的排期会离开 `kind=all` 列表，失去关联后又会以 `elapsed` 回到列表，旧记录因此可能在任意时间出现。每条 X 帖子是一条记录，主帖和回复会给同一次排期各建一条。重置种类和窗口相同的排期视为同一次排期，与 Did Codex Reset 首页一致，只推送其中 `announcedAt` 最晚的一条：同一次查询中较早的帖子只标为已见，之后出现更晚的帖子时作为更新再推送一次。
+只推送仍有意义的记录，其余只标为已见：排期必须是 `scheduleState = pending` 且窗口尚未结束；完成记录的时间（`completedAt`、`effectiveAt`、`announcedAt` 中最晚的一个）不能早于 48 小时前。已兑现的排期会离开 `kind=all` 列表，失去关联后又会以 `elapsed` 回到列表，旧记录因此可能在任意时间出现。每条 X 帖子是一条记录，主帖和回复会给同一次排期各建一条。重置种类、窗口起点和范围（`scope.plans`、`scope.windows`）相同的排期视为同一次排期。只用起点比较，因为同一次排期的记录有的只有 `effectiveAt`，有的带完整的 `scheduleWindow`。与 Did Codex Reset 首页一致，同一次查询中只推送其中 `announcedAt` 最晚、且本身可推送的一条，时间相同时按记录键取一条，其余只标为已见。回复可能晚一两次查询才进入最新 10 条，所以推送过的排期连同帖子的 `announcedAt` 和通知内容（按 UTC 和英文生成）记在 `sent_events` 中，最多 100 个。之后出现的同一排期帖子，只有 `announcedAt` 更晚且内容（置信度、时间、范围）有变化时，才以“排期更新”为标题再推送；其余只标为已见。
 
 排期时间取 `scheduleWindow`，没有时取 `effectiveAt`，按插件时区显示：起止相同时显示时刻，`scheduleConstraint = deadline` 时显示“终点 前”，其余（日期级排期）显示“起点～终点”。日期级窗口覆盖来源时区的一整天，起点通常早于公布时间，只显示起点会被误读为已经过去的时刻。
 
@@ -222,7 +222,7 @@ Did Codex Reset 每 `poll_seconds` 秒（最少 300 秒，对齐时间边界）�
 
 | 文件 | 内容 |
 | --- | --- |
-| `state.json` | `groups`：每个窗口的通知基线；`scheduler`：每个额度组的点火状态；`codex_reset_updates`：已见记录；`cooldown_notices`：已提醒的过期冷却；`language`：通知语言。写入临时文件后替换 |
+| `state.json` | `groups`：每个窗口的通知基线；`scheduler`：每个额度组的点火状态；`codex_reset_updates`：已见记录和已推送的排期；`cooldown_notices`：已提醒的过期冷却；`language`：通知语言。写入临时文件后替换 |
 | `history/YYYY-MM-DD.jsonl` | 按 UTC 日期分文件的额度样本和事件 |
 | `instance.lock` | 实例锁 |
 

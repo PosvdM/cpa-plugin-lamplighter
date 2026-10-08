@@ -21,6 +21,9 @@ const DidCodexResetURL = "https://didcodexreset.com/openapi/v1/records?kind=all&
 
 const maxSeenKeys = 100
 
+// timeLayout is how reset times are shown in notifications.
+const timeLayout = "01/02 15:04"
+
 // ResetRecord is one Did Codex Reset record.
 type ResetRecord map[string]any
 
@@ -99,6 +102,10 @@ func RecordKey(r ResetRecord) string {
 	return "manual:" + strings.Join(parts, "|")
 }
 
+func isSchedule(r ResetRecord) bool {
+	return strings.ToLower(r.str("kind")) == "reset_scheduled"
+}
+
 // maxRecordAge is how old a completed reset can be and still be sent. An old
 // record can enter the latest 10 late, for example when a schedule loses its
 // completion link and returns to the list.
@@ -122,22 +129,34 @@ func scheduleWindow(r ResetRecord) (start, end time.Time) {
 
 // eventKey identifies a scheduled reset across records. Every X post is its
 // own record, so a reply that repeats a schedule describes the same event.
+// The key uses the start of the window only: some records carry just
+// effectiveAt, others the whole scheduleWindow, for the same schedule.
 func eventKey(r ResetRecord) string {
-	if strings.ToLower(r.str("kind")) != "reset_scheduled" {
+	if !isSchedule(r) {
 		return ""
 	}
-	start, end := scheduleWindow(r)
+	start, _ := scheduleWindow(r)
 	if start.IsZero() {
 		return ""
 	}
-	return "event:" + strings.ToLower(r.str("resetType")) + "|" + start.UTC().Format(time.RFC3339) + "|" + end.UTC().Format(time.RFC3339)
+	scope, _ := r["scope"].(map[string]any)
+	var lists []string
+	for _, field := range []string{"plans", "windows"} {
+		items := stringList(scope[field])
+		for i := range items {
+			items[i] = strings.ToLower(items[i])
+		}
+		sort.Strings(items)
+		lists = append(lists, strings.Join(items, ","))
+	}
+	return "event:" + strings.ToLower(r.str("resetType")) + "|" + start.UTC().Format(time.RFC3339) + "|" + strings.Join(lists, "|")
 }
 
 // notifiable reports whether a record is still news. Only pending schedules
 // whose window has not ended are sent; elapsed, fulfilled and unknown
 // schedules are history, and so are completed resets older than maxRecordAge.
 func notifiable(r ResetRecord, now time.Time) bool {
-	if strings.ToLower(r.str("kind")) == "reset_scheduled" {
+	if isSchedule(r) {
 		_, end := scheduleWindow(r)
 		return r.str("scheduleState") == "pending" && (end.IsZero() || end.After(now))
 	}
@@ -150,17 +169,23 @@ func notifiable(r ResetRecord, now time.Time) bool {
 	return latest.IsZero() || now.Sub(latest) <= maxRecordAge
 }
 
-// superseded reports whether a later post in records announces the same
-// scheduled reset. Did Codex Reset shows the latest post for a window, so only
-// that one is sent.
-func superseded(r ResetRecord, records []ResetRecord) bool {
+// superseded reports whether another notifiable post in records announces
+// the same scheduled reset and comes later. Did Codex Reset shows the latest
+// post for a window, so only that one is sent. Posts with the same announcedAt
+// are ordered by RecordKey, so exactly one of them is sent.
+func superseded(r ResetRecord, records []ResetRecord, now time.Time) bool {
 	key := eventKey(r)
 	if key == "" {
 		return false
 	}
-	announced := quota.ParseTime(r.str("announcedAt"))
+	announced, rk := quota.ParseTime(r.str("announcedAt")), RecordKey(r)
 	for _, other := range records {
-		if eventKey(other) == key && quota.ParseTime(other.str("announcedAt")).After(announced) {
+		ok := RecordKey(other)
+		if ok == rk || eventKey(other) != key || !notifiable(other, now) {
+			continue
+		}
+		t := quota.ParseTime(other.str("announcedAt"))
+		if t.After(announced) || (t.Equal(announced) && ok > rk) {
 			return true
 		}
 	}
@@ -171,17 +196,16 @@ func superseded(r ResetRecord, records []ResetRecord) bool {
 // date-level window is shown as its start and end; a deadline shows only its
 // end.
 func scheduleText(r ResetRecord, loc *time.Location, lang string) string {
-	const layout = "01/02 15:04"
 	start, end := scheduleWindow(r)
 	switch {
 	case start.IsZero():
 		return ""
 	case !end.After(start):
-		return start.In(loc).Format(layout)
+		return start.In(loc).Format(timeLayout)
 	case strings.ToLower(r.str("scheduleConstraint")) == "deadline":
-		return T(lang, "schedule_before", end.In(loc).Format(layout))
+		return T(lang, "schedule_before", end.In(loc).Format(timeLayout))
 	}
-	return T(lang, "schedule_range", start.In(loc).Format(layout), end.In(loc).Format(layout))
+	return T(lang, "schedule_range", start.In(loc).Format(timeLayout), end.In(loc).Format(timeLayout))
 }
 
 func resetTypeLabel(value, lang string) string {
@@ -228,14 +252,14 @@ func ResetMessage(r ResetRecord, loc *time.Location, lang string) Message {
 	formatTime := func(values ...string) string {
 		for _, value := range values {
 			if t := quota.ParseTime(value); !t.IsZero() {
-				return t.In(loc).Format("01/02 15:04")
+				return t.In(loc).Format(timeLayout)
 			}
 		}
 		return ""
 	}
 	var title string
 	var lines []string
-	if strings.ToLower(r.str("kind")) == "reset_scheduled" {
+	if isSchedule(r) {
 		title = T(lang, "reset_scheduled", resetType)
 		if text := scheduleText(r, loc, lang); text != "" {
 			lines = append(lines, T(lang, "line_expected", text))
@@ -267,11 +291,25 @@ func ResetMessage(r ResetRecord, loc *time.Location, lang string) Message {
 	return msg
 }
 
+// eventContent is what a schedule notification says, independent of the
+// plugin time zone and language.
+func eventContent(r ResetRecord) string {
+	return ResetMessage(r, time.UTC, LangEN).Body
+}
+
+// isUpdate reports whether r changes a schedule that was already sent: it is
+// a later post and the notification would say something different.
+func isUpdate(r ResetRecord, prev store.SentEvent) bool {
+	return quota.ParseTime(r.str("announcedAt")).Unix() > prev.AnnouncedAt && eventContent(r) != prev.Content
+}
+
 // ProcessResetRecords sends notifications for unseen records and returns how
 // many were sent. On the first run only the current pending schedule is sent
 // (when notifyPending is set); older records are marked as seen. Records that
-// are no longer news, and schedules superseded by a later post about the same
-// window, are marked as seen without a notification.
+// are no longer news, schedules superseded by a later post about the same
+// window, and posts that repeat a schedule already sent are marked as seen
+// without a notification. A later post that changes a sent schedule is sent as
+// an update.
 func ProcessResetRecords(ctx context.Context, st *store.State, records []ResetRecord, notifyPending bool, sender Sender, loc *time.Location, lang string, now time.Time) int {
 	if st.CodexReset == nil {
 		st.CodexReset = &store.CodexResetState{}
@@ -281,13 +319,17 @@ func ProcessResetRecords(ctx context.Context, st *store.State, records []ResetRe
 	for _, key := range root.SeenKeys {
 		seen[key] = true
 	}
+	sentEvents := map[string]store.SentEvent{}
+	for _, e := range root.SentEvents {
+		sentEvents[e.Key] = e
+	}
 	var candidates []ResetRecord
 	if !root.Initialized {
 		root.Initialized = true
 		pendingKey := ""
 		if notifyPending {
 			for _, r := range records {
-				if r.str("kind") == "reset_scheduled" && notifiable(r, now) && !superseded(r, records) {
+				if isSchedule(r) && notifiable(r, now) && !superseded(r, records, now) {
 					pendingKey = RecordKey(r)
 					candidates = append(candidates, r)
 					break
@@ -305,7 +347,8 @@ func ProcessResetRecords(ctx context.Context, st *store.State, records []ResetRe
 			if seen[RecordKey(r)] {
 				continue
 			}
-			if notifiable(r, now) && !superseded(r, records) {
+			prev, sentBefore := sentEvents[eventKey(r)]
+			if notifiable(r, now) && !superseded(r, records, now) && (!sentBefore || isUpdate(r, prev)) {
 				candidates = append(candidates, r)
 			} else {
 				seen[RecordKey(r)] = true
@@ -314,14 +357,41 @@ func ProcessResetRecords(ctx context.Context, st *store.State, records []ResetRe
 	}
 
 	sent := 0
+	var newEvents []store.SentEvent
 	for _, r := range candidates {
 		if sender == nil {
 			break
 		}
-		if err := sender.Send(ctx, ResetMessage(r, loc, lang)); err == nil {
+		key := eventKey(r)
+		msg := ResetMessage(r, loc, lang)
+		if _, ok := sentEvents[key]; ok && key != "" {
+			msg.Title = T(lang, "reset_rescheduled", resetTypeLabel(r.str("resetType"), lang))
+		}
+		if err := sender.Send(ctx, msg); err == nil {
 			seen[RecordKey(r)] = true
+			if key != "" {
+				newEvents = append(newEvents, store.SentEvent{
+					Key: key, AnnouncedAt: quota.ParseTime(r.str("announcedAt")).Unix(), Content: eventContent(r),
+				})
+			}
 			sent++
 		}
+	}
+	if len(newEvents) > 0 {
+		events := newEvents
+		for _, e := range root.SentEvents {
+			replaced := false
+			for _, n := range newEvents {
+				replaced = replaced || n.Key == e.Key
+			}
+			if !replaced {
+				events = append(events, e)
+			}
+		}
+		if len(events) > maxSeenKeys {
+			events = events[:maxSeenKeys]
+		}
+		root.SentEvents = events
 	}
 
 	var ordered []string
