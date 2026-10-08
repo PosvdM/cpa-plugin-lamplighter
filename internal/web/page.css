@@ -242,7 +242,10 @@ input[type="checkbox"] { width: 16px; height: 16px; padding: 0; accent-color: va
   animation-delay: calc(var(--meter-index, 0) * 40ms);
 }
 @keyframes meter-fill { from { transform: scaleX(0); } }
-@media (prefers-reduced-motion: reduce) { .quota-fill { animation: none; } .card.account { transition: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .quota-fill { animation: none; } .card.account { transition: none; }
+  .mode-thumb, .mode-option span { transition: none; } .mode-thumb.bounce { animation: none; }
+}
 .fill-high { background: var(--viz-success); }
 .fill-medium { background: var(--quota-medium-color); }
 .fill-low { background: var(--viz-failure); }
@@ -328,7 +331,7 @@ html[lang="en"] { --event-type-width: 140px; }
 form fieldset {
   border: 1px solid var(--border-color); border-radius: 10px; padding: 14px 16px 16px; margin: 0 0 14px;
   background: color-mix(in srgb, var(--bg-secondary) 50%, transparent);
-  display: flex; flex-direction: column; gap: 14px;
+  display: flex; flex-direction: column; gap: 14px; min-width: 0;
 }
 form legend { color: var(--text-primary); font-size: 13px; font-weight: 650; padding: 0 6px; }
 form label { display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; font-weight: 600; color: var(--text-secondary); }
@@ -342,7 +345,41 @@ form label.inline { flex-direction: row; align-items: center; gap: 8px; font-wei
 form label.inline-input { flex-direction: row; align-items: center; gap: 6px; font-weight: 500; color: var(--text-primary); }
 .inline-input input { width: 72px; text-align: right; font-family: var(--font-mono); }
 .checks { display: flex; flex-wrap: wrap; gap: 8px 24px; }
-.notify-modes { display: grid; grid-template-columns: auto minmax(0, 200px) minmax(0, 200px); gap: 8px 18px; align-items: center; justify-content: start; }
+.notify-modes { display: grid; grid-template-columns: auto auto auto; gap: 10px 18px; align-items: center; justify-content: start; }
+
+/* Mode switches: three equal options; the thumb slides with an overshoot
+   and squashes on arrival. */
+.mode-switch {
+  --index: 0;
+  position: relative; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 3px; border-radius: 9px;
+  background: var(--bg-tertiary); border: 1px solid var(--border-color);
+}
+.mode-thumb {
+  position: absolute; top: 3px; bottom: 3px; left: 3px; width: calc((100% - 6px) / 3); border-radius: 6px;
+  background: var(--bg-secondary); box-shadow: var(--shadow);
+  translate: calc(var(--index) * 100%) 0;
+  transition: translate 480ms cubic-bezier(0.34, 1.7, 0.5, 1), background-color 200ms ease;
+}
+.mode-switch.on .mode-thumb { background: var(--primary-color); }
+.mode-switch.on .mode-option:has(input:checked) { color: var(--primary-contrast); }
+.mode-thumb.bounce { animation: mode-squash 520ms ease-out; }
+@keyframes mode-squash {
+  0% { scale: 1 1; }
+  25% { scale: 1.14 0.86; }
+  50% { scale: 0.94 1.08; }
+  75% { scale: 1.03 0.97; }
+  100% { scale: 1 1; }
+}
+form label.mode-option {
+  position: relative; display: block; text-align: center; cursor: pointer; padding: 4px 14px; border-radius: 6px;
+  font-size: 12.5px; font-weight: 600; color: var(--text-secondary); white-space: nowrap; transition: color 200ms ease;
+}
+.mode-option input { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; pointer-events: none; }
+.mode-option:has(input:checked) { color: var(--text-primary); }
+.mode-option:has(input:focus-visible) { box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-color) 25%, transparent); }
+.mode-option span { display: inline-block; transition: scale 300ms cubic-bezier(0.34, 1.7, 0.5, 1); }
+.mode-option:has(input:checked) span { scale: 1.06; }
+.mode-option:active span { scale: 0.92; }
 .hint, form .hint { font-size: 12px; font-weight: 400; color: var(--text-tertiary); margin: 0; }
 table.services th, table.services td { padding: 8px 10px; }
 table.services td:nth-child(2), table.services td:nth-child(3), table.services th:nth-child(2), table.services th:nth-child(3) { width: 84px; text-align: center; }
@@ -373,6 +410,10 @@ table.services .sub-row td { border-bottom: none; padding-top: 4px; text-align: 
   .grid-3 { grid-template-columns: 1fr; }
   .bark-row { grid-template-columns: 1fr; justify-items: start; }
   .grid-3 .span-2 { grid-column: auto; }
+  .notify-modes { grid-template-columns: repeat(2, minmax(0, 1fr)); justify-content: stretch; }
+  .notify-modes .mode-corner { display: none; }
+  .notify-modes .mode-row { grid-column: 1 / -1; margin-top: 4px; }
+  form label.mode-option { padding: 4px 2px; }
   .event-row { grid-template-columns: 82px minmax(0, 1fr); }
   .event-label, .event-detail { grid-column: 2; }
 }
