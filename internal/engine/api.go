@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"sort"
 	"time"
 
@@ -244,6 +245,8 @@ type Status struct {
 	Accounts  []AccountStatus `json:"accounts"`
 	Targets   []TargetView    `json:"targets"`
 	Events    []Event         `json:"events"`
+	// NextModels is the model automatic selection picks next, per provider.
+	NextModels map[string]string `json:"next_models,omitempty"`
 }
 
 // Status returns a snapshot for the management page. Secrets are removed
@@ -265,6 +268,7 @@ func (e *Engine) Status() Status {
 		ConfigError: e.cfgErr,
 		LockError:   e.lockErr,
 		ModelsError: e.modelsErr,
+		NextModels:  maps.Clone(e.nextModels),
 		ListError:   e.pollErrs[""],
 		Language:    notify.NormalizeLang(e.lang),
 		DataDir:     e.dataDir,

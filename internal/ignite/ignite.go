@@ -344,6 +344,26 @@ func Classify(err error) Kind {
 	return Transient
 }
 
+// ModelRejected reports whether the provider refused the model itself, with
+// HTTP 400 or 404. CPA lists a model for every credential of a provider, so a
+// listed model can still be refused by one account. Authentication errors and
+// rate limits concern the account and are not model rejections.
+func ModelRejected(err error) bool {
+	if Classify(err) != Hard || errors.Is(err, ErrNotConfirmed) || errors.Is(err, ErrNoModel) {
+		return false
+	}
+	if status := host.StatusOf(err); status != 0 {
+		return status == 400 || status == 404
+	}
+	text := strings.ToLower(err.Error())
+	for _, marker := range []string{"http 400", "http 404", "status 400", "status 404", "not_found", "not found", "invalid model"} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 // Request is the minimal model request for one provider.
 type Request struct {
 	EntryProtocol string

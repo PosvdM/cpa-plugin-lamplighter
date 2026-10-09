@@ -149,6 +149,29 @@ func TestClassify(t *testing.T) {
 	}
 }
 
+func TestModelRejected(t *testing.T) {
+	cases := []struct {
+		err  error
+		want bool
+	}{
+		{&host.Error{Code: "model_execution_failed", Message: `{"type":"error","error":{"type":"not_found_error","message":"model: claude-haiku-5-5"}}`, Status: 404}, true},
+		{&host.Error{Code: "model_execution_failed", Message: "invalid_request_error", Status: 400}, true},
+		{errors.New("upstream returned HTTP 404"), true},
+		{&host.Error{Code: "model_execution_failed", Message: "model not found", Status: 401}, false},
+		{&host.Error{Code: "model_execution_failed", Message: "upstream error", Status: 403}, false},
+		{&host.Error{Code: "model_execution_failed", Message: "rate_limit_error", Status: 429}, false},
+		{&host.Error{Code: "host_call_failed", Message: "auth_not_found: no auth available", Status: 503}, false},
+		{&host.Error{Code: "host_call_failed", Message: "upstream error", Status: 502}, false},
+		{ErrNotConfirmed, false},
+		{errors.Join(ErrNoModel, errors.New("not found")), false},
+	}
+	for _, c := range cases {
+		if got := ModelRejected(c.err); got != c.want {
+			t.Errorf("%v: got %v want %v", c.err, got, c.want)
+		}
+	}
+}
+
 func TestBuildRequestUsesMinimalBodies(t *testing.T) {
 	for provider, entry := range map[string]string{"codex": "openai-response", "claude": "claude", "antigravity": "openai"} {
 		req, err := BuildRequest(provider, "m")

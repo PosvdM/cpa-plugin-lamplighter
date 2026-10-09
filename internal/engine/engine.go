@@ -75,6 +75,8 @@ type Engine struct {
 	pollErrs  map[string]string
 	modelsErr string
 	lang      string // notification language, a copy of state.Language
+	// nextModels is the model automatic selection picks next, per provider.
+	nextModels map[string]string
 
 	// Owned by the loop goroutine.
 	state     *store.State
@@ -94,6 +96,15 @@ type Engine struct {
 	lastSample  map[string]sampleMark
 	pendingSamp map[string]store.Record
 	lock        *store.Lock
+	// modelsSource is the CPA address and models key the model list is read
+	// from outside an ignition; modelsTried and modelsOK tell whether it was
+	// read and whether that worked.
+	modelsSource string
+	modelsTried  bool
+	modelsOK     bool
+	// refused holds when the provider refused a model for a quota group,
+	// keyed by group key and model.
+	refused map[string]time.Time
 
 	usageCh chan usageEvent
 	cmdCh   chan command
@@ -433,6 +444,7 @@ func (e *Engine) run() {
 				e.pollResetFeed(ctx, cfg)
 				nextFeed = alignedAfter(e.now(), time.Duration(cfg.CodexResetUpdates.PollSeconds)*time.Second)
 			}
+			e.maybeReadModels(ctx, cfg, !now.Before(nextPoll))
 			if !now.Before(nextPoll) {
 				e.poll(ctx, cfg, nextPoll, "", false)
 				nextPoll = alignedAfter(e.now(), cfg.PollInterval())

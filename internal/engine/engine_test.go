@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -84,7 +85,7 @@ func (c *clock) add(d time.Duration) { c.t = c.t.Add(d) }
 func newTestEngine(t *testing.T, h *fakeHost, c *clock) (*Engine, *fakeSender) {
 	t.Helper()
 	models := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`{"data":[{"id":"gpt-6-luna"},{"id":"claude-haiku-4-5-20251001"},{"id":"claude-3-5-haiku-20241022"},{"id":"gemini-3.8-flash-high"}]}`))
+		w.Write([]byte(`{"data":[{"id":"gpt-6-luna"},{"id":"claude-haiku-4-5-20251001"},{"id":"claude-3-5-haiku-20241022"},{"id":"claude-sonnet-4-6"},{"id":"gemini-3.8-flash-high"}]}`))
 	}))
 	t.Cleanup(models.Close)
 	cfg := config.Default()
@@ -308,6 +309,175 @@ func TestIgnitionTriesNextModelWhenCredentialRejectsOne(t *testing.T) {
 	}
 	if ts := e.state.Target("claude:3:claude:main"); ts.LastModel != "claude-3-5-haiku-20241022" {
 		t.Fatalf("target state %+v", ts)
+	}
+}
+
+func TestIgnitionUsesNewestModelOverLastSuccessfulOne(t *testing.T) {
+	c := &clock{t: time.Date(2026, 10, 4, 10, 0, 0, 0, shanghai)}
+	h := claudeIgnitionHost(c, nil)
+	e, _ := newTestEngine(t, h, c)
+	ctx := context.Background()
+	cfg := e.config()
+	cfg.Providers["codex"] = config.Provider{Monitor: true}
+	e.Configure(cfg, nil)
+	e.state.Target("claude:3:claude:main").LastModel = "claude-3-5-haiku-20241022"
+	e.poll(ctx, cfg, c.t, "", false)
+	e.performDue(ctx, cfg)
+	if len(h.executed) != 1 || h.executed[0].Model != "claude-haiku-4-5-20251001" {
+		t.Fatalf("executed %+v", h.executed)
+	}
+	if ts := e.state.Target("claude:3:claude:main"); ts.LastModel != "claude-haiku-4-5-20251001" {
+		t.Fatalf("target state %+v", ts)
+	}
+}
+
+func TestIgnitionFallsBackWhenProviderRefusesNewestModel(t *testing.T) {
+	c := &clock{t: time.Date(2026, 10, 4, 10, 0, 0, 0, shanghai)}
+	refused := &host.Error{Code: "model_execution_failed", Message: `{"type":"error","error":{"type":"not_found_error","message":"model: claude-haiku-4-5-20251001"}}`, Status: 404}
+	h := claudeIgnitionHost(c, refused)
+	e, _ := newTestEngine(t, h, c)
+	ctx := context.Background()
+	cfg := e.config()
+	cfg.Providers["codex"] = config.Provider{Monitor: true}
+	e.Configure(cfg, nil)
+	e.poll(ctx, cfg, c.t, "", false)
+	e.performDue(ctx, cfg)
+	if len(h.executed) != 2 || h.executed[1].Model != "claude-3-5-haiku-20241022" {
+		t.Fatalf("executed %+v", h.executed)
+	}
+	if ts := e.state.Target("claude:3:claude:main"); ts.LastModel != "claude-3-5-haiku-20241022" || ts.ConsecutiveFailures != 0 {
+		t.Fatalf("target state %+v", ts)
+	}
+	var noted *Event
+	for i, ev := range e.Status().Events {
+		if ev.Kind == "model_refused" {
+			noted = &e.Status().Events[i]
+		}
+	}
+	if noted == nil || noted.Params["model"] != "claude-haiku-4-5-20251001" || noted.Params["fallback"] != "claude-3-5-haiku-20241022" || noted.Params["hours"] != "24" {
+		t.Fatalf("refusal event %+v", noted)
+	}
+
+	var target target
+	for _, candidate := range e.collectTargets(cfg) {
+		if candidate.group.Key == "claude:3:claude:main" {
+			target = candidate
+		}
+	}
+	c.add(23 * time.Hour)
+	if model, _, err := e.execute(ctx, cfg, target); err != nil || model != "claude-3-5-haiku-20241022" || len(h.executed) != 3 {
+		t.Fatalf("a refused model is skipped for a day: %s %v %+v", model, err, h.executed)
+	}
+	c.add(time.Hour)
+	if model, _, err := e.execute(ctx, cfg, target); err != nil || model != "claude-haiku-4-5-20251001" {
+		t.Fatalf("a refused model is tried again after a day: %s %v", model, err)
+	}
+}
+
+func TestIgnitionFallsBackOnlyOnceForRefusedModels(t *testing.T) {
+	c := &clock{t: time.Date(2026, 10, 4, 10, 0, 0, 0, shanghai)}
+	h := claudeIgnitionHost(c, nil)
+	h.execute = func(pluginapi.HostModelExecutionRequest) (pluginapi.HostModelExecutionResponse, error) {
+		return pluginapi.HostModelExecutionResponse{StatusCode: 400, Body: []byte(`{"type":"error","error":{"type":"invalid_request_error"}}`)}, nil
+	}
+	e, _ := newTestEngine(t, h, c)
+	ctx := context.Background()
+	cfg := e.config()
+	cfg.Providers["codex"] = config.Provider{Monitor: true}
+	e.Configure(cfg, nil)
+	e.poll(ctx, cfg, c.t, "", false)
+	e.performDue(ctx, cfg)
+	if len(h.executed) != 2 {
+		t.Fatalf("want two attempts, got %+v", h.executed)
+	}
+	ts := e.state.Target("claude:3:claude:main")
+	if ts.CircuitOpenUntilEpoch == 0 {
+		t.Fatalf("a second refusal must pause the target: %+v", ts)
+	}
+	if !strings.Contains(ts.LastError, "此前 claude-haiku-4-5-20251001 被上游拒绝（状态码 400）") {
+		t.Fatalf("the error must name the first refused model: %s", ts.LastError)
+	}
+	for _, ev := range e.Status().Events {
+		if ev.Kind == "model_refused" {
+			t.Fatalf("a refusal without a working fallback is not remembered: %+v", ev)
+		}
+	}
+}
+
+func TestStatusShowsNextAutomaticModels(t *testing.T) {
+	c := &clock{t: time.Date(2026, 10, 4, 10, 0, 0, 0, shanghai)}
+	h := claudeIgnitionHost(c, nil)
+	e, _ := newTestEngine(t, h, c)
+	ctx := context.Background()
+	cfg := e.config()
+	cfg.Providers["codex"] = config.Provider{Monitor: true}
+	e.Configure(cfg, nil)
+	e.poll(ctx, cfg, c.t, "", false)
+	if got := e.Status().NextModels; len(got) != 0 {
+		t.Fatalf("the model list is only read for an ignition, got %v", got)
+	}
+	e.performDue(ctx, cfg)
+	got := e.Status().NextModels
+	want := map[string]string{"codex": "gpt-6-luna", "claude": "claude-haiku-4-5-20251001", "antigravity": "gemini-3.8-flash-high"}
+	if !maps.Equal(got, want) {
+		t.Fatalf("next models %v", got)
+	}
+}
+
+func TestModelListIsReadAfterStartAndKeyChange(t *testing.T) {
+	c := &clock{t: time.Date(2026, 10, 4, 10, 0, 0, 0, shanghai)}
+	h := standardHost(c)
+	e, _ := newTestEngine(t, h, c)
+	reads := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reads++
+		if reads == 1 || r.Header.Get("Authorization") == "Bearer bad" {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.Write([]byte(`{"data":[{"id":"claude-haiku-5-5"},{"id":"claude-haiku-4-5-20251001"}]}`))
+	}))
+	defer server.Close()
+	ctx := context.Background()
+	cfg := e.config()
+	cfg.CPABaseURL = server.URL
+
+	e.maybeReadModels(ctx, cfg, false)
+	if reads != 1 || e.Status().ModelsError == "" {
+		t.Fatalf("reads %d, status %+v", reads, e.Status())
+	}
+	e.maybeReadModels(ctx, cfg, false)
+	if reads != 1 {
+		t.Fatalf("a failed read waits for the next poll, got %d reads", reads)
+	}
+	e.maybeReadModels(ctx, cfg, true)
+	if got := e.Status().NextModels["claude"]; reads != 2 || got != "claude-haiku-5-5" {
+		t.Fatalf("reads %d, next model %q", reads, got)
+	}
+	e.maybeReadModels(ctx, cfg, true)
+	if reads != 2 {
+		t.Fatalf("a read list is not read again until the next ignition, got %d reads", reads)
+	}
+	cfg.ModelsAPIKey = "k2"
+	e.maybeReadModels(ctx, cfg, false)
+	if reads != 3 {
+		t.Fatalf("a new models key is read at once, got %d reads", reads)
+	}
+
+	cfg.ModelsAPIKey = "bad"
+	e.maybeReadModels(ctx, cfg, false)
+	if status := e.Status(); reads != 4 || status.ModelsError == "" || len(status.NextModels) != 0 {
+		t.Fatalf("a failing key shows no models: reads %d, %+v", reads, status)
+	}
+	cfg.ModelsAPIKey = "k2"
+	e.maybeReadModels(ctx, cfg, false)
+	if status := e.Status(); status.ModelsError != "" || status.NextModels["claude"] != "claude-haiku-5-5" {
+		t.Fatalf("restoring a working key reads it again: %+v", status)
+	}
+	cfg.ModelsAPIKey = ""
+	e.maybeReadModels(ctx, cfg, true)
+	if status := e.Status(); status.ModelsError != "" || len(status.NextModels) != 0 {
+		t.Fatalf("removing the key clears the models: %+v", status)
 	}
 }
 
