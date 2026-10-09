@@ -79,7 +79,7 @@ A 5-hour window starts with the first request after a reset. If nobody uses the 
 - Times use the plugin time zone, which follows the CPA server by default.
 - The first ignition each day is at `07:00`; after that, 3 seconds after each reset, until `22:30`. A reset later than that waits for 07:00 the next day.
 - The request asks the model to reply `OK`, declares no tools and allows at most 4 output tokens.
-- Models are picked automatically: the newest Luna for ChatGPT, the newest Haiku for Claude, and the newest Flash for Antigravity's Gemini group. A model is used from the first ignition after CPA lists it; when the provider refuses it, that ignition falls back to the next candidate and records an event, and the quota group skips the refused model for 24 hours. They can also be set in the config.
+- Models are picked automatically: the newest Luna for ChatGPT, the newest Haiku for Claude, and the newest Flash for Antigravity's Gemini group. A model is used from the first ignition after CPA lists it; when the provider refuses it, that ignition falls back to the next candidate; when the fallback works, an event is recorded and the quota group skips the refused model for 24 hours. They can also be set in the config.
 - An ignition counts as successful only when the 5-hour window afterwards has a fixed reset time in the future.
 
 **Failure protection**:
