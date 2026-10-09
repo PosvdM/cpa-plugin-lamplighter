@@ -281,21 +281,16 @@ func (e *Engine) group(key string) (GroupView, bool) {
 	return snapshot, true
 }
 
-// execute sends the ignition request, trying the next candidate model when
-// CPA rejects one for the pinned credential.
+// execute sends the ignition request with the newest candidate model. It
+// tries the next candidate when CPA rejects a model for the pinned
+// credential, and once per ignition when the provider refuses a model.
 func (e *Engine) execute(ctx context.Context, cfg config.Config, t target) (string, pluginapi.HostModelExecutionResponse, error) {
 	var empty pluginapi.HostModelExecutionResponse
 	override := configuredModel(cfg, t.group.Provider, t.group.SourceLabel)
 	ts := e.state.Target(t.group.Key)
 
 	available, err := e.lister.List(ctx, cfg.CPABaseURL, cfg.ModelsAPIKey)
-	e.mu.Lock()
-	if err != nil {
-		e.modelsErr = err.Error()
-	} else {
-		e.modelsErr = ""
-	}
-	e.mu.Unlock()
+	e.noteModels(available, err)
 	var candidates []string
 	switch {
 	case err != nil && override != "":
@@ -310,16 +305,14 @@ func (e *Engine) execute(ctx context.Context, cfg config.Config, t target) (stri
 		if err != nil {
 			return "", empty, fmt.Errorf("%w: %v", ignite.ErrNoModel, err)
 		}
-		if override == "" && ts.LastModel != "" {
-			candidates = preferFirst(candidates, ts.LastModel)
-		}
 	}
 	if len(candidates) > maxCandidates {
 		candidates = candidates[:maxCandidates]
 	}
 
 	var lastErr error
-	for _, model := range candidates {
+	refused := false
+	for i, model := range candidates {
 		req, err := ignite.BuildRequest(t.group.Provider, model)
 		if err != nil {
 			return "", empty, err
@@ -347,29 +340,63 @@ func (e *Engine) execute(ctx context.Context, cfg config.Config, t target) (stri
 			lastErr = err
 			continue
 		}
+		// CPA lists a new model for every credential of the provider, and one
+		// account may not be able to use it yet. A second refusal points at
+		// the request or the account, so it ends the ignition.
+		if !refused && i < len(candidates)-1 && ignite.ModelRejected(err) {
+			refused = true
+			lastErr = err
+			e.logf("warn", "点火模型被上游拒绝，改用下一个候选：%s：%s：%v", t.group.Label, model, err)
+			continue
+		}
 		return model, resp, err
 	}
 	return "", empty, fmt.Errorf("%w（最后一次：%v）", ignite.ErrNoModel, lastErr)
 }
 
-func preferFirst(list []string, first string) []string {
-	out := []string{}
-	found := false
-	for _, item := range list {
-		if item == first {
-			found = true
+// nextModelGroups is the quota group whose automatic model the settings show
+// for each provider. Antigravity shows the Gemini group, which matches the
+// "newest Flash" description.
+var nextModelGroups = map[string]string{"codex": "", "claude": "", "antigravity": "Gemini"}
+
+// maybeReadModels reads the CPA model list after a start and after a change
+// of the CPA address or models key, so that the settings show the next
+// automatic model without waiting for an ignition. Otherwise the list is only
+// read for an ignition. A failed read is retried with the next poll.
+func (e *Engine) maybeReadModels(ctx context.Context, cfg config.Config, pollDue bool) {
+	if cfg.ModelsAPIKey == "" {
+		return
+	}
+	source := cfg.CPABaseURL + "\x00" + cfg.ModelsAPIKey
+	if source == e.modelsRead || (source == e.modelsTried && !pollDue) {
+		return
+	}
+	e.modelsTried = source
+	available, err := e.lister.List(ctx, cfg.CPABaseURL, cfg.ModelsAPIKey)
+	e.noteModels(available, err)
+	if err == nil {
+		e.modelsRead = source
+	}
+}
+
+// noteModels records the result of reading the model list and the first
+// automatic candidate of each provider. A failed read keeps the last known
+// models.
+func (e *Engine) noteModels(available []string, err error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if err != nil {
+		e.modelsErr = err.Error()
+		return
+	}
+	e.modelsErr = ""
+	next := make(map[string]string, len(nextModelGroups))
+	for provider, group := range nextModelGroups {
+		if candidates, err := models.Candidates(provider, group, "", available); err == nil {
+			next[provider] = candidates[0]
 		}
 	}
-	if !found {
-		return list
-	}
-	out = append(out, first)
-	for _, item := range list {
-		if item != first {
-			out = append(out, item)
-		}
-	}
-	return out
+	e.nextModels = next
 }
 
 func truncateText(text string, n int) string {

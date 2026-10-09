@@ -165,9 +165,13 @@ CPA has no host callback that lists the models of one credential, so the plugin 
 - Antigravity Gemini group: Flash newest first, then other non-Pro models, Pro last; image models excluded.
 - Antigravity Claude / GPT group: Haiku, Sonnet, Opus (all non-thinking), GPT-OSS, then other non-thinking models.
 
-"Newest first" compares the numeric segments of model names, so new releases need no code change. The last successful model goes first. A configured `model` or `models` entry is the only candidate and must be in the list.
+"Newest first" compares the numeric segments of model names, so new releases need no code change. Every ignition starts with the newest candidate; the last successful model is not moved forward, because older models usually stay in the list long after a new release. A configured `model` or `models` entry is the only candidate and must be in the list.
 
 When the pinned credential rejects a candidate, CPA answers locally with `auth_not_found` (the credential does not serve the model) or `unknown provider for model` (no credential does) without calling the provider. The plugin then tries the next candidate, up to 6. If every candidate is rejected, the error counts as high risk. While the model list cannot be read, the configured or last successful model is used.
+
+CPA's model list comes from its built-in model table, which it refreshes periodically, and every credential of a service lists the same models. A new model in the list may therefore not be usable by every account. When the provider refuses a candidate with HTTP 400 or 404 (`ignite.ModelRejected`), the plugin tries the next candidate in the same ignition, once per ignition; a second refusal points at the request or the account and counts as high risk. 401, 403 and 429 do not depend on the model and do not trigger another model.
+
+The model list is read after the plugin starts, after the CPA address or `models_api_key` changes (`engine.maybeReadModels`), and for every ignition. Quota polls do not read it; when one of the first two reads fails, it is retried with each poll until it succeeds. After each read, `engine.noteModels` computes the first automatic candidate of each service, ignoring configured models. The status API carries them in `next_models` (`codex`, `claude`, `antigravity`), and the settings show each one after the hint of the ignition model field. Antigravity uses the Gemini group, matching the "newest Flash" hint. `next_models` is kept in memory only, and a failed read keeps the previous result.
 
 ### Confirmation
 
@@ -186,6 +190,7 @@ If no check confirms, the result is `ErrNotConfirmed`.
 | Class | Condition | Handling |
 | --- | --- | --- |
 | Next model | `auth_not_found`, `unknown provider for model` | Try the next candidate |
+| Model refused upstream | HTTP 400/404 among high-risk errors (`ignite.ModelRejected`) | Try another candidate once per ignition, then treat as high risk |
 | High risk | `ErrNotConfirmed`, `ErrNoModel`, HTTP 400/401/403/404/409/422/429, `not found`, `unsupported` and similar | Pause until the next `start_hour` |
 | Transient | CPA local cooldown (`are cooling down`), `auth_unavailable`, anything else | Retry after `failure_retry_seconds × multiplier^(n-1)`; pause until the next day at failure `max_transient_failures` |
 

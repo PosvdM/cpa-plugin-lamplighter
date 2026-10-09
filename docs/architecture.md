@@ -165,9 +165,13 @@ CPA 没有按凭证列出模型的宿主回调，插件用 `models_api_key` 读�
 - Antigravity Gemini 组：Flash 由新到旧，然后其他非 Pro 模型，Pro 最后；排除图片模型。
 - Antigravity Claude / GPT 组：Haiku、Sonnet、Opus（均为非 thinking）、GPT-OSS、其他非 thinking 模型。
 
-“由新到旧”比较模型名中的数字段，新版本无需改代码。上次成功的模型排在最前。配置了 `model` 或 `models` 时只用指定模型，且它必须在列表中。
+“由新到旧”比较模型名中的数字段，新版本无需改代码。每次点火都从最新的候选开始，上次成功的模型不提前：新模型发布后，旧模型通常还会在列表里保留很久。配置了 `model` 或 `models` 时只用指定模型，且它必须在列表中。
 
 候选模型被锁定的凭证拒绝时，CPA 在本地返回 `auth_not_found`（凭证不支持该模型）或 `unknown provider for model`（没有凭证支持），不会请求上游；插件换下一个候选，最多 6 个。全部被拒绝时按高风险错误处理。模型列表暂时读不到时，使用指定模型或上次成功的模型。
+
+CPA 的模型列表来自它内置并定期更新的模型表，同一服务的凭证都列出相同的模型，所以列表里的新模型不一定能被每个账号调用。上游以 HTTP 400 或 404 拒绝某个候选时（`ignite.ModelRejected`），插件在这次点火中换下一个候选，每次点火只换一次；再次被拒说明问题在请求或账号，按高风险错误处理。401、403 和 429 与模型无关，不换模型。
+
+模型列表在三种情况下读取：插件启动后、CPA 地址或 `models_api_key` 变化后（`engine.maybeReadModels`），以及每次点火时。额度查询不读取模型列表；前两种读取失败时，随之后每轮额度查询重试，直到成功。每次读取后，`engine.noteModels` 不考虑指定模型，按服务算出自动选择的第一个候选，放在状态接口的 `next_models` 中（`codex`、`claude`、`antigravity`），设置页在点火模型输入框的提示文字后显示它。Antigravity 按 Gemini 组计算，与提示文字“最新的 Flash”一致。`next_models` 只保存在内存中，读取失败时保留上次的结果。
 
 ### 确认
 
@@ -186,6 +190,7 @@ CPA 没有按凭证列出模型的宿主回调，插件用 `models_api_key` 读�
 | 类别 | 条件 | 处理 |
 | --- | --- | --- |
 | 换模型 | `auth_not_found`、`unknown provider for model` | 换下一个候选 |
+| 上游拒绝模型 | 高风险错误中的 HTTP 400/404（`ignite.ModelRejected`） | 每次点火换一次候选，之后按高风险处理 |
 | 高风险 | `ErrNotConfirmed`、`ErrNoModel`，HTTP 400/401/403/404/409/422/429，`not found`、`unsupported` 等 | 立即暂停到第二天 `start_hour` |
 | 临时 | CPA 本地冷却（`are cooling down`）、`auth_unavailable`，其他错误 | 按 `failure_retry_seconds × multiplier^(n-1)` 重试，第 `max_transient_failures` 次暂停到第二天 |
 

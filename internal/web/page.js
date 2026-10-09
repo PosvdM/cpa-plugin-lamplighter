@@ -763,9 +763,24 @@
     more.textContent = eventsExpanded ? translate("collapse") : translate("show_more", Math.min(status.events.length, 100));
   }
 
+  // The model inputs show, after the automatic rule, the model the next
+  // ignition starts with.
+  function renderModelHints() {
+    var next = status.next_models || {};
+    var form = $("settings");
+    ["codex", "claude", "antigravity"].forEach(function (provider) {
+      var input = form.elements["providers." + provider + ".model"];
+      if (!input) return;
+      var text = translate("model_auto_" + provider);
+      if (next[provider]) text += " - " + next[provider];
+      input.setAttribute("placeholder", text);
+    });
+  }
+
   function renderStatus() {
     renderHeader();
     renderNotices();
+    renderModelHints();
     renderAccounts();
     renderTargets();
     renderEvents();
