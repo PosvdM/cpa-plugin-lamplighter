@@ -818,6 +818,8 @@
   var chartView = null;
   var hoverSource = "";
   var hoverListeners = [];
+  // Samples of the row in the detail chart; hovering either chart snaps to them.
+  var snapPoints = [];
 
   function cssVar(name) {
     return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -1234,6 +1236,7 @@
   // pooled row adds a band from its lowest to its highest account.
   function renderDetail(row, head, box) {
     var g = chartView, limit = gapLimit();
+    snapPoints = row.points;
     var group = !!row.children;
     var lowest = Math.min.apply(null, row.points.map(function (p) { return group ? p[3] : p[1]; }));
     head.appendChild(el("span", { class: "detail-name", text: row.name + " · " + translate(chartWindow === "5h" ? "quota_5h" : "quota_7d") }));
@@ -1385,7 +1388,17 @@
     var t = chartView.t((e.clientX - rect.left) / rect.width * chartView.width);
     if (t < chartView.from || t > chartView.to) { setHover(null); return; }
     hoverSource = source;
-    setHover(t, rowId);
+    setHover(snapTime(t), rowId);
+  }
+
+  // The nearest sample of the detail row, so the crosshair and tooltip show a
+  // measured time. Inside a data gap the pointer's own time is kept.
+  function snapTime(t) {
+    var best = null;
+    snapPoints.forEach(function (p) {
+      if (p[0] >= chartView.from && p[0] <= chartView.to && (best == null || Math.abs(p[0] - t) < Math.abs(best - t))) best = p[0];
+    });
+    return best != null && Math.abs(best - t) <= gapLimit() ? best : t;
   }
 
   function setHover(t, rowId) {
@@ -1417,6 +1430,7 @@
     clear(overview); clear(head); clear(detail);
     clear($("chart-table"));
     hoverListeners = [];
+    snapPoints = [];
     head.hidden = true;
     if (!history || !status) {
       overview.appendChild(el("div", { class: "empty", text: translate("loading") }));
