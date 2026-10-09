@@ -105,7 +105,7 @@ Title icons: 🟡 remaining fell to the first threshold (50% by default), 🔴 t
 
 ## Configuration
 
-All settings live under `plugins.configs.lamplighter` in `config.yaml`, and can also be edited under "设置" (Settings) on the management page. Changes apply without a restart.
+All settings live under `plugins.configs.lamplighter` in `config.yaml`, and can also be edited under "设置" (Settings) on the management page. Settings on the page save as you change them: switches and checkboxes when clicked, text and numbers when you leave the field or press Enter. Changes apply without a restart.
 
 | Key | Default | Description |
 | --- | --- | --- |
@@ -137,7 +137,7 @@ Recovery notifications and reset reminders are set per window: `five_hour` for 5
 
 The first line of a recovery notification is what was left when the previous cycle ended. This value comes from the active query 30 seconds before the reset; usage in those last 30 seconds is not counted. Without a reading from the last 15 minutes before the reset, the line is left out. A cycle that was never used (still 100% before the reset) is not notified. A window that is neither a 5-hour nor a 7-day window counts as a 7-day window once it was seen more than a day before its reset, and as a 5-hour window otherwise.
 
-`notify_recovery` and `notify_reset_reminders` set both windows of the matching key to `all` when `true` and to `off` when `false`. They apply only when `recovery_notify` or `reset_reminder` is absent; saving the settings on the management page replaces them with the new keys.
+`notify_recovery` and `notify_reset_reminders` set both windows of the matching key to `all` when `true` and to `off` when `false`. They apply only when `recovery_notify` or `reset_reminder` is absent; changing the matching notification setting on the management page replaces them with the new keys.
 
 Ignition settings live under `ignition`:
 
@@ -198,7 +198,7 @@ The page shows:
 - the next ignition, last result and failure protection state of each quota group, with an "ignite now" button;
 - a quota chart for either the 5-hour quota, over the last 1, 3, 6, 12, 24 or 26 hours (6 by default), or the 7-day quota, over the last 1, 4, 8 or 15 days, one month (from this date last month), or 36 days (8 days by default). The top part has one colored band per service, colored like the quota bars, in the order Claude, ChatGPT, Gemini, Fable, Claude / GPT by default or by lowest remaining; a service with several accounts shows their total and expands into one row per account. The bottom part plots the selected row with its resets and ignition results;
 - recent events in columns for time, type, quota group and detail;
-- the settings form, with a test notification button in the notification settings. An empty ignition model field shows the model the next ignition will use in its hint; for Antigravity, the model of the Gemini group. The model list is read when the plugin starts, when `cpa_base_url` or `models_api_key` changes and for every ignition, so a model newly listed by CPA shows after the next ignition, which already uses it.
+- the settings form, with a test notification button in the notification settings. The test uses the settings the plugin has applied, so after changing the Bark URL, wait a few seconds before testing. An empty ignition model field shows the model the next ignition will use in its hint; for Antigravity, the model of the Gemini group. The model list is read when the plugin starts, when `cpa_base_url` or `models_api_key` changes and for every ignition, so a model newly listed by CPA shows after the next ignition, which already uses it.
 
 The page follows the language of the CPA Management Center: Chinese for Simplified or Traditional Chinese, English for every other language.
 

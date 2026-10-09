@@ -143,6 +143,7 @@ header .actions { margin-left: auto; display: flex; gap: 8px; }
   margin-bottom: 16px;
 }
 .card-title, .block-title { font-size: 15px; font-weight: 650; margin: 0 0 14px; }
+.hint.settings-note { margin: -8px 0 14px; }
 .block { margin-bottom: 18px; }
 
 /* Buttons, matching .btn in the Management Center */
@@ -356,12 +357,10 @@ form label.inline-input { flex-direction: row; align-items: center; gap: 6px; fo
 }
 .mode-thumb {
   position: absolute; top: 3px; bottom: 3px; left: 3px; width: calc((100% - 6px) / 3); border-radius: 6px;
-  background: var(--bg-secondary); box-shadow: var(--shadow);
+  background: var(--primary-color); box-shadow: var(--shadow);
   translate: calc(var(--index) * 100%) 0;
-  transition: translate 480ms cubic-bezier(0.34, 1.7, 0.5, 1), background-color 200ms ease;
+  transition: translate 480ms cubic-bezier(0.34, 1.7, 0.5, 1);
 }
-.mode-switch.on .mode-thumb { background: var(--primary-color); }
-.mode-switch.on .mode-option:has(input:checked) { color: var(--primary-contrast); }
 .mode-thumb.bounce { animation: mode-squash 520ms ease-out; }
 @keyframes mode-squash {
   0% { scale: 1 1; }
@@ -375,7 +374,7 @@ form label.mode-option {
   font-size: 12.5px; font-weight: 600; color: var(--text-secondary); white-space: nowrap; transition: color 200ms ease;
 }
 .mode-option input { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; pointer-events: none; }
-.mode-option:has(input:checked) { color: var(--text-primary); }
+.mode-option:has(input:checked) { color: var(--primary-contrast); }
 .mode-option:has(input:focus-visible) { box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-color) 25%, transparent); }
 .mode-option span { display: inline-block; transition: scale 300ms cubic-bezier(0.34, 1.7, 0.5, 1); }
 .mode-option:has(input:checked) span { scale: 1.06; }
@@ -389,8 +388,6 @@ table.services tbody tr:hover td { background: transparent; }
 table.services .sub-row td { border-bottom: none; padding-top: 4px; text-align: left; }
 .sub-row .field-label { display: block; margin-bottom: 6px; }
 .sub-row .checks { margin-bottom: 6px; }
-.form-actions { display: flex; gap: 12px; align-items: center; }
-.form-actions .muted { font-size: 12.5px; }
 
 /* Key prompt */
 #key-section { max-width: 440px; margin: 80px auto; }
