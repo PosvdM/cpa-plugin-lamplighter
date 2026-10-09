@@ -168,12 +168,13 @@
       ignite_now: "立即点火",
       ignite_confirm: "立即向 {0} 发送一次点火请求？这会开始一个新的 5 小时窗口。",
       ignited: "{0} 点火成功",
-      ev_ignite: "点火成功", ev_ignite_manual: "手动点火", ev_ignite_failed: "点火失败", ev_ignite_paused: "点火暂停",
+      ev_ignite: "点火成功", ev_ignite_manual: "手动点火", ev_ignite_failed: "点火失败", ev_ignite_paused: "点火暂停", ev_model_refused: "模型被拒",
       ev_cooldown_stale: "冷却未解除", ev_notify: "已推送", ev_notify_failed: "推送失败", ev_codex_reset: "重置信号", ev_error: "错误",
       ev_ignited: "{0} · 下次重置 {1}",
       ev_retry: "{0}后重试：{1}", ev_retry_cooldown: "CPA 冷却结束，{0}后重试：{1}",
       ev_seconds: "{0} 秒", ev_minutes: "{0} 分钟",
       ev_paused: "暂停到 {0}：{1}",
+      ev_refused: "{0} 被上游拒绝，改用 {1}，{2} 小时内不再尝试",
       ev_notify_failed_detail: "{0}：{1}",
       ev_cooldown: "额度已恢复，CPA 仍冷却到 {0}",
       ev_codex_sent: "已发送 {0} 条通知",
@@ -281,12 +282,13 @@
       ignite_now: "Ignite now",
       ignite_confirm: "Send an ignition request to {0} now? This starts a new 5-hour window.",
       ignited: "{0} ignited",
-      ev_ignite: "Ignited", ev_ignite_manual: "Manual ignition", ev_ignite_failed: "Ignition failed", ev_ignite_paused: "Ignition paused",
+      ev_ignite: "Ignited", ev_ignite_manual: "Manual ignition", ev_ignite_failed: "Ignition failed", ev_ignite_paused: "Ignition paused", ev_model_refused: "Model refused",
       ev_cooldown_stale: "Cooldown not cleared", ev_notify: "Notified", ev_notify_failed: "Notification failed", ev_codex_reset: "Reset signal", ev_error: "Error",
       ev_ignited: "{0} · next reset {1}",
       ev_retry: "Retrying in {0}: {1}", ev_retry_cooldown: "Retrying when the CPA cooldown ends, in {0}: {1}",
       ev_seconds: "{0} s", ev_minutes: "{0} min",
       ev_paused: "Paused until {0}: {1}",
+      ev_refused: "{0} was refused upstream; used {1}, not tried again for {2} hours",
       ev_notify_failed_detail: "{0}: {1}",
       ev_cooldown: "Quota is back, but CPA cools down until {0}",
       ev_codex_sent: "Sent {0} notifications",
@@ -690,7 +692,7 @@
 
   // Badge style per event type; the label is ev_<kind> in the dictionary.
   var EVENT_TYPES = {
-    ignite: "success", ignite_manual: "success", ignite_failed: "warning", ignite_paused: "failure",
+    ignite: "success", ignite_manual: "success", ignite_failed: "warning", ignite_paused: "failure", model_refused: "warning",
     cooldown_stale: "warning", notify: "muted", notify_failed: "warning", codex_reset: "muted", error: "failure"
   };
   var EVENTS_COLLAPSED = 12;
@@ -718,6 +720,7 @@
       case "ignite": case "ignite_manual": return p.reset ? translate("ev_ignited", p.model, time(p.reset)) : p.model;
       case "ignite_failed": return translate(p.cooldown ? "ev_retry_cooldown" : "ev_retry", retryText(Number(p.retry_seconds) || 0), p.error);
       case "ignite_paused": return translate("ev_paused", time(p.until), p.error);
+      case "model_refused": return translate("ev_refused", p.model, p.fallback, p.hours);
       case "notify": return p.title;
       case "notify_failed": return translate("ev_notify_failed_detail", p.title, p.error);
       case "cooldown_stale": return translate("ev_cooldown", time(p.until));
@@ -763,9 +766,24 @@
     more.textContent = eventsExpanded ? translate("collapse") : translate("show_more", Math.min(status.events.length, 100));
   }
 
+  // The model inputs show, after the automatic rule, the model the next
+  // ignition starts with.
+  function renderModelHints() {
+    var next = status.next_models || {};
+    var form = $("settings");
+    ["codex", "claude", "antigravity"].forEach(function (provider) {
+      var input = form.elements["providers." + provider + ".model"];
+      if (!input) return;
+      var text = translate("model_auto_" + provider);
+      if (next[provider]) text += " - " + next[provider];
+      input.setAttribute("placeholder", text);
+    });
+  }
+
   function renderStatus() {
     renderHeader();
     renderNotices();
+    renderModelHints();
     renderAccounts();
     renderTargets();
     renderEvents();
