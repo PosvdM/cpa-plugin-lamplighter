@@ -109,7 +109,7 @@
       settings: "设置",
       notifications: "通知",
       bark_url: "Bark 推送地址", bark_group: "Bark 分组",
-      test_bark: "测试推送", test_bark_hint: "按已保存的设置发送，修改地址后先保存",
+      test_bark: "测试推送", test_bark_hint: "按插件已应用的设置发送，修改地址后等几秒再测试",
       thresholds: "提醒阈值", remaining_le: "剩余 ≤",
       thresholds_hint: "额度降到每一档时推送一次，耗尽时再推送一次",
       window_5h: "5 小时窗口", window_7d: "7 天窗口",
@@ -139,7 +139,7 @@
       ag_groups_hint: "Antigravity 按模型分成多个独立的 5 小时额度组。只有勾选的额度组会自动点火；Claude / GPT 额度组较小，默认不点。",
       codex_reset_enabled: "转发 Did Codex Reset 发布的 Codex 重置信号",
       codex_reset_pending: "首次开启时推送当前待生效的排期",
-      save: "保存", save_hint: "保存后写入 CPA 的 config.yaml，插件自动应用。",
+      save_hint: "修改后自动保存到 CPA 的 config.yaml，插件几秒内应用。文本和数字在离开输入框或按回车时保存。",
       language_note: "通知语言跟随最近打开此页面时管理中心的语言，当前为{0}。",
       lang_zh: "中文", lang_en: "English",
       due: "已到", minutes: "{0} 分钟", hours_minutes: "{0} 小时 {1} 分", days: "{0} 天",
@@ -223,7 +223,7 @@
       settings: "Settings",
       notifications: "Notifications",
       bark_url: "Bark push URL", bark_group: "Bark group",
-      test_bark: "Send test", test_bark_hint: "Uses the saved settings; save after changing the URL",
+      test_bark: "Send test", test_bark_hint: "Uses the settings the plugin has applied; after changing the URL, wait a few seconds",
       thresholds: "Alert thresholds", remaining_le: "Remaining ≤",
       thresholds_hint: "One notification when quota drops to each threshold, and one more when it runs out",
       window_5h: "5-hour window", window_7d: "7-day window",
@@ -253,7 +253,7 @@
       ag_groups_hint: "Antigravity splits quota into separate 5-hour groups by model. Only checked groups are ignited; the Claude / GPT group is small and off by default.",
       codex_reset_enabled: "Forward Codex reset signals published by Did Codex Reset",
       codex_reset_pending: "When first turned on, send the pending schedule",
-      save: "Save", save_hint: "Saved to CPA's config.yaml; the plugin applies it automatically.",
+      save_hint: "Changes save to CPA's config.yaml automatically, and the plugin applies them within a few seconds. Text and numbers save when you leave the field or press Enter.",
       language_note: "Notifications use the Management Center language from the last time this page was opened, now {0}.",
       lang_zh: "中文", lang_en: "English",
       due: "due", minutes: "{0} min", hours_minutes: "{0} h {1} min", days: "{0} days",
@@ -1540,22 +1540,38 @@
     return translate("tz_note", name ? name + " (" + utc + ")" : utc, source);
   }
 
+  function topKey(name) { return name.split(".")[0]; }
+
   // Effective values come from the status config (defaults applied); saved
   // secrets come from the raw plugin config.
-  function fillSettings() {
-    var form = $("settings");
+  function effectiveConfig() {
     var effective = JSON.parse(JSON.stringify(status.config || {}));
     effective.bark_url = rawConfig.bark_url || "";
     effective.models_api_key = rawConfig.models_api_key || "";
-    Array.prototype.forEach.call(form.elements, function (input) {
+    return effective;
+  }
+
+  function fillInput(input, effective) {
+    var value = getPath(effective, input.name);
+    if (input.type === "checkbox") input.checked = !!value;
+    else if (input.type === "radio") input.checked = input.value === value;
+    else input.value = value === undefined || value === null ? "" : value;
+  }
+
+  // keys, when given, limits the refill to those top-level keys and skips the
+  // focused field, so a refill after a save leaves the field being edited alone.
+  function fillSettings(keys) {
+    var effective = effectiveConfig();
+    var active = document.activeElement;
+    Array.prototype.forEach.call($("settings").elements, function (input) {
       if (!input.name) return;
-      var value = getPath(effective, input.name);
-      if (input.type === "checkbox") input.checked = !!value;
-      else if (input.type === "radio") input.checked = input.value === value;
-      else input.value = value === undefined || value === null ? "" : value;
+      if (keys && (!keys[topKey(input.name)] || input === active)) return;
+      fillInput(input, effective);
     });
     Array.prototype.forEach.call(document.querySelectorAll(".mode-switch"), function (box) { placeThumb(box, false); });
-    renderGroupChecks(getPath(effective, "providers.antigravity.groups"));
+    if (!keys || (keys.providers && !$("ag-groups").contains(active))) {
+      renderGroupChecks(getPath(effective, "providers.antigravity.groups"));
+    }
     $("timezone-note").textContent = timezoneText();
   }
 
@@ -1566,7 +1582,6 @@
     var index = 0;
     Array.prototype.forEach.call(options, function (input, i) { if (input.checked) index = i; });
     box.style.setProperty("--index", index);
-    box.classList.toggle("on", options[index] && options[index].value !== "off");
     if (!bounce) return;
     var thumb = box.querySelector(".mode-thumb");
     thumb.classList.remove("bounce");
@@ -1578,17 +1593,16 @@
     box.addEventListener("change", function () { placeThumb(box, true); });
   });
 
-  function saveSettings(event) {
-    event.preventDefault();
-    var form = $("settings");
-    var patch = {
-      ignition: JSON.parse(JSON.stringify(rawConfig.ignition || (status.config && status.config.ignition) || {})),
-      providers: JSON.parse(JSON.stringify(rawConfig.providers || {})),
-      codex_reset_updates: JSON.parse(JSON.stringify(rawConfig.codex_reset_updates || {}))
-    };
-    PROVIDERS.forEach(function (p) { if (!patch.providers[p]) patch.providers[p] = {}; });
-    Array.prototype.forEach.call(form.elements, function (input) {
-      if (!input.name) return;
+  // The patch for one top-level key. CPA merges top-level keys only, so
+  // objects are sent whole, starting from the saved object to keep keys the
+  // page does not show.
+  function buildPatch(top) {
+    var patch = {};
+    var base = rawConfig[top];
+    if (top === "ignition" && !base) base = status.config && status.config.ignition;
+    if (base && typeof base === "object") patch[top] = JSON.parse(JSON.stringify(base));
+    Array.prototype.forEach.call($("settings").elements, function (input) {
+      if (!input.name || topKey(input.name) !== top) return;
       var value;
       if (input.type === "checkbox") value = input.checked;
       else if (input.type === "radio") {
@@ -1600,24 +1614,59 @@
       } else value = input.value.trim();
       setPath(patch, input.name, value);
     });
-    patch.providers.antigravity.groups = Array.prototype.filter.call(
-      document.querySelectorAll("[data-ag-group]"), function (input) { return input.checked; }
-    ).map(function (input) { return input.getAttribute("data-ag-group"); });
+    if (top === "providers") {
+      PROVIDERS.forEach(function (p) { if (!patch.providers[p]) patch.providers[p] = {}; });
+      patch.providers.antigravity.groups = Array.prototype.filter.call(
+        document.querySelectorAll("[data-ag-group]"), function (input) { return input.checked; }
+      ).map(function (input) { return input.getAttribute("data-ag-group"); });
+    }
     // A fixed offset from older versions is removed so the time zone follows CPA.
     if (rawConfig.timezone_offset_hours !== undefined) patch.timezone_offset_hours = null;
     // The single switches are replaced by recovery_notify and reset_reminder.
-    if (rawConfig.notify_recovery !== undefined) patch.notify_recovery = null;
-    if (rawConfig.notify_reset_reminders !== undefined) patch.notify_reset_reminders = null;
-    var button = form.querySelector("button[type=submit]");
-    button.disabled = true;
-    api("PATCH", CONFIG_API, patch).then(function () {
-      toast(translate("saved"));
-      return loadConfig();
-    }).then(function () {
-      setTimeout(function () { loadStatus().then(fillSettings); }, 3000);
-    }).catch(function (err) {
-      if (err.message !== "unauthorized") toast(translate("save_failed", err.message));
-    }).then(function () { button.disabled = false; });
+    if (top === "recovery_notify" && rawConfig.notify_recovery !== undefined) patch.notify_recovery = null;
+    if (top === "reset_reminder" && rawConfig.notify_reset_reminders !== undefined) patch.notify_reset_reminders = null;
+    return patch;
+  }
+
+  // Settings save as they change: switches and checkboxes when clicked, text
+  // and number fields when they lose focus or on Enter. Saves run one at a
+  // time, so each patch starts from the config the previous one wrote. A few
+  // seconds after the last save, when the plugin has applied it, the saved
+  // fields show the effective values again.
+  var saveQueue = Promise.resolve();
+  var refillKeys = {};
+  var refillTimer = null;
+
+  function saveField(event) {
+    var input = event.target;
+    var top = input.hasAttribute("data-ag-group") ? "providers" : input.name && topKey(input.name);
+    if (!top) return;
+    if (input.type === "number") {
+      if (!input.checkValidity()) { input.reportValidity(); return; }
+      if (input.value === "") { fillInput(input, effectiveConfig()); return; }
+    }
+    saveQueue = saveQueue.then(function () {
+      return api("PATCH", CONFIG_API, buildPatch(top)).then(function () {
+        toast(translate("saved"));
+        refillKeys[top] = true;
+        clearTimeout(refillTimer);
+        refillTimer = setTimeout(refillSaved, 3000);
+        return loadConfig();
+      }).catch(function (err) {
+        if (err.message !== "unauthorized") toast(translate("save_failed", err.message));
+        var keys = {};
+        keys[top] = true;
+        fillSettings(keys);
+      });
+    });
+  }
+
+  function refillSaved() {
+    saveQueue = saveQueue.then(function () {
+      var keys = refillKeys;
+      refillKeys = {};
+      return loadStatus().then(function () { fillSettings(keys); }).catch(function () {});
+    });
   }
 
   function loadConfig() {
@@ -1653,9 +1702,18 @@
     runAction(e.currentTarget, API + "/refresh", {}, translate("refreshed_all"));
   });
   $("test-bark").addEventListener("click", function (e) {
-    runAction(e.currentTarget, API + "/test-bark", {}, translate("test_sent"));
+    var button = e.currentTarget;
+    saveQueue.then(function () { runAction(button, API + "/test-bark", {}, translate("test_sent")); });
   });
-  $("settings").addEventListener("submit", saveSettings);
+  $("settings").addEventListener("change", saveField);
+  $("settings").addEventListener("submit", function (e) { e.preventDefault(); });
+  // Enter commits a text or number field; leaving it fires the change that saves it.
+  $("settings").addEventListener("keydown", function (e) {
+    if (e.key === "Enter" && e.target.tagName === "INPUT" && /^(text|number|password)$/.test(e.target.type)) {
+      e.preventDefault();
+      e.target.blur();
+    }
+  });
   $("events-more").addEventListener("click", function () { eventsExpanded = !eventsExpanded; renderEvents(); });
   function bindSegmented(id, onPick) {
     Array.prototype.forEach.call($(id).querySelectorAll("button"), function (button) {

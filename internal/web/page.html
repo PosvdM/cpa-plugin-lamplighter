@@ -96,13 +96,14 @@
 
   <section class="card">
     <h2 class="card-title" data-i18n="settings">设置</h2>
+    <p class="hint settings-note" data-i18n="save_hint">修改后自动保存到 CPA 的 config.yaml，插件几秒内应用。文本和数字在离开输入框或按回车时保存。</p>
     <form id="settings">
       <fieldset>
         <legend data-i18n="notifications">通知</legend>
         <div class="bark-row">
           <label><span data-i18n="bark_url">Bark 推送地址</span><input name="bark_url" type="text" autocomplete="off" placeholder="https://api.day.app/device_key"></label>
           <label><span data-i18n="bark_group">Bark 分组</span><input name="bark_group" type="text"></label>
-          <button id="test-bark" class="btn btn-secondary" type="button" title="按已保存的设置发送，修改地址后先保存" data-i18n="test_bark" data-i18n-title="test_bark_hint">测试推送</button>
+          <button id="test-bark" class="btn btn-secondary" type="button" title="按插件已应用的设置发送，修改地址后等几秒再测试" data-i18n="test_bark" data-i18n-title="test_bark_hint">测试推送</button>
         </div>
         <div class="field">
           <span class="field-label" data-i18n="thresholds">提醒阈值</span>
@@ -199,10 +200,6 @@
           <label class="inline"><input name="codex_reset_updates.notify_current_pending" type="checkbox"><span data-i18n="codex_reset_pending">首次开启时推送当前待生效的排期</span></label>
         </div>
       </fieldset>
-      <div class="form-actions">
-        <button class="btn btn-primary" type="submit" data-i18n="save">保存</button>
-        <span id="settings-note" class="muted" data-i18n="save_hint">保存后写入 CPA 的 config.yaml，插件自动应用。</span>
-      </div>
     </form>
   </section>
 </main>
