@@ -79,7 +79,7 @@ A 5-hour window starts with the first request after a reset. If nobody uses the 
 - Times use the plugin time zone, which follows the CPA server by default.
 - The first ignition each day is at `07:00`; after that, 3 seconds after each reset, until `22:30`. A reset later than that waits for 07:00 the next day.
 - The request asks the model to reply `OK`, declares no tools and allows at most 4 output tokens.
-- Models are picked automatically: the newest Luna for ChatGPT, the newest Haiku for Claude, and the newest Flash for Antigravity's Gemini group. A model is used from the first ignition after CPA lists it; when the account cannot use it yet, that ignition falls back to the next newest model. They can also be set in the config.
+- Models are picked automatically: the newest Luna for ChatGPT, the newest Haiku for Claude, and the newest Flash for Antigravity's Gemini group. A model is used from the first ignition after CPA lists it; when the provider refuses it, that ignition falls back to the next candidate and records an event, and the quota group skips the refused model for 24 hours. They can also be set in the config.
 - An ignition counts as successful only when the 5-hour window afterwards has a fixed reset time in the future.
 
 **Failure protection**:
@@ -198,7 +198,7 @@ The page shows:
 - the next ignition, last result and failure protection state of each quota group, with an "ignite now" button;
 - a quota chart for either the 5-hour quota, over the last 1, 3, 6, 12, 24 or 26 hours (6 by default), or the 7-day quota, over the last 1, 4, 8 or 15 days, one month (from this date last month), or 36 days (8 days by default). The top part has one colored band per service, colored like the quota bars, in the order Claude, ChatGPT, Gemini, Fable, Claude / GPT by default or by lowest remaining; a service with several accounts shows their total and expands into one row per account. The bottom part plots the selected row with its resets and ignition results;
 - recent events in columns for time, type, quota group and detail;
-- the settings form, with a test notification button in the notification settings. An empty ignition model field shows the model the next ignition will use in its hint; for Antigravity, the model of the Gemini group. The model list is read when the plugin starts, when `models_api_key` changes and for every ignition, so a model newly listed by CPA shows after the next ignition, which already uses it.
+- the settings form, with a test notification button in the notification settings. An empty ignition model field shows the model the next ignition will use in its hint; for Antigravity, the model of the Gemini group. The model list is read when the plugin starts, when `cpa_base_url` or `models_api_key` changes and for every ignition, so a model newly listed by CPA shows after the next ignition, which already uses it.
 
 The page follows the language of the CPA Management Center: Chinese for Simplified or Traditional Chinese, English for every other language.
 

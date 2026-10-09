@@ -96,10 +96,15 @@ type Engine struct {
 	lastSample  map[string]sampleMark
 	pendingSamp map[string]store.Record
 	lock        *store.Lock
-	// modelsRead is the CPA address and key whose model list was read
-	// outside an ignition, and modelsTried the last one attempted.
-	modelsRead  string
-	modelsTried string
+	// modelsSource is the CPA address and models key the model list is read
+	// from outside an ignition; modelsTried and modelsOK tell whether it was
+	// read and whether that worked.
+	modelsSource string
+	modelsTried  bool
+	modelsOK     bool
+	// refused holds when the provider refused a model for a quota group,
+	// keyed by group key and model.
+	refused map[string]time.Time
 
 	usageCh chan usageEvent
 	cmdCh   chan command

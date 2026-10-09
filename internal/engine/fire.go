@@ -306,12 +306,15 @@ func (e *Engine) execute(ctx context.Context, cfg config.Config, t target) (stri
 			return "", empty, fmt.Errorf("%w: %v", ignite.ErrNoModel, err)
 		}
 	}
+	if override == "" {
+		candidates = e.skipRefused(t.group.Key, candidates)
+	}
 	if len(candidates) > maxCandidates {
 		candidates = candidates[:maxCandidates]
 	}
 
-	var lastErr error
-	refused := false
+	var lastErr, refusedErr error
+	refused := ""
 	for i, model := range candidates {
 		req, err := ignite.BuildRequest(t.group.Provider, model)
 		if err != nil {
@@ -334,6 +337,9 @@ func (e *Engine) execute(ctx context.Context, cfg config.Config, t target) (stri
 			}
 		}
 		if err == nil {
+			if refused != "" {
+				e.noteRefused(t, refused, model)
+			}
 			return model, resp, nil
 		}
 		if ignite.Classify(err) == ignite.Unsupported {
@@ -343,15 +349,66 @@ func (e *Engine) execute(ctx context.Context, cfg config.Config, t target) (stri
 		// CPA lists a new model for every credential of the provider, and one
 		// account may not be able to use it yet. A second refusal points at
 		// the request or the account, so it ends the ignition.
-		if !refused && i < len(candidates)-1 && ignite.ModelRejected(err) {
-			refused = true
-			lastErr = err
-			e.logf("warn", "点火模型被上游拒绝，改用下一个候选：%s：%s：%v", t.group.Label, model, err)
+		if refused == "" && i < len(candidates)-1 && ignite.ModelRejected(err) {
+			refused, refusedErr = model, err
 			continue
+		}
+		if refused != "" {
+			// Only the status of the refusal is added: its text could carry
+			// markers that change how the final error is classified.
+			status := ""
+			if code := host.StatusOf(refusedErr); code != 0 {
+				status = fmt.Sprintf("（状态码 %d）", code)
+			}
+			err = fmt.Errorf("%w；此前 %s 被上游拒绝%s", err, refused, status)
 		}
 		return model, resp, err
 	}
+	if refused != "" {
+		return "", empty, fmt.Errorf("%w（%s 被上游拒绝：%v；最后一次：%v）", ignite.ErrNoModel, refused, refusedErr, lastErr)
+	}
 	return "", empty, fmt.Errorf("%w（最后一次：%v）", ignite.ErrNoModel, lastErr)
+}
+
+// refusedFor is how long a model the provider refused for a quota group is
+// skipped. A new model can reach accounts in stages, so it is tried again
+// after a day instead of being dropped; a day keeps requests for a model the
+// account cannot use rare.
+const refusedFor = 24 * time.Hour
+
+// noteRefused remembers that the provider refused model for the target while
+// fallback worked, which shows the refusal concerns the model.
+func (e *Engine) noteRefused(t target, model, fallback string) {
+	if e.refused == nil {
+		e.refused = map[string]time.Time{}
+	}
+	e.refused[t.group.Key+"\x00"+model] = e.now()
+	hours := strconv.Itoa(int(refusedFor / time.Hour))
+	e.addEventDetail("warn", "model_refused", t.group.Key, t.group.Label,
+		fmt.Sprintf("%s 被上游拒绝，改用 %s，%s 小时内不再尝试", model, fallback, hours),
+		fmt.Sprintf("%s 点火模型 %s 被上游拒绝，改用 %s，%s 小时内不再尝试", t.group.Label, model, fallback, hours),
+		map[string]string{"model": model, "fallback": fallback, "hours": hours})
+}
+
+// skipRefused drops the candidates refused for the target within refusedFor,
+// unless that leaves none, and forgets expired refusals.
+func (e *Engine) skipRefused(key string, candidates []string) []string {
+	now := e.now()
+	for k, at := range e.refused {
+		if now.Sub(at) >= refusedFor {
+			delete(e.refused, k)
+		}
+	}
+	var out []string
+	for _, model := range candidates {
+		if _, ok := e.refused[key+"\x00"+model]; !ok {
+			out = append(out, model)
+		}
+	}
+	if len(out) == 0 {
+		return candidates
+	}
+	return out
 }
 
 // nextModelGroups is the quota group whose automatic model the settings show
@@ -364,19 +421,25 @@ var nextModelGroups = map[string]string{"codex": "", "claude": "", "antigravity"
 // automatic model without waiting for an ignition. Otherwise the list is only
 // read for an ignition. A failed read is retried with the next poll.
 func (e *Engine) maybeReadModels(ctx context.Context, cfg config.Config, pollDue bool) {
-	if cfg.ModelsAPIKey == "" {
+	source := ""
+	if cfg.ModelsAPIKey != "" {
+		source = cfg.CPABaseURL + "\x00" + cfg.ModelsAPIKey
+	}
+	if source != e.modelsSource {
+		// Models and errors of another CPA or key do not describe the next
+		// ignition.
+		e.modelsSource, e.modelsTried, e.modelsOK = source, false, false
+		e.mu.Lock()
+		e.nextModels, e.modelsErr = nil, ""
+		e.mu.Unlock()
+	}
+	if source == "" || e.modelsOK || (e.modelsTried && !pollDue) {
 		return
 	}
-	source := cfg.CPABaseURL + "\x00" + cfg.ModelsAPIKey
-	if source == e.modelsRead || (source == e.modelsTried && !pollDue) {
-		return
-	}
-	e.modelsTried = source
+	e.modelsTried = true
 	available, err := e.lister.List(ctx, cfg.CPABaseURL, cfg.ModelsAPIKey)
 	e.noteModels(available, err)
-	if err == nil {
-		e.modelsRead = source
-	}
+	e.modelsOK = err == nil
 }
 
 // noteModels records the result of reading the model list and the first

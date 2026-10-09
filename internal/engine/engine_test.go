@@ -348,6 +348,30 @@ func TestIgnitionFallsBackWhenProviderRefusesNewestModel(t *testing.T) {
 	if ts := e.state.Target("claude:3:claude:main"); ts.LastModel != "claude-3-5-haiku-20241022" || ts.ConsecutiveFailures != 0 {
 		t.Fatalf("target state %+v", ts)
 	}
+	var noted *Event
+	for i, ev := range e.Status().Events {
+		if ev.Kind == "model_refused" {
+			noted = &e.Status().Events[i]
+		}
+	}
+	if noted == nil || noted.Params["model"] != "claude-haiku-4-5-20251001" || noted.Params["fallback"] != "claude-3-5-haiku-20241022" || noted.Params["hours"] != "24" {
+		t.Fatalf("refusal event %+v", noted)
+	}
+
+	var target target
+	for _, candidate := range e.collectTargets(cfg) {
+		if candidate.group.Key == "claude:3:claude:main" {
+			target = candidate
+		}
+	}
+	c.add(23 * time.Hour)
+	if model, _, err := e.execute(ctx, cfg, target); err != nil || model != "claude-3-5-haiku-20241022" || len(h.executed) != 3 {
+		t.Fatalf("a refused model is skipped for a day: %s %v %+v", model, err, h.executed)
+	}
+	c.add(time.Hour)
+	if model, _, err := e.execute(ctx, cfg, target); err != nil || model != "claude-haiku-4-5-20251001" {
+		t.Fatalf("a refused model is tried again after a day: %s %v", model, err)
+	}
 }
 
 func TestIgnitionFallsBackOnlyOnceForRefusedModels(t *testing.T) {
@@ -366,8 +390,17 @@ func TestIgnitionFallsBackOnlyOnceForRefusedModels(t *testing.T) {
 	if len(h.executed) != 2 {
 		t.Fatalf("want two attempts, got %+v", h.executed)
 	}
-	if ts := e.state.Target("claude:3:claude:main"); ts.CircuitOpenUntilEpoch == 0 {
+	ts := e.state.Target("claude:3:claude:main")
+	if ts.CircuitOpenUntilEpoch == 0 {
 		t.Fatalf("a second refusal must pause the target: %+v", ts)
+	}
+	if !strings.Contains(ts.LastError, "此前 claude-haiku-4-5-20251001 被上游拒绝（状态码 400）") {
+		t.Fatalf("the error must name the first refused model: %s", ts.LastError)
+	}
+	for _, ev := range e.Status().Events {
+		if ev.Kind == "model_refused" {
+			t.Fatalf("a refusal without a working fallback is not remembered: %+v", ev)
+		}
 	}
 }
 
@@ -398,7 +431,7 @@ func TestModelListIsReadAfterStartAndKeyChange(t *testing.T) {
 	reads := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		reads++
-		if reads == 1 {
+		if reads == 1 || r.Header.Get("Authorization") == "Bearer bad" {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			return
 		}
@@ -429,6 +462,22 @@ func TestModelListIsReadAfterStartAndKeyChange(t *testing.T) {
 	e.maybeReadModels(ctx, cfg, false)
 	if reads != 3 {
 		t.Fatalf("a new models key is read at once, got %d reads", reads)
+	}
+
+	cfg.ModelsAPIKey = "bad"
+	e.maybeReadModels(ctx, cfg, false)
+	if status := e.Status(); reads != 4 || status.ModelsError == "" || len(status.NextModels) != 0 {
+		t.Fatalf("a failing key shows no models: reads %d, %+v", reads, status)
+	}
+	cfg.ModelsAPIKey = "k2"
+	e.maybeReadModels(ctx, cfg, false)
+	if status := e.Status(); status.ModelsError != "" || status.NextModels["claude"] != "claude-haiku-5-5" {
+		t.Fatalf("restoring a working key reads it again: %+v", status)
+	}
+	cfg.ModelsAPIKey = ""
+	e.maybeReadModels(ctx, cfg, true)
+	if status := e.Status(); status.ModelsError != "" || len(status.NextModels) != 0 {
+		t.Fatalf("removing the key clears the models: %+v", status)
 	}
 }
 
