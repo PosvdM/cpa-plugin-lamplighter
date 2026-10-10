@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/config"
@@ -88,43 +89,47 @@ func (e *Engine) loadRecentEvents() {
 type command struct {
 	kind  string
 	arg   string
-	reply chan error
-	// results receives the outcome per channel of test_notify.
-	results *[]ChannelResult
+	reply chan commandReply
+}
+
+type commandReply struct {
+	err error
+	// results is the outcome per channel of test_notify.
+	results []ChannelResult
 }
 
 // ErrNotRunning means the background loop has not started yet.
 var ErrNotRunning = errors.New("Lamplighter 尚未就绪：CPA 启动后约 20 秒开始运行，或插件已在配置中停用")
 
 func (e *Engine) send(kind, arg string) error {
-	return e.dispatch(command{kind: kind, arg: arg})
+	return e.dispatch(kind, arg).err
 }
 
-// dispatch hands cmd to the loop and waits for its reply.
-func (e *Engine) dispatch(cmd command) error {
+// dispatch hands a command to the loop and waits for its reply.
+func (e *Engine) dispatch(kind, arg string) commandReply {
 	e.mu.Lock()
 	ready := e.running && e.enabled
 	e.mu.Unlock()
 	if !ready {
-		return ErrNotRunning
+		return commandReply{err: ErrNotRunning}
 	}
-	cmd.reply = make(chan error, 1)
+	cmd := command{kind: kind, arg: arg, reply: make(chan commandReply, 1)}
 	timer := time.NewTimer(commandTimeout)
 	defer timer.Stop()
 	select {
 	case e.cmdCh <- cmd:
 	case <-timer.C:
-		return errors.New("后台任务繁忙，请稍后再试")
+		return commandReply{err: errors.New("后台任务繁忙，请稍后再试")}
 	case <-e.stopCh:
-		return ErrNotRunning
+		return commandReply{err: ErrNotRunning}
 	}
 	select {
-	case err := <-cmd.reply:
-		return err
+	case reply := <-cmd.reply:
+		return reply
 	case <-timer.C:
-		return errors.New("操作超时")
+		return commandReply{err: errors.New("操作超时")}
 	case <-e.stopCh:
-		return ErrNotRunning
+		return commandReply{err: ErrNotRunning}
 	}
 }
 
@@ -150,19 +155,19 @@ type ChannelResult struct {
 // TestNotify sends a test notification to each configured channel. A
 // webhook whose settings were not applied is reported as failed.
 func (e *Engine) TestNotify() ([]ChannelResult, error) {
-	var results []ChannelResult
-	err := e.dispatch(command{kind: "test_notify", results: &results})
-	return results, err
+	reply := e.dispatch("test_notify", "")
+	return reply.results, reply.err
 }
 
 func (e *Engine) runCommand(ctx context.Context, cmd command) {
 	defer func() {
 		if r := recover(); r != nil {
-			cmd.reply <- fmt.Errorf("内部错误：%v", r)
+			cmd.reply <- commandReply{err: fmt.Errorf("内部错误：%v", r)}
 		}
 	}()
 	cfg := e.config()
 	var err error
+	var results []ChannelResult
 	switch cmd.kind {
 	case "refresh":
 		e.poll(ctx, cfg, e.now(), cmd.arg, true)
@@ -184,7 +189,7 @@ func (e *Engine) runCommand(ctx context.Context, cmd command) {
 			}
 		}
 	case "test_notify":
-		*cmd.results, err = e.testNotify(ctx)
+		results, err = e.testNotify(ctx)
 	case "language":
 		lang := notify.NormalizeLang(cmd.arg)
 		e.mu.Lock()
@@ -200,10 +205,11 @@ func (e *Engine) runCommand(ctx context.Context, cmd command) {
 	}
 	e.refreshTargets(cfg)
 	e.saveState()
-	cmd.reply <- err
+	cmd.reply <- commandReply{err: err, results: results}
 }
 
-// testNotify sends the test message to each channel in turn.
+// testNotify sends the test message to all channels at once, so the test
+// takes as long as the slowest channel and stays within commandTimeout.
 func (e *Engine) testNotify(ctx context.Context) ([]ChannelResult, error) {
 	var results []ChannelResult
 	e.mu.Lock()
@@ -228,22 +234,34 @@ func (e *Engine) testNotify(ctx context.Context) ([]ChannelResult, error) {
 		Body:  notify.T(lang, "test_body"),
 		Level: notify.LevelActive,
 	}
-	for _, channel := range channels {
-		result := ChannelResult{Channel: channel.Name}
-		var err error
-		if webhook, ok := channel.Sender.(*notify.Webhook); ok {
-			result.Response, err = webhook.Deliver(ctx, msg)
-			result.Unchecked = !webhook.Checked()
-		} else {
-			err = channel.Sender.Send(ctx, msg)
-		}
-		result.OK = err == nil
-		if err != nil {
-			result.Error = err.Error()
-		}
-		results = append(results, result)
+	tested := make([]ChannelResult, len(channels))
+	var wg sync.WaitGroup
+	for i, channel := range channels {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			result := ChannelResult{Channel: channel.Name}
+			defer func() {
+				if r := recover(); r != nil {
+					result.OK, result.Error = false, fmt.Sprintf("内部错误：%v", r)
+				}
+				tested[i] = result
+			}()
+			var err error
+			if webhook, ok := channel.Sender.(*notify.Webhook); ok {
+				result.Response, err = webhook.Deliver(ctx, msg)
+				result.Unchecked = !webhook.Checked()
+			} else {
+				err = channel.Sender.Send(ctx, msg)
+			}
+			result.OK = err == nil
+			if err != nil {
+				result.Error = err.Error()
+			}
+		}()
 	}
-	return results, nil
+	wg.Wait()
+	return append(tested, results...), nil
 }
 
 // WindowStatus is one window on the status page.

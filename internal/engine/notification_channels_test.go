@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/config"
+	"github.com/PosvdM/cpa-plugin-lamplighter/internal/notify"
 )
 
 func channelEngine(t *testing.T, yaml string) *Engine {
@@ -62,5 +64,22 @@ func TestInvalidWebhookIsReported(t *testing.T) {
 	results, err := e.testNotify(context.Background())
 	if err != nil || len(results) != 1 || results[0].OK || results[0].Channel != "Webhook" {
 		t.Fatalf("results %+v, err %v", results, err)
+	}
+
+	fixed, _ := config.Parse([]byte("webhook:\n  url: https://example.com/\n  body: '{{text}}'\n"))
+	if sameRuntimeConfig(fixed, e.config()) {
+		t.Fatal("a webhook change must rebuild the channels")
+	}
+	e.Configure(fixed, nil)
+	e.applyRuntimeConfig(fixed)
+	if status := e.Status(); status.NotifyError != "" {
+		t.Fatalf("notify_error stays after the fix: %q", status.NotifyError)
+	}
+}
+
+func TestTestNotifyWithoutChannels(t *testing.T) {
+	e := channelEngine(t, "")
+	if _, err := e.testNotify(context.Background()); !errors.Is(err, notify.ErrNotConfigured) {
+		t.Fatalf("err %v", err)
 	}
 }

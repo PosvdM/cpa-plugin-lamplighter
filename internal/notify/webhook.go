@@ -48,7 +48,7 @@ func NewWebhook(cfg config.Webhook) (*Webhook, error) {
 	if cfg.URL == "" {
 		return nil, nil
 	}
-	w := &Webhook{URL: cfg.URL, Method: cfg.Method, Headers: cfg.Headers, Body: cfg.Body, SuccessJSON: cfg.SuccessJSON}
+	w := &Webhook{URL: cfg.URL, Method: cfg.Method, Body: cfg.Body, SuccessJSON: cfg.SuccessJSON}
 	if w.Method == "" {
 		w.Method = http.MethodPost
 	}
@@ -65,10 +65,23 @@ func NewWebhook(cfg config.Webhook) (*Webhook, error) {
 		return nil, errors.New("webhook.url 必须是 http:// 或 https:// 开头的地址")
 	}
 	texts := []string{w.URL, w.Body}
-	for name, value := range w.Headers {
+	// Values are trimmed because a YAML block scalar ends with a line break,
+	// which Go refuses to send in a header.
+	w.Headers = make(map[string]string, len(cfg.Headers))
+	seen := map[string]bool{}
+	for name, value := range cfg.Headers {
 		if !headerNamePattern.MatchString(name) {
 			return nil, fmt.Errorf("webhook.headers 中的名称不合法：%q", name)
 		}
+		if seen[strings.ToLower(name)] {
+			return nil, fmt.Errorf("webhook.headers 中的 %s 重复（名称不区分大小写）", name)
+		}
+		seen[strings.ToLower(name)] = true
+		value = strings.TrimSpace(value)
+		if strings.ContainsFunc(value, func(r rune) bool { return (r < 0x20 && r != '\t') || r == 0x7f }) {
+			return nil, fmt.Errorf("webhook.headers 中 %s 的值含有换行或控制字符", name)
+		}
+		w.Headers[name] = value
 		texts = append(texts, value)
 	}
 	for _, text := range texts {
@@ -111,6 +124,19 @@ func (w *Webhook) Checked() bool { return len(w.SuccessJSON) > 0 }
 func (w *Webhook) Send(ctx context.Context, msg Message) error {
 	_, err := w.Deliver(ctx, msg)
 	return err
+}
+
+// payload is the built-in JSON message, sent when webhook.body is empty.
+type payload struct {
+	Source   string `json:"source"`
+	Kind     string `json:"kind"`
+	Title    string `json:"title"`
+	Body     string `json:"body"`
+	Text     string `json:"text"`
+	URL      string `json:"url"`
+	Priority string `json:"priority"`
+	Label    string `json:"label"`
+	Time     string `json:"time"`
 }
 
 // Deliver sends msg and returns the start of the response, with secrets
@@ -204,30 +230,31 @@ func (w *Webhook) values(msg Message) map[string]string {
 	}
 }
 
-// defaultBody is the JSON message sent when webhook.body is empty.
+// defaultBody is the built-in JSON message.
 func defaultBody(values map[string]string) string {
-	payload := map[string]string{"source": "lamplighter"}
-	for _, name := range Placeholders {
-		payload[name] = values[name]
-	}
-	raw, _ := json.Marshal(payload)
+	raw, _ := json.Marshal(payload{
+		Source: "lamplighter", Kind: values["kind"], Title: values["title"], Body: values["body"], Text: values["text"],
+		URL: values["url"], Priority: values["priority"], Label: values["label"], Time: values["time"],
+	})
 	return string(raw)
 }
 
-// contentType is the Content-Type header when set, otherwise JSON for a body
-// that starts with { or [ outside a placeholder and plain text for anything
-// else.
+// jsonTemplate reports whether body is JSON once every placeholder is
+// filled with a word. Placeholders in a JSON body sit inside quotes, so text
+// such as "[Lamplighter] {{text}}" stays plain text.
+func jsonTemplate(body string) bool {
+	return json.Valid([]byte(placeholderPattern.ReplaceAllString(body, "x")))
+}
+
+// contentType is the Content-Type header when set, otherwise JSON for an
+// empty or JSON body and plain text for anything else.
 func (w *Webhook) contentType() string {
 	for name, value := range w.Headers {
 		if strings.EqualFold(name, "Content-Type") {
 			return value
 		}
 	}
-	if strings.TrimSpace(w.Body) == "" {
-		return "application/json; charset=utf-8"
-	}
-	body := strings.TrimSpace(placeholderPattern.ReplaceAllString(w.Body, ""))
-	if strings.HasPrefix(body, "{") || strings.HasPrefix(body, "[") {
+	if strings.TrimSpace(w.Body) == "" || jsonTemplate(w.Body) {
 		return "application/json; charset=utf-8"
 	}
 	return "text/plain; charset=utf-8"
@@ -265,8 +292,9 @@ func fill(template string, values map[string]string, escape func(string) string)
 }
 
 // secrets returns the parts of the settings that may be keys or tokens: the
-// URL, its longer path segments and query values, and the header values and
-// their longer words.
+// URL, its longer path segments and query values, the header values and
+// their longer words, and the longer strings of a JSON body, such as an
+// ntfy topic or a Telegram chat ID.
 func (w *Webhook) secrets() []string {
 	found := []string{w.URL}
 	add := func(value string) {
@@ -289,6 +317,25 @@ func (w *Webhook) secrets() []string {
 		for _, word := range strings.Fields(value) {
 			add(word)
 		}
+	}
+	var body any
+	if json.Unmarshal([]byte(w.Body), &body) == nil {
+		var walk func(any)
+		walk = func(value any) {
+			switch v := value.(type) {
+			case string:
+				add(v)
+			case []any:
+				for _, item := range v {
+					walk(item)
+				}
+			case map[string]any:
+				for _, item := range v {
+					walk(item)
+				}
+			}
+		}
+		walk(body)
 	}
 	// Longer values first, so a token inside the URL goes with the URL.
 	sort.Slice(found, func(i, j int) bool { return len(found[i]) > len(found[j]) })

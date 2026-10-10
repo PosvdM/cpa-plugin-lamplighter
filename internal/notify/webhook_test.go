@@ -7,11 +7,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/config"
+	"github.com/PosvdM/cpa-plugin-lamplighter/internal/store"
 )
 
 // webhookFromYAML builds a webhook the way the plugin does, from the YAML
@@ -239,5 +241,113 @@ func TestFanoutDeliversWhenOneChannelWorks(t *testing.T) {
 
 	if err := (&Fanout{}).Send(context.Background(), testMessage); !errors.Is(err, ErrNotConfigured) {
 		t.Fatalf("no channel: %v", err)
+	}
+}
+
+func TestWebhookContentTypeDetection(t *testing.T) {
+	server, got := captureServer(t, 200, "")
+	w, err := webhookFromYAML(t, "webhook:\n  url: "+server.URL+"\n  body: '[Lamplighter] {{text}}'\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Send(context.Background(), testMessage); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(got.header.Get("Content-Type"), "text/plain") || got.body != "[Lamplighter] "+testMessage.Title+"\n"+testMessage.Body {
+		t.Fatalf("plain text with a bracket: %q %q", got.header.Get("Content-Type"), got.body)
+	}
+
+	w, err = webhookFromYAML(t, "webhook:\n  url: "+server.URL+"\n  headers:\n    content-type: application/x-www-form-urlencoded\n  body: 'title={{title}}&label={{label}}'\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Send(context.Background(), testMessage); err != nil {
+		t.Fatal(err)
+	}
+	form, err := url.ParseQuery(got.body)
+	if err != nil || form.Get("title") != testMessage.Title || form.Get("label") != testMessage.Label {
+		t.Fatalf("form body %q", got.body)
+	}
+}
+
+func TestWebhookDefaultBodyOrder(t *testing.T) {
+	server, got := captureServer(t, 200, "")
+	w, _ := webhookFromYAML(t, "webhook:\n  url: "+server.URL+"\n")
+	if err := w.Send(context.Background(), testMessage); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(got.body, `{"source":"lamplighter","kind":"quota","title":`) {
+		t.Fatalf("default body order %s", got.body)
+	}
+}
+
+func TestWebhookHeaderValues(t *testing.T) {
+	server, got := captureServer(t, 200, "")
+	// A block scalar ends with a line break, which is trimmed.
+	w, err := webhookFromYAML(t, "webhook:\n  url: "+server.URL+"\n  headers:\n    Authorization: |\n      Bearer x\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Send(context.Background(), testMessage); err != nil || got.header.Get("Authorization") != "Bearer x" {
+		t.Fatalf("header %q, err %v", got.header.Get("Authorization"), err)
+	}
+	for _, yaml := range []string{
+		"webhook:\n  url: https://example.com/\n  headers:\n    X-A: " + `"a\nb"` + "\n",
+		"webhook:\n  url: https://example.com/\n  headers:\n    X-A: a\n    x-a: b\n",
+	} {
+		if _, err := webhookFromYAML(t, yaml); err == nil {
+			t.Fatalf("header must be rejected:\n%s", yaml)
+		}
+	}
+}
+
+func TestWebhookHidesBodyStrings(t *testing.T) {
+	server, _ := captureServer(t, 200, `{"id":"x","topic":"my-private-topic","message":"t"}`)
+	w, _ := webhookFromYAML(t, "webhook:\n  url: "+server.URL+"\n  body: '{\"topic\":\"my-private-topic\",\"message\":\"{{body}}\"}'\n")
+	response, err := w.Deliver(context.Background(), testMessage)
+	if err != nil || strings.Contains(response, "my-private-topic") {
+		t.Fatalf("response %q, err %v", response, err)
+	}
+}
+
+func TestBarkRequestErrorHidesDeviceKey(t *testing.T) {
+	b := &Bark{URL: "https://api .day.app/device-key-123"}
+	err := b.Send(context.Background(), Message{Title: "t", Body: "b"})
+	if err == nil || strings.Contains(err.Error(), "device-key-123") {
+		t.Fatalf("err %v", err)
+	}
+}
+
+type panicSender struct{}
+
+func (panicSender) Send(context.Context, Message) error { panic("boom") }
+
+func TestFanoutRecoversFromPanics(t *testing.T) {
+	good := &channelSender{}
+	var failed []string
+	f := &Fanout{
+		Channels:       []Channel{{Name: "Bark", Sender: good}, {Name: "Webhook", Sender: panicSender{}}},
+		OnChannelError: func(_ Message, err error) { failed = append(failed, err.Error()) },
+	}
+	if err := f.Send(context.Background(), testMessage); err != nil || len(failed) != 1 || !strings.Contains(failed[0], "boom") {
+		t.Fatalf("err %v, failed %v", err, failed)
+	}
+}
+
+func TestAlertsWithOneWorkingChannelDoNotRepeat(t *testing.T) {
+	good, bad := &channelSender{}, &channelSender{err: errors.New("offline")}
+	failures := 0
+	f := &Fanout{
+		Channels:       []Channel{{Name: "Bark", Sender: good}, {Name: "Webhook", Sender: bad}},
+		OnChannelError: func(Message, error) { failures++ },
+	}
+	st := store.NewState()
+	now := time.Date(2026, 10, 4, 1, 0, 0, 0, time.UTC)
+	a := alerts(config.Default(), f)
+	a.ProcessGroup(context.Background(), st, group(80, 80, now), now)
+	a.ProcessGroup(context.Background(), st, group(30, 80, now), now)
+	a.ProcessGroup(context.Background(), st, group(30, 80, now), now)
+	if good.sent != 1 || failures != 1 {
+		t.Fatalf("working channel got %d messages, %d failures logged", good.sent, failures)
 	}
 }

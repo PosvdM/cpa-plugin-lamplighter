@@ -117,7 +117,7 @@
       test_notify: "测试推送", test_notify_hint: "按插件已应用的设置发送到所有已配置的渠道，修改设置后等几秒再测试",
       test_ok: "{0}：已发送", test_failed: "{0}：失败，{1}", test_response: "响应：{0}",
       test_unchecked: "只检查了 HTTP 状态码。飞书、钉钉、企业微信等服务失败时也返回 200，请到客户端确认是否收到，或设置成功条件。",
-      test_some_failed: "部分渠道测试失败",
+      test_some_failed: "部分渠道测试失败", test_all_failed: "测试推送失败",
       thresholds: "提醒阈值", remaining_le: "剩余 ≤",
       thresholds_hint: "额度降到每一档时推送一次，耗尽时再推送一次",
       window_5h: "5 小时窗口", window_7d: "7 天窗口",
@@ -240,7 +240,7 @@
       test_notify: "Send test", test_notify_hint: "Sends to every configured channel using the settings the plugin has applied; after changing a setting, wait a few seconds",
       test_ok: "{0}: sent", test_failed: "{0}: failed, {1}", test_response: "Response: {0}",
       test_unchecked: "Only the HTTP status was checked. Feishu, DingTalk, WeCom and similar services answer 200 on failure too, so check that the message arrived or set a success condition.",
-      test_some_failed: "A channel failed the test",
+      test_some_failed: "Some channels failed the test", test_all_failed: "The test notification failed",
       thresholds: "Alert thresholds", remaining_le: "Remaining ≤",
       thresholds_hint: "One notification when quota drops to each threshold, and one more when it runs out",
       window_5h: "5-hour window", window_7d: "7-day window",
@@ -1805,7 +1805,8 @@
       if (data.status) { status = data.status; renderStatus(); }
       renderTestResults(data.results);
       if (data.ok) toast(translate("test_sent"));
-      else toast(data.results ? translate("test_some_failed") : translate("failed", data.error));
+      else if (!data.results) toast(translate("failed", data.error));
+      else toast(translate(data.results.some(function (r) { return r.ok; }) ? "test_some_failed" : "test_all_failed"));
     }).catch(function (err) {
       if (err.message !== "unauthorized") toast(translate("failed", err.message));
     }).then(function () { button.disabled = false; });

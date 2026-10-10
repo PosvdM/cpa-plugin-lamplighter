@@ -36,9 +36,16 @@ func (f *Fanout) Send(ctx context.Context, msg Message) error {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := channel.Sender.Send(ctx, msg); err != nil {
-				errs[i] = fmt.Errorf("%s：%w", channel.Name, err)
+			defer func() {
+				if r := recover(); r != nil {
+					errs[i] = fmt.Errorf("%s：内部错误：%v", channel.Name, r)
+				}
+			}()
+			err := channel.Sender.Send(ctx, msg)
+			if err != nil && !strings.HasPrefix(err.Error(), channel.Name) {
+				err = fmt.Errorf("%s：%w", channel.Name, err)
 			}
+			errs[i] = err
 		}()
 	}
 	wg.Wait()

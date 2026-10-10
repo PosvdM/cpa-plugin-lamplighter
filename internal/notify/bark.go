@@ -90,7 +90,7 @@ func (b *Bark) Send(ctx context.Context, msg Message) error {
 	target := fmt.Sprintf("%s/%s/%s?%s", base, escape(msg.Title), escape(msg.Body), params.Encode())
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("Bark 请求无法创建: %w", unwrapURLError(err))
 	}
 	if b.UserAgent != "" {
 		req.Header.Set("User-Agent", b.UserAgent)

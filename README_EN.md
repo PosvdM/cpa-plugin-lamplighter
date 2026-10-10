@@ -216,7 +216,7 @@ The URL, headers and body can use placeholders:
 | `{{label}}` | Quota group, such as `ChatGPT#rk`; empty for notifications not about a quota group |
 | `{{time}}` | Time sent, in RFC 3339 format and the plugin time zone |
 
-Placeholders are escaped for where they appear: URL-encoded in the URL; JSON-string-escaped in a JSON body, so put them inside quotes; form-encoded in a form body; with line breaks replaced by spaces in headers. Without a `Content-Type` header, a body that starts with `{` or `[` is sent as JSON and anything else as plain text.
+Placeholders are escaped for where they appear: URL-encoded in the URL; JSON-string-escaped in a JSON body, so put them inside quotes; form-encoded in a form body; with line breaks replaced by spaces in headers. Without a `Content-Type` header, a body that is JSON (with placeholders inside quotes) is sent as JSON and anything else as plain text.
 
 Without `body`, the webhook receives this JSON:
 
