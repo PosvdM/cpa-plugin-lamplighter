@@ -51,7 +51,7 @@ func TestFeishuTemplate(t *testing.T) {
 		want string
 	}{
 		{"notice uses yellow", Message{Severity: SeverityNotice}, feishuYellow},
-		{"low uses orange", Message{Severity: SeverityLow}, feishuOrange},
+		{"low uses red", Message{Severity: SeverityLow}, feishuRed},
 		{"critical uses red", Message{Severity: SeverityCritical}, feishuRed},
 		{"exhausted uses red", Message{Severity: SeverityExhausted}, feishuRed},
 		{"recovery uses green", Message{Title: "✅ Claude · 5h 已恢复"}, feishuGreen},
@@ -77,6 +77,8 @@ func TestSplitField(t *testing.T) {
 		{"5h：100% | 04h | 10/04 13:50", "5h", "100% | 04h | 10/04 13:50", true},
 		{"7d：33% | 03d | 10/07 14:00", "7d", "33% | 03d | 10/07 14:00", true},
 		{"上周期剩余：5h 3% / 7d 12%", "上周期剩余", "5h 3% / 7d 12%", true},
+		{"error: <at id=all></at>", "", "", false},
+		{"HTTP 429: retry later", "", "", false},
 		{"Expected: 10/05 12:00", "Expected", "10/05 12:00", true},
 		// A URL must survive intact rather than split at the scheme colon.
 		{"https://didcodexreset.com/history/1.html", "", "", false},
@@ -116,7 +118,7 @@ func TestFeishuElementsGroupFields(t *testing.T) {
 		t.Errorf("expected is_short fields so they sit side by side")
 	}
 	text, _ := first["text"].(map[string]any)
-	if text["tag"] != "lark_md" || text["content"] != "**5h**\n100% | 04h | 10/04 13:50" {
+	if text["tag"] != "plain_text" || text["content"] != "5h\n100% | 04h | 10/04 13:50" {
 		t.Errorf("unexpected field content: %#v", text)
 	}
 }
@@ -243,12 +245,6 @@ func TestFeishuFallsBackToText(t *testing.T) {
 }
 
 func TestFeishuSendReportsErrors(t *testing.T) {
-	t.Run("not configured", func(t *testing.T) {
-		f := &Feishu{}
-		if err := f.Send(context.Background(), Message{}); !errors.Is(err, ErrFeishuNotConfigured) {
-			t.Fatalf("expected ErrFeishuNotConfigured, got %v", err)
-		}
-	})
 	t.Run("api error survives the fallback", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte(`{"code":19021,"msg":"sign match fail"}`))
@@ -274,7 +270,7 @@ func TestFeishuSendReportsErrors(t *testing.T) {
 
 func TestMultiSendFanout(t *testing.T) {
 	a, b := &fakeSender{}, &fakeSender{}
-	var senders Multi = Multi{a, b}
+	var senders Multi = Multi{Senders: []Sender{a, b}}
 	if err := senders.Send(context.Background(), Message{Title: "x"}); err != nil {
 		t.Fatalf("Send: %v", err)
 	}
@@ -285,10 +281,10 @@ func TestMultiSendFanout(t *testing.T) {
 
 func TestMultiKeepsGoingAfterFailure(t *testing.T) {
 	broken, healthy := &fakeSender{fail: true}, &fakeSender{}
-	var senders Multi = Multi{broken, healthy}
+	var senders Multi = Multi{Senders: []Sender{broken, healthy}}
 	err := senders.Send(context.Background(), Message{Title: "x"})
-	if err == nil {
-		t.Fatal("expected the failing channel to be reported")
+	if err != nil {
+		t.Fatalf("a healthy channel completes the delivery: %v", err)
 	}
 	if len(healthy.sent) != 1 {
 		t.Fatalf("a broken channel must not silence the healthy one, got %d", len(healthy.sent))
@@ -302,8 +298,7 @@ func TestMultiEmptyReportsNoChannel(t *testing.T) {
 	if err := senders.Send(context.Background(), Message{}); !errors.Is(err, ErrNoChannel) {
 		t.Fatalf("expected ErrNoChannel, got %v", err)
 	}
-	// A nil Multi (what Alerts holds when nothing was configured) behaves the
-	// same way, so the caller sees an error rather than a silent success.
+	// The zero value also keeps an undelivered alert pending.
 	var nilMulti Multi
 	if err := nilMulti.Send(context.Background(), Message{}); !errors.Is(err, ErrNoChannel) {
 		t.Fatalf("expected ErrNoChannel for a nil Multi, got %v", err)

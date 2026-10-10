@@ -73,7 +73,7 @@ Lamplighter 是用 Go 编写、以 `-buildmode=c-shared` 构建的 CPA 原生插
 
 ## 后台循环
 
-`engine.Engine` 用一个 goroutine 完成所有网络工作，避免查询、点火和通知交叉修改状态：
+`engine.Engine` 用一个 goroutine 调度查询、点火和通知，避免交叉修改状态；通知发送到各渠道时并发执行，全部结束后返回主循环：
 
 1. 插件注册后启动，先等 20 秒，让 CPA 加载凭证和执行器。
 2. 打开数据目录，取得 `instance.lock`。
@@ -218,11 +218,11 @@ CPA 本地冷却带有 `reset_seconds` 且不超过 10 分钟时（`ignite.Coold
 - 第一次看到某个窗口只记录基线，不推送。
 - 推送失败时不更新已通知等级，下一次检查会重试。
 
-`engine.notificationSenders` 按配置各建一个 sender：`bark_url` 非空时加上 `notify.Bark`，`feishu_webhook` 非空且通过 `validateFeishuWebhook`（必须是 http(s) 地址，路径含 `/hook/`）时加上 `notify.Feishu`。两者都没有时得到空的多渠道发送器，它返回 `ErrNoChannel`，告警保持待发。有多个渠道时逐个发送，一个渠道失败不影响其他渠道，但只有全部成功才更新已通知等级：部分成功时下一次重试会让已成功的渠道重复收到同一条通知。
+`engine.notificationSenders` 按配置建立 Bark 和飞书 sender。Webhook 必须是含主机名的 http(s) 地址，路径中 `/hook/` 后须有单段非空 token，不能含用户信息或 fragment。校验错误保留在发送器中，通过 Status 的 `notification_error` 和页面显示，测试推送也返回该错误。未配置渠道时返回 `ErrNoChannel`，告警保持待发。`notify.Multi` 并发发送，等待全部结束；任一渠道成功即更新已通知状态，其他渠道失败记为 `notify_partial` 事件，这条通知不再重试失败渠道；全部失败时保留待发状态。测试接口使用 `SendAll`，全部渠道成功才报告成功。渠道 goroutine 的 panic 转换为发送错误，状态和事件更新仍在引擎 goroutine 执行。
 
 Bark 请求为 `GET {bark_url}/{标题}/{正文}?group&level&icon&url`，标题和正文除 RFC 3986 非保留字符外全部百分号编码，返回 JSON 中 `code` 不为 200 视为失败。`icon` 默认使用仓库中的 `assets/logo.png`；配置中的 `bark_icon` 仍为旧默认值（CPA Management Center 图标）时，载入时替换为该默认值。
 
-飞书请求为 `POST {feishu_webhook}`，正文是 JSON：`msg_type` 为 `interactive` 的交互卡片，或卡片被拒时 `msg_type` 为 `text` 的纯文本。HTTP 状态码不在 2xx 内，或返回 JSON 的 `code` 不为 0，视为失败。卡片标题是 `plain_text`，标题栏颜色按等级取 `yellow`、`orange`、`red`、`green`；正文中形如 `标签：值` 且标签不超过 16 个字符（`feishuLabelMax`）的行渲染为并排字段，其余按普通文本，末尾是分隔线和内容为 `Lamplighter · MM/DD HH:MM` 的脚注。`feishu_secret` 为空时不签名，否则附加 Unix 秒的 `timestamp` 和 `sign`；`sign` 是对空内容做 HMAC-SHA256 再 Base64，HMAC 的密钥是 `timestamp + "\n" + secret`，与常见的 key 和 message 分工相反。
+飞书请求为 `POST {feishu_webhook}`，JSON 正文默认 `msg_type=interactive`。仅 HTTP 成功且业务 `code=9499` 明确拒绝请求内容时，以 `msg_type=text` 回退一次；超时、HTTP 错误、限流和签名错误直接返回。响应必须包含有效 `code`，0 表示成功。卡片标题、正文和字段都使用 `plain_text`；`feishuFieldLabels` 中的通知标签才渲染为并排字段，上游错误保持普通正文。notice 标题栏为黄，low、critical 和 exhausted 为红，恢复为绿，⚠️ 为橙。`Message.JumpURL` 的 http(s) 链接渲染为按钮，纯文本回退时追加链接。分隔线后是 `Lamplighter · MM/DD HH:MM` 脚注，每次请求只取一次时间，同时用于脚注和签名。`feishu_secret` 为空时不签名，否则附加 Unix 秒的 `timestamp` 和 `sign`；`sign` 是对空内容做 HMAC-SHA256 再 Base64，HMAC 的密钥是 `timestamp + "\n" + secret`。飞书错误在返回前去掉 `url.Error` 中的请求 URL，并清除错误文字中的 webhook、token 和签名密钥；HTTP 错误不保存响应正文。纯文本回退将 `<at` 替换为 `＜at`，防止上游错误中的 mention 标签触发通知。
 
 通知文字在 `internal/notify/text.go` 中，中文和英文各一列，按 `state.json` 的 `language` 选择。语言由管理页面上报：Bark 推送时没有打开的页面，所以使用最近一次上报的语言，没有上报过时使用中文。窗口名在通知中始终写作 `5h`、`7d`。Did Codex Reset 的跳转链接按语言指向中文版或英文版的历史页面。
 
@@ -242,7 +242,7 @@ Did Codex Reset 每 `poll_seconds` 秒（最少 300 秒，对齐时间边界）�
 | `history/YYYY-MM-DD.jsonl` | 按 UTC 日期分文件的额度样本和事件 |
 | `instance.lock` | 实例锁 |
 
-历史记录每行一个 JSON：样本为 `{"k":"s","t":秒,"g":额度组,"w":窗口,"r":剩余,"x":重置,"s":"active|passive"}`，事件为 `{"k":"e","t":秒,"g":额度组,"e":类型,"v":级别,"m":文本,"l":标签,"d":详情,"p":参数}`。`m` 和 `d` 是写给 CPA 日志的中文；`p` 是页面拼出事件文字所需的值：`ignite` 和 `ignite_manual` 为 `model`、`reset`，`ignite_failed` 为 `retry_seconds`、`error` 和可选的 `cooldown`，`ignite_paused` 为 `until`、`error`，`model_refused` 为 `model`、`fallback`、`hours`，`notify` 为 `title`，`notify_failed` 为 `title`、`error`，`cooldown_stale` 为 `until`，`codex_reset` 为 `count`；时间为 RFC 3339 UTC。主动样本每次都写；被动样本只在数值或重置时间变化时写，同一窗口每分钟最多一次，期间的新值暂存在 `pendingSamp`，满一分钟后写入。历史接口对超过 2 天的范围按 5 分钟、超过 8 天的范围按 30 分钟取每段最后一个样本。每个系列带有 `label`（含账号后缀，例如 `ChatGPT#rk`）和 `source_label`（不含后缀），页面按服务和 `source_label` 合并同一额度的多个账号。
+历史记录每行一个 JSON：样本为 `{"k":"s","t":秒,"g":额度组,"w":窗口,"r":剩余,"x":重置,"s":"active|passive"}`，事件为 `{"k":"e","t":秒,"g":额度组,"e":类型,"v":级别,"m":文本,"l":标签,"d":详情,"p":参数}`。`m` 和 `d` 是写给 CPA 日志的中文；`p` 是页面拼出事件文字所需的值：`ignite` 和 `ignite_manual` 为 `model`、`reset`，`ignite_failed` 为 `retry_seconds`、`error` 和可选的 `cooldown`，`ignite_paused` 为 `until`、`error`，`model_refused` 为 `model`、`fallback`、`hours`，`notify` 为 `title`，`notify_failed` 和 `notify_partial` 为 `title`、`error`，`cooldown_stale` 为 `until`，`codex_reset` 为 `count`；时间为 RFC 3339 UTC。主动样本每次都写；被动样本只在数值或重置时间变化时写，同一窗口每分钟最多一次，期间的新值暂存在 `pendingSamp`，满一分钟后写入。历史接口对超过 2 天的范围按 5 分钟、超过 8 天的范围按 30 分钟取每段最后一个样本。每个系列带有 `label`（含账号后缀，例如 `ChatGPT#rk`）和 `source_label`（不含后缀），页面按服务和 `source_label` 合并同一额度的多个账号。
 
 额度组 key 为 `<服务>:<auth_index>:<分组>`，例如 `codex:3:codex:main`、`claude:3:claude:seven-day-fable`、`antigravity:4:antigravity:gemini-models`。它同时是点火目标 ID。
 

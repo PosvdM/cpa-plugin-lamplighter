@@ -373,6 +373,7 @@ func (e *Engine) applyRuntimeConfig(cfg config.Config) {
 	if err != nil {
 		e.logf("warn", "通知渠道配置有误：%v", err)
 	}
+	senders.OnPartial = e.notifyPartial
 	e.alerts = &notify.Alerts{
 		Cfg:     cfg,
 		Lang:    e.language(),
@@ -389,7 +390,7 @@ func notificationSenders(cfg config.Config, version string) (notify.Multi, error
 	senders := notify.Multi{}
 	var errs []error
 	if cfg.BarkURL != "" {
-		senders = append(senders, &notify.Bark{
+		senders.Senders = append(senders.Senders, &notify.Bark{
 			URL:       cfg.BarkURL,
 			Group:     cfg.BarkGroup,
 			Icon:      cfg.BarkIcon,
@@ -401,7 +402,7 @@ func notificationSenders(cfg config.Config, version string) (notify.Multi, error
 		if err := validateFeishuWebhook(cfg.FeishuWebhook); err != nil {
 			errs = append(errs, err)
 		} else {
-			senders = append(senders, &notify.Feishu{
+			senders.Senders = append(senders.Senders, &notify.Feishu{
 				Webhook:   cfg.FeishuWebhook,
 				Secret:    cfg.FeishuSecret,
 				UserAgent: "cpa-plugin-lamplighter/" + version,
@@ -410,7 +411,8 @@ func notificationSenders(cfg config.Config, version string) (notify.Multi, error
 			})
 		}
 	}
-	return senders, errors.Join(errs...)
+	senders.ConfigError = errors.Join(errs...)
+	return senders, senders.ConfigError
 }
 
 // validateFeishuWebhook rejects the common misconfiguration of pasting
@@ -419,13 +421,13 @@ func notificationSenders(cfg config.Config, version string) (notify.Multi, error
 func validateFeishuWebhook(webhook string) error {
 	parsed, err := url.Parse(webhook)
 	if err != nil {
-		return fmt.Errorf("feishu_webhook 不是合法 URL：%w", err)
+		return errors.New("feishu_webhook 不是合法 URL")
 	}
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return fmt.Errorf("feishu_webhook 需要 http(s) 地址，收到 %q", parsed.Scheme)
+	if (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Hostname() == "" || parsed.User != nil || parsed.Fragment != "" {
+		return errors.New("feishu_webhook 需要包含主机名的 http(s) 地址，且不能含用户信息或 fragment")
 	}
-	if !strings.Contains(parsed.Path, "/hook/") {
-		return errors.New("feishu_webhook 看起来不是机器人地址（路径里没有 /hook/），请检查是否复制完整")
+	if _, token, ok := strings.Cut(parsed.Path, "/hook/"); !ok || token == "" || strings.Contains(token, "/") {
+		return errors.New("feishu_webhook 的路径须包含 /hook/ 和单段非空 token，请检查是否复制完整")
 	}
 	return nil
 }

@@ -11,14 +11,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 )
-
-// ErrFeishuNotConfigured means feishu_webhook is empty.
-var ErrFeishuNotConfigured = errors.New("未配置 feishu_webhook")
 
 // Card header colours accepted by Feishu. The mapping follows the same
 // thresholds the Management Center uses for quota.
@@ -30,9 +27,13 @@ const (
 	feishuRed    = "red"
 )
 
-// feishuLabelMax bounds how long the left half of a "label：value" line may
-// be before it is treated as prose instead of a field.
-const feishuLabelMax = 16
+// Fields use only labels produced by the notification builders. Unrecognised
+// lines, including upstream errors, remain prose.
+var feishuFieldLabels = map[string]bool{
+	"5h": true, "7d": true, "上周期剩余": true, "Left last cycle": true,
+	"预计": true, "Expected": true, "时间": true, "Time": true,
+	"置信度": true, "Confidence": true, "范围": true, "Plans": true,
+}
 
 // Feishu sends messages to a Feishu (Lark) custom bot webhook. Messages are
 // rendered as interactive cards; a card the bot refuses is retried as plain
@@ -50,31 +51,40 @@ type Feishu struct {
 
 // Send delivers msg to the webhook.
 func (f *Feishu) Send(ctx context.Context, msg Message) error {
-	webhook := strings.TrimSpace(f.Webhook)
-	if webhook == "" {
-		return ErrFeishuNotConfigured
-	}
-	cardErr := f.post(ctx, webhook, f.cardPayload(msg))
+	stamp := f.now()
+	cardErr := f.post(ctx, f.cardPayload(msg, stamp))
 	if cardErr == nil {
 		return nil
 	}
-	// A card Feishu will not render must not swallow the alert, so fall back
-	// to plain text before reporting failure.
-	if textErr := f.post(ctx, webhook, f.textPayload(msg)); textErr != nil {
-		return fmt.Errorf("飞书卡片推送失败（%v），纯文本回退也失败（%v）", cardErr, textErr)
+	var apiErr *feishuAPIError
+	// 9499 explicitly rejects the request body. Timeouts, HTTP failures,
+	// signatures and rate limits are not card-format failures.
+	if !errors.As(cardErr, &apiErr) || apiErr.Code != 9499 {
+		return cardErr
+	}
+	if textErr := f.post(ctx, f.textPayload(msg, f.now())); textErr != nil {
+		return fmt.Errorf("飞书卡片推送失败（%v），纯文本回退也失败: %w", cardErr, textErr)
 	}
 	return nil
 }
 
 // cardPayload builds the interactive card for msg.
-func (f *Feishu) cardPayload(msg Message) map[string]any {
+func (f *Feishu) cardPayload(msg Message, stamp time.Time) map[string]any {
 	elements := feishuElements(msg.Body)
+	if link := feishuJumpURL(msg.JumpURL); link != "" {
+		elements = append(elements, map[string]any{
+			"tag": "action", "actions": []any{map[string]any{
+				"tag": "button", "type": "default", "url": link,
+				"text": map[string]any{"tag": "plain_text", "content": "↗ didcodexreset.com"},
+			}},
+		})
+	}
 	elements = append(elements,
 		map[string]any{"tag": "hr"},
 		map[string]any{
 			"tag": "note",
 			"elements": []any{
-				map[string]any{"tag": "plain_text", "content": f.footer()},
+				map[string]any{"tag": "plain_text", "content": f.footer(stamp)},
 			},
 		},
 	)
@@ -88,19 +98,24 @@ func (f *Feishu) cardPayload(msg Message) map[string]any {
 			},
 			"elements": elements,
 		},
-	})
+	}, stamp)
 }
 
 // textPayload is the fallback used when the card is rejected.
-func (f *Feishu) textPayload(msg Message) map[string]any {
+func (f *Feishu) textPayload(msg Message, stamp time.Time) map[string]any {
 	text := msg.Title
 	if body := strings.TrimSpace(msg.Body); body != "" {
 		text += "\n" + body
 	}
+	if link := feishuJumpURL(msg.JumpURL); link != "" {
+		text += "\n" + link
+	}
 	return f.withAuth(map[string]any{
 		"msg_type": "text",
-		"content":  map[string]any{"text": text},
-	})
+		// Text messages also recognise Feishu mention tags. Keep upstream
+		// error text literal when a card falls back.
+		"content": map[string]any{"text": strings.ReplaceAll(text, "<at", "＜at")},
+	}, stamp)
 }
 
 // feishuTemplate picks the header colour. Messages built from quota carry an
@@ -109,9 +124,7 @@ func feishuTemplate(msg Message) string {
 	switch msg.Severity {
 	case SeverityNotice:
 		return feishuYellow
-	case SeverityLow:
-		return feishuOrange
-	case SeverityCritical, SeverityExhausted:
+	case SeverityLow, SeverityCritical, SeverityExhausted:
 		return feishuRed
 	}
 	switch {
@@ -155,7 +168,7 @@ func feishuElements(body string) []any {
 		}
 		fields = append(fields, map[string]any{
 			"is_short": true,
-			"text":     map[string]any{"tag": "lark_md", "content": "**" + label + "**\n" + value},
+			"text":     map[string]any{"tag": "plain_text", "content": label + "\n" + value},
 		})
 	}
 	flush()
@@ -165,12 +178,12 @@ func feishuElements(body string) []any {
 func divElement(content string) map[string]any {
 	return map[string]any{
 		"tag":  "div",
-		"text": map[string]any{"tag": "lark_md", "content": content},
+		"text": map[string]any{"tag": "plain_text", "content": content},
 	}
 }
 
 // splitField splits "5h：100% | 04h" into its two halves. It only accepts a
-// short label without path separators so URLs and prose stay intact.
+// known label so upstream errors and URLs stay intact.
 func splitField(line string) (string, string, bool) {
 	for _, sep := range []string{"：", ": "} {
 		idx := strings.Index(line, sep)
@@ -182,10 +195,7 @@ func splitField(line string) (string, string, bool) {
 		if label == "" || value == "" {
 			continue
 		}
-		if utf8.RuneCountInString(label) > feishuLabelMax {
-			continue
-		}
-		if strings.ContainsAny(label, "/\\@") {
+		if !feishuFieldLabels[label] {
 			continue
 		}
 		return label, value, true
@@ -193,12 +203,22 @@ func splitField(line string) (string, string, bool) {
 	return "", "", false
 }
 
-func (f *Feishu) footer() string {
-	now := time.Now
+func (f *Feishu) now() time.Time {
 	if f.Now != nil {
-		now = f.Now
+		return f.Now()
 	}
-	stamp := now()
+	return time.Now()
+}
+
+func feishuJumpURL(value string) string {
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Host == "" || parsed.User != nil || (parsed.Scheme != "https" && parsed.Scheme != "http") {
+		return ""
+	}
+	return value
+}
+
+func (f *Feishu) footer(stamp time.Time) string {
 	if f.Loc != nil {
 		stamp = stamp.In(f.Loc)
 	}
@@ -206,18 +226,13 @@ func (f *Feishu) footer() string {
 }
 
 // withAuth adds the signature fields when a secret is configured.
-func (f *Feishu) withAuth(payload map[string]any) map[string]any {
-	secret := strings.TrimSpace(f.Secret)
-	if secret == "" {
+func (f *Feishu) withAuth(payload map[string]any, stamp time.Time) map[string]any {
+	if f.Secret == "" {
 		return payload
 	}
-	now := time.Now
-	if f.Now != nil {
-		now = f.Now
-	}
-	timestamp := strconv.FormatInt(now().Unix(), 10)
+	timestamp := strconv.FormatInt(stamp.Unix(), 10)
 	payload["timestamp"] = timestamp
-	payload["sign"] = feishuSign(secret, timestamp)
+	payload["sign"] = feishuSign(f.Secret, timestamp)
 	return payload
 }
 
@@ -231,14 +246,45 @@ func feishuSign(secret, timestamp string) string {
 	return base64.StdEncoding.EncodeToString(mac.Sum(nil))
 }
 
-func (f *Feishu) post(ctx context.Context, webhook string, payload map[string]any) error {
+type feishuAPIError struct {
+	Code    int
+	Message string
+}
+
+func (e *feishuAPIError) Error() string {
+	return fmt.Sprintf("飞书返回 code=%d: %s", e.Code, e.Message)
+}
+
+// safeError removes both the request URL and any echoed secret before an
+// error can reach logs, history or the status endpoint.
+func (f *Feishu) safeError(err error) error {
+	var urlErr *url.Error
+	for errors.As(err, &urlErr) {
+		err = urlErr.Err
+	}
+	text := err.Error()
+	for _, secret := range []string{f.Webhook, f.Secret} {
+		if secret != "" {
+			text = strings.ReplaceAll(text, secret, "[redacted]")
+		}
+	}
+	if parsed, parseErr := url.Parse(f.Webhook); parseErr == nil {
+		parts := strings.Split(strings.TrimRight(parsed.Path, "/"), "/")
+		if last := parts[len(parts)-1]; last != "" {
+			text = strings.ReplaceAll(text, last, "[redacted]")
+		}
+	}
+	return errors.New(text)
+}
+
+func (f *Feishu) post(ctx context.Context, payload map[string]any) error {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, webhook, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, f.Webhook, bytes.NewReader(body))
 	if err != nil {
-		return err
+		return f.safeError(err)
 	}
 	req.Header.Set("Content-Type", "application/json; charset=utf-8")
 	if f.UserAgent != "" {
@@ -250,19 +296,25 @@ func (f *Feishu) post(ctx context.Context, webhook string, payload map[string]an
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("飞书请求失败: %w", err)
+		return fmt.Errorf("飞书请求失败: %w", f.safeError(err))
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+	if err != nil {
+		return fmt.Errorf("读取飞书响应失败: %w", f.safeError(err))
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("飞书 HTTP %d: %s", resp.StatusCode, truncate(string(raw), 200))
+		return fmt.Errorf("飞书 HTTP %d", resp.StatusCode)
 	}
 	var result struct {
 		Code *int   `json:"code"`
 		Msg  string `json:"msg"`
 	}
-	if json.Unmarshal(raw, &result) == nil && result.Code != nil && *result.Code != 0 {
-		return fmt.Errorf("飞书返回 code=%d: %s", *result.Code, truncate(result.Msg, 200))
+	if json.Unmarshal(raw, &result) != nil || result.Code == nil {
+		return errors.New("飞书响应缺少有效业务 code")
+	}
+	if *result.Code != 0 {
+		return &feishuAPIError{Code: *result.Code, Message: truncate(f.safeError(errors.New(result.Msg)).Error(), 200)}
 	}
 	return nil
 }

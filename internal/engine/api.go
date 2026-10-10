@@ -165,11 +165,12 @@ func (e *Engine) runCommand(ctx context.Context, cmd command) {
 			break
 		}
 		lang := e.language()
-		err = e.alerts.Sender.Send(ctx, notify.Message{
-			Title: notify.T(lang, "test_title"),
-			Body:  notify.T(lang, "test_body"),
-			Level: notify.LevelActive,
-		})
+		msg := notify.Message{Title: notify.T(lang, "test_title"), Body: notify.T(lang, "test_body"), Level: notify.LevelActive}
+		if sender, ok := e.alerts.Sender.(notify.Multi); ok {
+			err = sender.SendAll(ctx, msg)
+		} else {
+			err = e.alerts.Sender.Send(ctx, msg)
+		}
 	case "language":
 		lang := notify.NormalizeLang(cmd.arg)
 		e.mu.Lock()
@@ -225,14 +226,15 @@ type AccountStatus struct {
 
 // Status is the response of the status endpoint.
 type Status struct {
-	Version     string `json:"version"`
-	Running     bool   `json:"running"`
-	Enabled     bool   `json:"enabled"`
-	ConfigError string `json:"config_error,omitempty"`
-	LockError   string `json:"lock_error,omitempty"`
-	ModelsError string `json:"models_error,omitempty"`
-	ListError   string `json:"list_error,omitempty"`
-	DataDir     string `json:"data_dir"`
+	Version           string `json:"version"`
+	Running           bool   `json:"running"`
+	Enabled           bool   `json:"enabled"`
+	ConfigError       string `json:"config_error,omitempty"`
+	NotificationError string `json:"notification_error,omitempty"`
+	LockError         string `json:"lock_error,omitempty"`
+	ModelsError       string `json:"models_error,omitempty"`
+	ListError         string `json:"list_error,omitempty"`
+	DataDir           string `json:"data_dir"`
 	// Language is the notification language, "zh" or "en".
 	Language string `json:"language"`
 	// Timezone and UTCOffset describe the effective display time zone.
@@ -267,23 +269,30 @@ func (e *Engine) Status() Status {
 	if cfg.ModelsAPIKey != "" {
 		cfg.ModelsAPIKey = "已设置"
 	}
+	var notificationError string
+	if cfg.FeishuWebhook != "" {
+		if err := validateFeishuWebhook(e.cfg.FeishuWebhook); err != nil {
+			notificationError = err.Error()
+		}
+	}
 	status := Status{
-		Version:     e.version,
-		Running:     e.running,
-		Enabled:     e.enabled,
-		ConfigError: e.cfgErr,
-		LockError:   e.lockErr,
-		ModelsError: e.modelsErr,
-		NextModels:  maps.Clone(e.nextModels),
-		ListError:   e.pollErrs[""],
-		Language:    notify.NormalizeLang(e.lang),
-		DataDir:     e.dataDir,
-		Timezone:    e.cfg.Location().String(),
-		Now:         e.now().UTC(),
-		LastPoll:    e.lastPoll,
-		NextPoll:    e.nextPoll,
-		Config:      cfg,
-		Targets:     append([]TargetView{}, e.targets...),
+		Version:           e.version,
+		Running:           e.running,
+		Enabled:           e.enabled,
+		ConfigError:       e.cfgErr,
+		NotificationError: notificationError,
+		LockError:         e.lockErr,
+		ModelsError:       e.modelsErr,
+		NextModels:        maps.Clone(e.nextModels),
+		ListError:         e.pollErrs[""],
+		Language:          notify.NormalizeLang(e.lang),
+		DataDir:           e.dataDir,
+		Timezone:          e.cfg.Location().String(),
+		Now:               e.now().UTC(),
+		LastPoll:          e.lastPoll,
+		NextPoll:          e.nextPoll,
+		Config:            cfg,
+		Targets:           append([]TargetView{}, e.targets...),
 	}
 	_, status.UTCOffset = e.now().In(e.cfg.Location()).Zone()
 	creds := make([]*Cred, 0, len(e.creds))
@@ -525,6 +534,12 @@ func (e *Engine) notified(group string, msg notify.Message) {
 func (e *Engine) notifyFailed(group string, msg notify.Message, err error) {
 	e.addEventDetail("warn", "notify_failed", group, msg.Label, fmt.Sprintf("%s：%v", msg.Title, err),
 		fmt.Sprintf("推送失败 %s：%v", msg.Title, err), map[string]string{"title": msg.Title, "error": err.Error()})
+}
+
+// notifyPartial records failed channels after another channel delivered the alert.
+func (e *Engine) notifyPartial(msg notify.Message, err error) {
+	e.addEventDetail("warn", "notify_partial", "", msg.Label, fmt.Sprintf("部分渠道失败 %s：%v", msg.Title, err),
+		fmt.Sprintf("部分渠道失败 %s：%v", msg.Title, err), map[string]string{"title": msg.Title, "error": err.Error()})
 }
 
 // language returns the notification language.

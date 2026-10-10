@@ -45,14 +45,26 @@ func TestRegisterDeclaresCapabilities(t *testing.T) {
 	var reg struct {
 		SchemaVersion int `json:"schema_version"`
 		Metadata      struct {
-			Name    string
-			Version string
+			Name         string
+			Version      string
+			ConfigFields []struct {
+				Name string `json:"name"`
+			} `json:"ConfigFields"`
 		} `json:"metadata"`
 		Capabilities map[string]bool `json:"capabilities"`
 	}
 	json.Unmarshal(result(t, p.Handle("plugin.register", req)), &reg)
 	if reg.SchemaVersion != 6 || reg.Metadata.Name != "Lamplighter" || reg.Metadata.Version != "1.2.3" {
 		t.Fatalf("registration %+v", reg)
+	}
+	fields := map[string]bool{}
+	for _, field := range reg.Metadata.ConfigFields {
+		fields[field.Name] = true
+	}
+	for _, name := range []string{"feishu_webhook", "feishu_secret"} {
+		if !fields[name] {
+			t.Fatalf("registration missing %s: %+v", name, reg.Metadata.ConfigFields)
+		}
 	}
 	if !reg.Capabilities["management_api"] || !reg.Capabilities["usage_plugin"] {
 		t.Fatalf("capabilities %+v", reg.Capabilities)

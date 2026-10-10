@@ -103,7 +103,7 @@ Notifications use the Management Center language from the last time the manageme
 
 Title icons: 🟡 remaining fell to the first threshold (50% by default), 🔴 to the second threshold (20% by default) or below, ✅ recovered, ⏰ reset reminder, ⚠️ a problem that needs action, such as ignition paused or a CPA cooldown that outlasts the quota. Each body line shows the window, the remaining quota, the time until reset, and the reset time. The first time the plugin sees a quota window it only records the current level and sends nothing.
 
-Feishu receives an interactive card: the header is coloured by level (🟡 yellow, 🔴 red, ✅ green, ⚠️ orange), quota lines become side-by-side fields, and the footer is the send time. A card Feishu refuses is resent as plain text.
+Feishu receives an interactive card: the header is coloured by level (🟡 yellow, 🔴 red, ✅ green, ⚠️ orange), quota lines become side-by-side fields, and the footer is the send time. An explicit request-content rejection is resent as plain text; network, rate-limit and signature errors return directly. Did Codex Reset cards include a history-page button.
 
 ## Configuration
 
@@ -111,7 +111,7 @@ All settings live under `plugins.configs.lamplighter` in `config.yaml`, and can 
 
 | Key | Default | Description |
 | --- | --- | --- |
-| `bark_url` | empty | Bark push URL up to the device key; empty disables notifications |
+| `bark_url` | empty | Bark push URL up to the device key; empty disables Bark |
 | `bark_group` | `CPA` | Bark notification group |
 | `bark_icon` | Lamplighter logo | Notification icon |
 | `feishu_webhook` | empty | Feishu custom bot webhook URL; empty disables Feishu delivery |
@@ -132,7 +132,7 @@ All settings live under `plugins.configs.lamplighter` in `config.yaml`, and can 
 | `history_retention_days` | `40` | Days of quota history to keep |
 | `data_dir` | `data/lamplighter` in the plugin directory | State and history directory |
 
-Bark and the Feishu custom bot are separate channels. With both set, every notification goes to each of them and one failing channel does not stop the other; with neither set nothing is sent and alerts are kept until a channel is configured. The Bark URL comes from the Bark app. The Feishu URL comes from adding a custom bot under the group's bot settings and looks like `https://open.feishu.cn/open-apis/bot/v2/hook/...`; if signature verification was enabled there, put its key in `feishu_secret`.
+Bark and the Feishu custom bot are separate channels. With both set, notifications are sent concurrently. Any successful channel completes delivery; other failures become “Some channels failed” events and are not retried for that notification. When all channels fail, the alert stays pending for the next check. Test notifications require all channels to succeed; configuration errors also appear on the page. With neither set, nothing is sent and alerts are kept until a channel is configured. The Bark URL comes from the Bark app. The Feishu URL comes from adding a custom bot under the group's bot settings and looks like `https://open.feishu.cn/open-apis/bot/v2/hook/...`; if signature verification was enabled there, put its key in `feishu_secret`.
 
 Recovery notifications and reset reminders are set per window: `five_hour` for 5-hour windows and `seven_day` for 7-day windows.
 
@@ -205,7 +205,7 @@ The page shows:
 - the next ignition, last result and failure protection state of each quota group, with an "ignite now" button;
 - a quota chart for either the 5-hour quota, over the last 1, 3, 6, 12, 24 or 26 hours (6 by default), or the 7-day quota, over the last 1, 4, 8 or 15 days, one month (from this date last month), or 36 days (8 days by default). The top part has one colored band per service, colored like the quota bars, in the order Claude, ChatGPT, Gemini, Fable, Claude / GPT by default or by lowest remaining; a service with several accounts shows their total and expands into one row per account. The bottom part plots the selected row with its resets and ignition results;
 - recent events in columns for time, type, quota group and detail;
-- the settings form, with a test notification button in the notification settings. The test uses the settings the plugin has applied, so after changing the Bark URL, wait a few seconds before testing. An empty ignition model field shows the model the next ignition will use in its hint; for Antigravity, the model of the Gemini group. The model list is read when the plugin starts, when `cpa_base_url` or `models_api_key` changes and for every ignition, so a model newly listed by CPA shows after the next ignition, which already uses it.
+- the settings form, with a test notification button in the notification settings. The test uses the settings the plugin has applied, so after changing notification settings, wait for automatic saving before testing. An empty ignition model field shows the model the next ignition will use in its hint; for Antigravity, the model of the Gemini group. The model list is read when the plugin starts, when `cpa_base_url` or `models_api_key` changes and for every ignition, so a model newly listed by CPA shows after the next ignition, which already uses it.
 
 The page follows the language of the CPA Management Center: Chinese for Simplified or Traditional Chinese, English for every other language.
 
