@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/config"
+	"github.com/PosvdM/cpa-plugin-lamplighter/internal/quota"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/store"
 )
 
@@ -349,5 +350,89 @@ func TestAlertsWithOneWorkingChannelDoNotRepeat(t *testing.T) {
 	a.ProcessGroup(context.Background(), st, group(30, 80, now), now)
 	if good.sent != 1 || failures != 1 {
 		t.Fatalf("working channel got %d messages, %d failures logged", good.sent, failures)
+	}
+}
+
+func TestNoChannelTurnsNotificationsOff(t *testing.T) {
+	failures := 0
+	f := &Fanout{}
+	a := &Alerts{Cfg: config.Default(), Sender: f, OnError: func(Message, error) { failures++ }}
+	st := store.NewState()
+	now := time.Date(2026, 10, 4, 1, 0, 0, 0, time.UTC)
+	a.ProcessGroup(context.Background(), st, group(80, 80, now), now)
+	a.ProcessGroup(context.Background(), st, group(30, 80, now), now)
+	a.ProcessGroup(context.Background(), st, group(30, 80, now), now.Add(5*time.Minute))
+	if failures != 0 {
+		t.Fatalf("notifications are off, but %d failures were logged", failures)
+	}
+	// A channel set up later does not receive the alert dropped earlier.
+	good := &channelSender{}
+	f.Channels = []Channel{{Name: "Bark", Sender: good}}
+	a.ProcessGroup(context.Background(), st, group(30, 80, now), now.Add(10*time.Minute))
+	if good.sent != 0 {
+		t.Fatalf("old alert sent after a channel was set up")
+	}
+}
+
+func TestInvalidWebhookAloneFailsAndRetries(t *testing.T) {
+	failures := 0
+	f := &Fanout{Invalid: errors.New("Webhook 设置无效")}
+	a := &Alerts{Cfg: config.Default(), Sender: f, OnError: func(Message, error) { failures++ }}
+	st := store.NewState()
+	now := time.Date(2026, 10, 4, 1, 0, 0, 0, time.UTC)
+	a.ProcessGroup(context.Background(), st, group(80, 80, now), now)
+	a.ProcessGroup(context.Background(), st, group(30, 80, now), now)
+	good := &channelSender{}
+	f.Invalid, f.Channels = nil, []Channel{{Name: "Webhook", Sender: good}}
+	a.ProcessGroup(context.Background(), st, group(30, 80, now), now.Add(5*time.Minute))
+	if failures != 1 || good.sent != 1 {
+		t.Fatalf("failures %d, sent after the fix %d", failures, good.sent)
+	}
+}
+
+func TestNotificationsOffClearRecoveriesAndReminders(t *testing.T) {
+	cfg := config.Default()
+	cfg.RecoveryNotify.FiveHour = config.RecoveryAll
+	cfg.ResetReminder.FiveHour = config.ReminderAll
+	failures := 0
+	f := &Fanout{}
+	start := time.Date(2026, 10, 4, 1, 0, 0, 0, time.UTC)
+	reset := start.Add(time.Hour)
+	after := reset.Add(time.Minute)
+	// The same readings with a working channel send a reminder and a recovery.
+	run := func(a *Alerts, st *store.State) {
+		a.ProcessGroup(context.Background(), st, fiveHour(80, reset), start)
+		a.ProcessGroup(context.Background(), st, fiveHour(63, reset), reset.Add(-30*time.Minute))
+		a.ProcessGroup(context.Background(), st, fiveHour(100, after.Add(5*time.Hour)), after)
+	}
+	control := &fakeSender{}
+	run(alerts(cfg, control), store.NewState())
+	if len(control.sent) != 2 {
+		t.Fatalf("control run sent %+v", control.sent)
+	}
+
+	a := &Alerts{Cfg: cfg, Sender: f, OnError: func(Message, error) { failures++ }}
+	st := store.NewState()
+	run(a, st)
+	ws := st.Group("g").Windows[quota.WindowFiveHour]
+	if failures != 0 || ws.PendingRecovery != nil || ws.ResetNotice1hFor == "" {
+		t.Fatalf("failures %d, pending %+v, reminder for %q", failures, ws.PendingRecovery, ws.ResetNotice1hFor)
+	}
+	good := &channelSender{}
+	f.Channels = []Channel{{Name: "Bark", Sender: good}}
+	a.ProcessGroup(context.Background(), st, fiveHour(100, after.Add(5*time.Hour)), after.Add(5*time.Minute))
+	if good.sent != 0 {
+		t.Fatal("a recovery from while notifications were off was sent later")
+	}
+}
+
+func TestResetFeedKeepsRecordsWhileNotificationsAreOff(t *testing.T) {
+	st := store.NewState()
+	if sent := ProcessResetRecords(context.Background(), st, records(), true, &Fanout{}, time.UTC, LangZH, resetNow); sent != 0 {
+		t.Fatalf("sent %d with notifications off", sent)
+	}
+	sender := &fakeSender{}
+	if sent := ProcessResetRecords(context.Background(), st, records(), true, sender, time.UTC, LangZH, resetNow); sent != 1 {
+		t.Fatalf("the pending schedule must go out once a channel is set up, sent %d", sent)
 	}
 }

@@ -11,6 +11,7 @@ import (
 
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/config"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/notify"
+	"github.com/PosvdM/cpa-plugin-lamplighter/internal/store"
 )
 
 func channelEngine(t *testing.T, yaml string) *Engine {
@@ -81,5 +82,39 @@ func TestTestNotifyWithoutChannels(t *testing.T) {
 	e := channelEngine(t, "")
 	if _, err := e.testNotify(context.Background()); !errors.Is(err, notify.ErrNotConfigured) {
 		t.Fatalf("err %v", err)
+	}
+}
+
+func TestInvalidWebhookFailsAlertsUnlessBarkWorks(t *testing.T) {
+	msg := notify.Message{Title: "t", Body: "b"}
+	e := channelEngine(t, "webhook:\n  url: https://example.com/\n  body: '{{nope}}'\n")
+	if err := e.alerts.Sender.Send(context.Background(), msg); err == nil || errors.Is(err, notify.ErrNotConfigured) {
+		t.Fatalf("an invalid webhook alone must fail, not turn notifications off: %v", err)
+	}
+
+	bark := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"code":200}`))
+	}))
+	defer bark.Close()
+	e = channelEngine(t, "bark_url: "+bark.URL+"/key\nwebhook:\n  url: https://example.com/\n  body: '{{nope}}'\n")
+	if err := e.alerts.Sender.Send(context.Background(), msg); err != nil {
+		t.Fatalf("Bark delivers next to an invalid webhook: %v", err)
+	}
+}
+
+func TestStaleCooldownWithNotificationsOff(t *testing.T) {
+	e := channelEngine(t, "")
+	now := e.now()
+	e.state = store.NewState()
+	e.creds = map[string]*Cred{"1": {AuthIndex: "1", Provider: "claude", Unavailable: true, CooldownUntil: now.Add(72 * time.Hour)}}
+	group := claudeGroup(now, 100, 100, now.Add(7*24*time.Hour))
+	e.groups = map[string]*GroupView{group.Key: &group}
+	e.checkCooldowns(context.Background(), e.config())
+	kinds := map[string]int{}
+	for _, ev := range e.Status().Events {
+		kinds[ev.Kind]++
+	}
+	if kinds["cooldown_stale"] != 1 || kinds["notify_failed"] != 0 {
+		t.Fatalf("events %v", kinds)
 	}
 }

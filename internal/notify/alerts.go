@@ -2,6 +2,7 @@ package notify
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -339,11 +340,16 @@ func renewed(old *store.WindowState, w quota.Window) bool {
 	return w.Remaining-old.Remaining >= RecoveryJump
 }
 
+// send reports whether msg is done with: delivered, or dropped because
+// notifications are off. Dropped messages update the baseline like
+// delivered ones, so setting up a channel later does not send old alerts.
 func (a *Alerts) send(ctx context.Context, msg Message) bool {
 	if a.Sender == nil {
 		return false
 	}
-	if err := a.Sender.Send(ctx, msg); err != nil {
+	if err := a.Sender.Send(ctx, msg); errors.Is(err, ErrNotConfigured) {
+		return true
+	} else if err != nil {
 		if a.OnError != nil {
 			a.OnError(msg, err)
 		}

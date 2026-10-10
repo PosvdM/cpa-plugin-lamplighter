@@ -48,7 +48,8 @@ type Sender interface {
 	Send(ctx context.Context, msg Message) error
 }
 
-// ErrNotConfigured means neither bark_url nor webhook.url is set.
+// ErrNotConfigured means neither bark_url nor webhook.url is set, which turns
+// notifications off: callers drop the message without logging a failure.
 var ErrNotConfigured = errors.New("未配置推送渠道（bark_url 或 webhook.url）")
 
 // Bark sends messages to a Bark server.

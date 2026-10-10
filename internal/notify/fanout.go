@@ -20,14 +20,22 @@ type Channel struct {
 // channels that already did. The failed channels go to OnChannelError.
 type Fanout struct {
 	Channels []Channel
+	// Invalid is why a configured channel could not be built. Without any
+	// other channel, Send returns it, so the message counts as failed and is
+	// retried once the settings are fixed.
+	Invalid error
 	// OnChannelError runs on the caller's goroutine for each channel that
 	// failed while another one delivered the message.
 	OnChannelError func(msg Message, err error)
 }
 
 // Send delivers msg to all channels. It fails only when every channel failed.
+// Without channels it returns ErrNotConfigured: notifications are off.
 func (f *Fanout) Send(ctx context.Context, msg Message) error {
 	if len(f.Channels) == 0 {
+		if f.Invalid != nil {
+			return f.Invalid
+		}
 		return ErrNotConfigured
 	}
 	errs := make([]error, len(f.Channels))
