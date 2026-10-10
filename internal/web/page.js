@@ -158,7 +158,7 @@
       last_poll: "上次查询 {0}（{1}）", next_poll: "下次 {0}（{1}）",
       config_error: "配置无法解析，仍在使用上一份配置：{0}",
       models_error: "模型列表不可用：{0}",
-      no_channel: "未设置 Bark 推送地址或 Webhook 地址，通知不会发送。",
+      notify_off: "未设置 Bark 推送地址或 Webhook 地址，通知已关闭。",
       notify_error: "Webhook 设置无效，未启用：{0}",
       no_models_key: "未设置模型列表 API key，自动点火无法选择模型。",
       remaining_aria: "{0} {1} 剩余",
@@ -281,7 +281,7 @@
       last_poll: "last query {0} ({1})", next_poll: "next {0} ({1})",
       config_error: "The config cannot be parsed; the previous config stays in use: {0}",
       models_error: "Model list unavailable: {0}",
-      no_channel: "No Bark push URL or webhook URL is set, so no notifications are sent.",
+      notify_off: "No Bark push URL or webhook URL is set, so notifications are off.",
       notify_error: "The webhook settings are invalid, so the webhook is off: {0}",
       no_models_key: "No model list API key is set, so ignition cannot pick a model.",
       remaining_aria: "{0} {1} remaining",
@@ -583,9 +583,9 @@
     if (status.list_error) box.appendChild(notice(status.list_error));
     if (status.models_error) box.appendChild(notice(translate("models_error", status.models_error)));
     if (status.notify_error) box.appendChild(notice(translate("notify_error", status.notify_error)));
-    if (status.config && !status.config.bark_url && !(status.config.webhook && status.config.webhook.url) && !status.notify_error) {
-      box.appendChild(notice(translate("no_channel")));
-    }
+    // No channel is how notifications are turned off, so it is a hint in the
+    // settings rather than a notice.
+    $("notify-off").hidden = !(status.config && !status.config.bark_url && !(status.config.webhook && status.config.webhook.url));
     if (status.config && status.config.ignition && status.config.ignition.enabled && !status.config.models_api_key) {
       box.appendChild(notice(translate("no_models_key")));
     }
@@ -1849,6 +1849,7 @@
     if (media.addEventListener) media.addEventListener("change", function () { applyTheme(); renderChart(); });
   }
 
+  if (parentRoot()) document.documentElement.classList.add("embedded");
   applyTheme();
   applyLanguage();
   watchParent();

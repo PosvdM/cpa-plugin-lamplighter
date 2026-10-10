@@ -129,6 +129,8 @@ All settings live under `plugins.configs.lamplighter` in `config.yaml`, and can 
 | `history_retention_days` | `40` | Days of quota history to keep |
 | `data_dir` | `data/lamplighter` in the plugin directory | State and history directory |
 
+With both `bark_url` and `webhook.url` empty, notifications are off: nothing is sent and no failed notifications are logged as events. Quota alerts from that time are not sent once a URL is set; Did Codex Reset signals that have not expired are still sent.
+
 Recovery notifications and reset reminders are set per window: `five_hour` for 5-hour windows and `seven_day` for 7-day windows.
 
 | Key | Values | Description |

@@ -351,3 +351,40 @@ func TestAlertsWithOneWorkingChannelDoNotRepeat(t *testing.T) {
 		t.Fatalf("working channel got %d messages, %d failures logged", good.sent, failures)
 	}
 }
+
+func TestNoChannelTurnsNotificationsOff(t *testing.T) {
+	failures := 0
+	f := &Fanout{}
+	a := &Alerts{Cfg: config.Default(), Sender: f, OnError: func(Message, error) { failures++ }}
+	st := store.NewState()
+	now := time.Date(2026, 10, 4, 1, 0, 0, 0, time.UTC)
+	a.ProcessGroup(context.Background(), st, group(80, 80, now), now)
+	a.ProcessGroup(context.Background(), st, group(30, 80, now), now)
+	a.ProcessGroup(context.Background(), st, group(30, 80, now), now.Add(5*time.Minute))
+	if failures != 0 {
+		t.Fatalf("notifications are off, but %d failures were logged", failures)
+	}
+	// A channel set up later does not receive the alert dropped earlier.
+	good := &channelSender{}
+	f.Channels = []Channel{{Name: "Bark", Sender: good}}
+	a.ProcessGroup(context.Background(), st, group(30, 80, now), now.Add(10*time.Minute))
+	if good.sent != 0 {
+		t.Fatalf("old alert sent after a channel was set up")
+	}
+}
+
+func TestInvalidWebhookAloneFailsAndRetries(t *testing.T) {
+	failures := 0
+	f := &Fanout{Invalid: errors.New("Webhook 设置无效")}
+	a := &Alerts{Cfg: config.Default(), Sender: f, OnError: func(Message, error) { failures++ }}
+	st := store.NewState()
+	now := time.Date(2026, 10, 4, 1, 0, 0, 0, time.UTC)
+	a.ProcessGroup(context.Background(), st, group(80, 80, now), now)
+	a.ProcessGroup(context.Background(), st, group(30, 80, now), now)
+	good := &channelSender{}
+	f.Invalid, f.Channels = nil, []Channel{{Name: "Webhook", Sender: good}}
+	a.ProcessGroup(context.Background(), st, group(30, 80, now), now.Add(5*time.Minute))
+	if failures != 1 || good.sent != 1 {
+		t.Fatalf("failures %d, sent after the fix %d", failures, good.sent)
+	}
+}

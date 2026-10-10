@@ -387,6 +387,7 @@ func (e *Engine) applyRuntimeConfig(cfg config.Config) {
 	notifyErr := ""
 	if err != nil {
 		notifyErr = err.Error()
+		fanout.Invalid = fmt.Errorf("Webhook 设置无效：%w", err)
 		e.logf("warn", "Webhook 设置无效，未启用：%v", err)
 	} else if webhook != nil {
 		webhook.UserAgent = userAgent

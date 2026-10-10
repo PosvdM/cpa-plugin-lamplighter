@@ -131,7 +131,20 @@ h1 .home:hover { opacity: 0.8; }
 h1 .sub { color: var(--text-tertiary); font-weight: 500; font-size: 15px; margin-left: 8px; }
 h1 .sub:empty { display: none; }
 header .meta { color: var(--text-tertiary); font-size: 12.5px; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
-header .actions { margin-left: auto; display: flex; gap: 8px; }
+
+/* In the Management Center, a floating toolbar covers the top right corner
+   of the page: 178 × 52 px, 24 px from the top and right edges of the
+   window (162 × 48 px, 12 px from the edges on phones). The header leaves
+   room for it on the right, and the quota heading, whose row holds the
+   refresh button, starts 8 px below it. From 1628 px on, the page margin
+   holds the toolbar. On phones the page starts below the toolbar. */
+@media (max-width: 1628px) {
+  .embedded header { padding-right: max(0px, calc(192px - max(0px, (100vw - 1244px) / 2))); margin-bottom: 32px; }
+}
+@media (max-width: 640px) {
+  .embedded main { padding-top: 84px; }
+  .embedded header { padding-right: 0; margin-bottom: 18px; }
+}
 
 /* Cards and sections */
 .card {
@@ -143,6 +156,8 @@ header .actions { margin-left: auto; display: flex; gap: 8px; }
   margin-bottom: 16px;
 }
 .card-title, .block-title { font-size: 15px; font-weight: 650; margin: 0 0 14px; }
+.block-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.block-head .block-title { margin: 0; }
 .hint.settings-note { margin: -8px 0 14px; }
 .block { margin-bottom: 18px; }
 
@@ -414,7 +429,6 @@ table.services .sub-row td { border-bottom: none; padding-top: 4px; text-align: 
 
 @media (max-width: 640px) {
   main { padding: 14px 12px 32px; }
-  header .actions { margin-left: 0; width: 100%; }
   .grid-3 { grid-template-columns: 1fr; }
   .bark-row, .webhook-row, .webhook-grid { grid-template-columns: 1fr; }
   .grid-3 .span-2 { grid-column: auto; }
