@@ -45,14 +45,26 @@ func TestRegisterDeclaresCapabilities(t *testing.T) {
 	var reg struct {
 		SchemaVersion int `json:"schema_version"`
 		Metadata      struct {
-			Name    string
-			Version string
+			Name         string
+			Version      string
+			ConfigFields []struct {
+				Name string `json:"name"`
+			} `json:"ConfigFields"`
 		} `json:"metadata"`
 		Capabilities map[string]bool `json:"capabilities"`
 	}
 	json.Unmarshal(result(t, p.Handle("plugin.register", req)), &reg)
 	if reg.SchemaVersion != 6 || reg.Metadata.Name != "Lamplighter" || reg.Metadata.Version != "1.2.3" {
 		t.Fatalf("registration %+v", reg)
+	}
+	fields := map[string]bool{}
+	for _, field := range reg.Metadata.ConfigFields {
+		fields[field.Name] = true
+	}
+	for _, name := range []string{"feishu_webhook", "feishu_secret"} {
+		if !fields[name] {
+			t.Fatalf("registration missing %s: %+v", name, reg.Metadata.ConfigFields)
+		}
 	}
 	if !reg.Capabilities["management_api"] || !reg.Capabilities["usage_plugin"] {
 		t.Fatalf("capabilities %+v", reg.Capabilities)
@@ -101,13 +113,21 @@ func TestManagementRoutesAndPage(t *testing.T) {
 func TestStatusHidesSecrets(t *testing.T) {
 	p := New(nopHost{}, "1", t.TempDir(), "")
 	defer p.Shutdown()
-	req, _ := json.Marshal(map[string]any{"config_yaml": []byte("bark_url: https://api.day.app/secret\nmodels_api_key: sk-secret\n")})
+	req, _ := json.Marshal(map[string]any{"config_yaml": []byte("bark_url: https://api.day.app/secret\nmodels_api_key: sk-secret\nfeishu_webhook: https://open.feishu.cn/open-apis/bot/v2/hook/secret-token\nfeishu_secret: sign-secret\n")})
 	p.Handle("plugin.register", req)
 	req, _ = json.Marshal(pluginapi.ManagementRequest{Method: "GET", Path: "/v0/management/lamplighter/status"})
 	var resp pluginapi.ManagementResponse
 	json.Unmarshal(result(t, p.Handle("management.handle", req)), &resp)
-	if strings.Contains(string(resp.Body), "secret") {
-		t.Fatalf("status leaks secrets: %s", resp.Body)
+	// The status reports secrets as 已设置. Assert on the values rather than the
+	// whole body, because the config key names themselves (feishu_secret)
+	// contain the word "secret" without leaking anything.
+	for _, leaked := range []string{"api.day.app/secret", "sk-secret", "hook/secret-token", "sign-secret"} {
+		if strings.Contains(string(resp.Body), leaked) {
+			t.Fatalf("status leaks %q: %s", leaked, resp.Body)
+		}
+	}
+	if !strings.Contains(string(resp.Body), "已设置") {
+		t.Fatalf("status must report configured secrets as 已设置: %s", resp.Body)
 	}
 }
 

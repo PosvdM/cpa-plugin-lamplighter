@@ -1,5 +1,5 @@
-// Package notify sends Bark notifications for quota changes, ignition pauses
-// and Did Codex Reset signals.
+// Package notify sends Bark and Feishu notifications for quota changes,
+// ignition pauses and Did Codex Reset signals.
 package notify
 
 import (
@@ -20,18 +20,22 @@ const (
 	LevelTimeSensitive = "timeSensitive"
 )
 
-// Message is one Bark notification.
+// Message is one notification.
 type Message struct {
 	Title   string
 	Body    string
 	Level   string
 	JumpURL string
+	// Severity is the quota severity the message was raised for. It is empty
+	// for messages that are not about quota; Feishu falls back to the state
+	// emoji in the title to pick a colour for those.
+	Severity string
 	// Label is the quota group the message is about, for the event log.
 	// It is not sent to Bark.
 	Label string
 }
 
-// Sender delivers a message and reports whether Bark accepted it.
+// Sender delivers a message and reports whether the channel accepted it.
 type Sender interface {
 	Send(ctx context.Context, msg Message) error
 }

@@ -4,7 +4,7 @@
 
 [中文](./README.md)
 
-Lamplighter is a native plugin for [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) (CPA). It monitors the quota of ChatGPT (Codex), Claude and Antigravity accounts, sends alerts through [Bark](https://github.com/Finb/Bark), and sends one minimal request after each 5-hour quota window resets so that the next window starts right away.
+Lamplighter is a native plugin for [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) (CPA). It monitors the quota of ChatGPT (Codex), Claude and Antigravity accounts, sends alerts through [Bark](https://github.com/Finb/Bark) or a Feishu custom bot, and sends one minimal request after each 5-hour quota window resets so that the next window starts right away.
 
 ![Management page: quota per account and ignition plans](./docs/images/overview.png)
 
@@ -15,7 +15,7 @@ Lamplighter is a native plugin for [CLIProxyAPI](https://github.com/router-for-m
 ## Features
 
 - **Quota monitoring**: queries quota on a schedule and also reads the quota that upstream providers return while CPA serves real requests.
-- **Bark notifications**: alerts when remaining quota drops to 50%, 20%, 10% and zero; optional recovery and pre-reset reminders; optional forwarding of [Did Codex Reset](https://didcodexreset.com/) signals.
+- **Notifications**: alerts when remaining quota drops to 50%, 20%, 10% and zero; optional recovery and pre-reset reminders; optional forwarding of [Did Codex Reset](https://didcodexreset.com/) signals. Bark and a Feishu custom bot can be enabled separately or together.
 - **Window ignition**: from 07:00 every day, sends a minimal request 3 seconds after each 5-hour reset, until 22:30. The request goes through CPA's own model executor and is pinned to one account.
 - **Management page**: shows quota, ignition plans, events and a quota chart in the CPA Management Center, and edits the settings.
 
@@ -31,7 +31,7 @@ When a service has several accounts, notifications and the page tell them apart 
 
 - CPA v8.0.4 or later with plugins enabled (`plugins.enabled: true`). The plugin is built for Linux amd64/arm64, macOS amd64/arm64 and Windows amd64; the macOS builds are only built and tested in CI and have not been tried on a running CPA.
 - A CPA API key reserved for Lamplighter. The plugin reads the model list with it to pick ignition models.
-- An iPhone with Bark, if you want notifications.
+- An iPhone with Bark, or a Feishu custom bot, if you want notifications.
 
 ## Installation
 
@@ -103,15 +103,19 @@ Notifications use the Management Center language from the last time the manageme
 
 Title icons: 🟡 remaining fell to the first threshold (50% by default), 🔴 to the second threshold (20% by default) or below, ✅ recovered, ⏰ reset reminder, ⚠️ a problem that needs action, such as ignition paused or a CPA cooldown that outlasts the quota. Each body line shows the window, the remaining quota, the time until reset, and the reset time. The first time the plugin sees a quota window it only records the current level and sends nothing.
 
+Feishu receives an interactive card: the header is coloured by level (🟡 yellow, 🔴 red, ✅ green, ⚠️ orange), quota lines become side-by-side fields, and the footer is the send time. An explicit request-content rejection is resent as plain text; network, rate-limit and signature errors return directly. Did Codex Reset cards include a history-page button.
+
 ## Configuration
 
 All settings live under `plugins.configs.lamplighter` in `config.yaml`, and can also be edited under "设置" (Settings) on the management page. Settings on the page save as you change them: switches and checkboxes when clicked, text and numbers when you leave the field or press Enter. Changes apply without a restart.
 
 | Key | Default | Description |
 | --- | --- | --- |
-| `bark_url` | empty | Bark push URL up to the device key; empty disables notifications |
+| `bark_url` | empty | Bark push URL up to the device key; empty disables Bark |
 | `bark_group` | `CPA` | Bark notification group |
 | `bark_icon` | Lamplighter logo | Notification icon |
+| `feishu_webhook` | empty | Feishu custom bot webhook URL; empty disables Feishu delivery |
+| `feishu_secret` | empty | Sign key of a bot with signature verification enabled; empty sends unsigned |
 | `notice_threshold` | `50` | First alert level (remaining percent) |
 | `low_threshold` | `20` | Second alert level |
 | `critical_threshold` | `10` | Third alert level |
@@ -127,6 +131,8 @@ All settings live under `plugins.configs.lamplighter` in `config.yaml`, and can 
 | `cpa_base_url` | `http://127.0.0.1:8317` | Address the plugin uses to reach CPA; change it when CPA uses another port or TLS |
 | `history_retention_days` | `40` | Days of quota history to keep |
 | `data_dir` | `data/lamplighter` in the plugin directory | State and history directory |
+
+Bark and the Feishu custom bot are separate channels. With both set, notifications are sent concurrently. Any successful channel completes delivery; other failures become “Some channels failed” events and are not retried for that notification. When all channels fail, the alert stays pending for the next check. Test notifications require all channels to succeed; configuration errors also appear on the page. With neither set, nothing is sent and alerts are kept until a channel is configured. The Bark URL comes from the Bark app. The Feishu URL comes from adding a custom bot under the group's bot settings and looks like `https://open.feishu.cn/open-apis/bot/v2/hook/...`; if signature verification was enabled there, put its key in `feishu_secret`.
 
 Recovery notifications and reset reminders are set per window: `five_hour` for 5-hour windows and `seven_day` for 7-day windows.
 
@@ -173,6 +179,7 @@ plugins:
     lamplighter:
       enabled: true
       bark_url: "https://api.day.app/your_device_key"
+      feishu_webhook: "https://open.feishu.cn/open-apis/bot/v2/hook/your_webhook_path"
       models_api_key: "new key for Lamplighter"
       ignition:
         enabled: true
@@ -198,14 +205,14 @@ The page shows:
 - the next ignition, last result and failure protection state of each quota group, with an "ignite now" button;
 - a quota chart for either the 5-hour quota, over the last 1, 3, 6, 12, 24 or 26 hours (6 by default), or the 7-day quota, over the last 1, 4, 8 or 15 days, one month (from this date last month), or 36 days (8 days by default). The top part has one colored band per service, colored like the quota bars, in the order Claude, ChatGPT, Gemini, Fable, Claude / GPT by default or by lowest remaining; a service with several accounts shows their total and expands into one row per account. The bottom part plots the selected row with its resets and ignition results;
 - recent events in columns for time, type, quota group and detail;
-- the settings form, with a test notification button in the notification settings. The test uses the settings the plugin has applied, so after changing the Bark URL, wait a few seconds before testing. An empty ignition model field shows the model the next ignition will use in its hint; for Antigravity, the model of the Gemini group. The model list is read when the plugin starts, when `cpa_base_url` or `models_api_key` changes and for every ignition, so a model newly listed by CPA shows after the next ignition, which already uses it.
+- the settings form, with a test notification button in the notification settings. The test uses the settings the plugin has applied, so after changing notification settings, wait for automatic saving before testing. An empty ignition model field shows the model the next ignition will use in its hint; for Antigravity, the model of the Gemini group. The model list is read when the plugin starts, when `cpa_base_url` or `models_api_key` changes and for every ignition, so a model newly listed by CPA shows after the next ignition, which already uses it.
 
 The page follows the language of the CPA Management Center: Chinese for Simplified or Traditional Chinese, English for every other language.
 
 ## Security and risk
 
 - The plugin reads the access token from the credential file into memory only to query quota, and never writes it to logs or disk. The page and its API require the CPA management key.
-- `bark_url` and `models_api_key` are stored in plain text in CPA's `config.yaml`, visible to anyone with the management key.
+- `bark_url`, `feishu_webhook`, `feishu_secret` and `models_api_key` are stored in plain text in CPA's `config.yaml`, visible to anyone with the management key.
 - Each service restricts the use of subscription accounts through third-party tools in its own way. Using accounts through CPA, sending scheduled ignition requests and querying quota may all put accounts at risk. Use it at your own discretion.
 
 ## Development

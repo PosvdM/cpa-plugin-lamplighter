@@ -147,7 +147,9 @@ func (p *Plugin) registration() registration {
 			Author:           "PosvdM",
 			GitHubRepository: repository,
 			ConfigFields: []pluginapi.ConfigField{
-				field("bark_url", pluginapi.ConfigFieldTypeString, "Bark 推送地址，到 device key 为止；为空时不推送 / Bark push URL up to the device key; empty turns notifications off"),
+				field("bark_url", pluginapi.ConfigFieldTypeString, "Bark 推送地址，到 device key 为止；为空时不通过 Bark 推送 / Bark push URL up to the device key; empty disables Bark"),
+				field("feishu_webhook", pluginapi.ConfigFieldTypeString, "飞书自定义机器人 Webhook 地址 / Feishu custom bot webhook URL"),
+				field("feishu_secret", pluginapi.ConfigFieldTypeString, "飞书机器人签名密钥（可选） / Feishu bot signature key (optional)"),
 				field("bark_group", pluginapi.ConfigFieldTypeString, "Bark 通知分组 / Bark notification group"),
 				field("models_api_key", pluginapi.ConfigFieldTypeString, "读取 /v1/models 用的专用 CPA API key / Dedicated CPA API key for reading /v1/models"),
 				field("cpa_base_url", pluginapi.ConfigFieldTypeString, "插件访问 CPA 自身的地址 / Address the plugin uses to reach CPA"),
@@ -193,7 +195,7 @@ func managementRegistration() map[string]any {
 			{Method: http.MethodGet, Path: apiBase + "/history", Description: "Lamplighter quota history"},
 			{Method: http.MethodPost, Path: apiBase + "/refresh", Description: "Query quota now"},
 			{Method: http.MethodPost, Path: apiBase + "/ignite", Description: "Ignite one quota window now"},
-			{Method: http.MethodPost, Path: apiBase + "/test-bark", Description: "Send a Bark test notification"},
+			{Method: http.MethodPost, Path: apiBase + "/test-bark", Description: "Send a test notification to every configured channel"},
 			{Method: http.MethodPost, Path: apiBase + "/language", Description: "Set the notification language"},
 		},
 		"resources": []resource{

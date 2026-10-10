@@ -24,9 +24,9 @@ Coverage:
 - network exit selection, including that an invalid `proxy_url` never falls back to a direct connection;
 - ignition timing, rolling-reset detection, error classes and failure protection;
 - candidate model order and model list reading;
-- quota alerts, per-window recovery notifications and reset reminders, the Bark request format, and Did Codex Reset deduplication, filtering and schedule times;
+- quota alerts, per-window recovery notifications and reset reminders, the Bark request format, Feishu signatures, cards and jump links, safe body rendering, error-specific fallback, error redaction, concurrent channels and partial-delivery deduplication, and Did Codex Reset deduplication, filtering and schedule times;
 - the engine: account suffixes, the passive skip rule, queries around resets, ignition confirmation, retry with the next model, pause notifications and history sampling;
-- plugin RPC: registration, management routes, the page, and that the status contains no secrets;
+- plugin RPC: notification config fields in registration, management routes, the page, and that status contains no secrets; visible notification config errors that clear after correction, and tests requiring all channels to work;
 - the instance lock being exclusive, and reading the plugin directory from the CPA config.
 
 ## Building

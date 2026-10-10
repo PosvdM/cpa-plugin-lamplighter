@@ -42,7 +42,7 @@ type Group struct {
 	Windows []quota.Window
 }
 
-// Alerts turns quota changes into Bark notifications.
+// Alerts turns quota changes into notifications.
 type Alerts struct {
 	Cfg    config.Config
 	Sender Sender
@@ -190,10 +190,11 @@ func (a *Alerts) buildChangeMessage(g Group, changes []change, now time.Time) Me
 		level = LevelTimeSensitive
 	}
 	return Message{
-		Title: fmt.Sprintf("%s %s · %s", prefix, g.Label, strings.Join(parts, " / ")),
-		Body:  a.body(g, now),
-		Level: level,
-		Label: g.Label,
+		Title:    fmt.Sprintf("%s %s · %s", prefix, g.Label, strings.Join(parts, " / ")),
+		Body:     a.body(g, now),
+		Level:    level,
+		Severity: worst.to,
+		Label:    g.Label,
 	}
 }
 

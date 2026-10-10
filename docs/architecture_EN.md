@@ -18,7 +18,7 @@ Lamplighter is a CPA native plugin written in Go and built with `-buildmode=c-sh
 | `internal/egress` | Picks the network exit of quota requests |
 | `internal/models` | Reads the CPA model list and orders ignition candidates |
 | `internal/ignite` | Ignition timing, rolling-reset detection, error classification and failure protection |
-| `internal/notify` | Bark delivery, quota alerts, Did Codex Reset forwarding |
+| `internal/notify` | Bark and Feishu delivery, quota alerts, Did Codex Reset forwarding |
 | `internal/store` | `state.json`, quota history and the instance lock |
 | `internal/web` | Management page; HTML, CSS and JS are separate files combined into one document at runtime |
 
@@ -37,7 +37,7 @@ Management routes (require the CPA management key):
 | `GET /v0/management/lamplighter/history?range=1h\|3h\|6h\|12h\|24h\|26h\|4d\|8d\|15d\|1mo\|36d` | Quota history and ignition events, `24h` by default. In hours for the 5-hour quota and days for the 7-day quota, the ranges are: one unit; half a window plus one (`3h`, `4d`); a window plus one (`6h`, `8d`); half a day or month, which fits two whole windows (`12h`, `15d`); a day or a month (`24h`, `1mo`); five windows plus one (`26h`, `36d`). `1mo` runs from the same date of the previous month in the plugin's time zone, or its last day when that month is shorter, to now |
 | `POST /v0/management/lamplighter/refresh` | Query now; `{"auth_index": "..."}` limits it to one account |
 | `POST /v0/management/lamplighter/ignite` | Ignite now, `{"target": "<group key>"}` |
-| `POST /v0/management/lamplighter/test-bark` | Send a test notification |
+| `POST /v0/management/lamplighter/test-bark` | Send a test notification to every configured channel |
 | `POST /v0/management/lamplighter/language` | Record the notification language, `{"language": "zh-CN"}`; any form of Chinese is stored as `zh`, every other language as `en` |
 
 The page is the resource `GET /v0/resource/plugins/lamplighter/page` with the menu label `Lamplighter`. The resource itself needs no authentication; its data requests carry the management key. The page reads the key from `cli-proxy-auth` in `localStorage`, where the Management Center stores it with a reversible obfuscation derived from the host and user agent; otherwise it asks for the key and keeps it in `sessionStorage` only. Settings save automatically through CPA's `PATCH /v0/management/plugins/lamplighter/config`: the form's `change` event triggers a save that sends only the top-level key of the changed field. The endpoint merges top-level keys only, so objects such as `ignition`, `providers` and `recovery_notify` are sent whole, starting from the saved object. Saves run one at a time, each starting from the config the previous one wrote; a number outside its field's range or step is not saved. Three seconds after the last save, the page reads the status again and fills the saved fields with the values the plugin applied, leaving the field being edited alone; a failed save puts the saved values back. A test notification waits for pending saves.
@@ -73,7 +73,7 @@ Host callbacks are bound to the plugin instance, not to one RPC, so the backgrou
 
 ## Background loop
 
-`engine.Engine` does all network work on one goroutine, so queries, ignition and notifications never modify the state concurrently:
+`engine.Engine` schedules queries, ignition and notifications on one goroutine so they do not modify state concurrently. Notification channels send concurrently and all finish before control returns to the loop:
 
 1. It starts after plugin registration and waits 20 seconds so that CPA can load credentials and executors.
 2. It opens the data directory and takes `instance.lock`.
@@ -200,7 +200,7 @@ When a CPA local cooldown carries a `reset_seconds` of 10 minutes or less (`igni
 
 **Stale CPA cooldowns**: after an account-level 429, CPA cools the credential down until the reset the provider reported, which can be days away when the 7-day quota is used up, and does not lift it when the quota comes back early, for example after a reset card. After each poll, `engine.checkCooldowns` checks every credential: when the CPA cooldown has more than 10 minutes left and a quota group with a 5-hour window shows, in data from the last 15 minutes, that no window is used up, the cooldown is stale. One notification is sent per cooldown end time (`cooldown_notices` in `state.json`) and a `cooldown_stale` event is recorded; accounts in the status API carry `cooldown_until` and `stale_cooldown`. The plugin does not clear the cooldown itself, because that needs the CPA management key and changes CPA's routing state.
 
-A pause sends one Bark notification (`circuit_notified_until_epoch` prevents repeats). A success or a fixed future reset clears the failure state.
+A pause sends one notification (`circuit_notified_until_epoch` prevents repeats). A success or a fixed future reset clears the failure state.
 
 ## Notifications
 
@@ -218,7 +218,11 @@ A pause sends one Bark notification (`circuit_notified_until_epoch` prevents rep
 - A window seen for the first time only records its baseline.
 - A failed delivery leaves the notified level unchanged, so the next check retries.
 
+`engine.notificationSenders` builds the configured Bark and Feishu senders. A webhook must be an http(s) URL with a hostname and a single nonempty token after `/hook/`, without user information or a fragment. Validation errors stay on the sender, appear in Status as `notification_error` and on the page, and fail test notifications. With no channels set, `ErrNoChannel` leaves alerts pending. `notify.Multi` sends concurrently and waits for all channels: any success completes delivery; other failures become `notify_partial` events and are not retried for that notification. When all channels fail the alert stays pending. The test endpoint uses `SendAll` and requires every channel to succeed. Panics in sender goroutines become delivery errors; state and event updates still run on the engine goroutine.
+
 A Bark request is `GET {bark_url}/{title}/{body}?group&level&icon&url`, with title and body percent-encoded except RFC 3986 unreserved characters. A JSON `code` other than 200 is a failure. `icon` defaults to the repository's `assets/logo.png`; a `bark_icon` that still holds the old default (the CPA Management Center logo) is replaced with it on load.
+
+A Feishu request is `POST {feishu_webhook}` with a JSON body and `msg_type=interactive`. Only an HTTP-successful response with business `code=9499`, explicitly rejecting the request body, causes one fallback to `msg_type=text`. Timeouts, HTTP failures, rate limits and signature errors return directly. The response must contain a valid `code`; 0 means success. Titles, body blocks and fields all use `plain_text`. Only known notification labels in `feishuFieldLabels` become side-by-side fields; upstream errors stay prose. The notice header is yellow, low/critical/exhausted are red, recovery is green and ⚠️ is orange. An http(s) `Message.JumpURL` becomes a button and is appended to the plain-text fallback. A divider and a `Lamplighter · MM/DD HH:MM` footer close the card. Each request samples the clock once for the footer and signature. An empty `feishu_secret` sends unsigned; otherwise Unix-seconds `timestamp` and `sign` are added. `sign` is Base64 of HMAC-SHA256 over the empty string with `timestamp + "\n" + secret` as its key. Feishu errors strip request URLs from `url.Error` and remove webhook URLs, tokens and signing keys from error text before returning; HTTP failures omit response bodies. The text fallback replaces `<at` with `＜at` to prevent upstream errors from triggering mentions.
 
 Notification texts are in `internal/notify/text.go`, one column each for Chinese and English, chosen by `language` in `state.json`. The management page reports the language: notifications are sent without a page open, so they use the language reported last, and Chinese until one has been reported. Window names in notifications are always `5h` and `7d`. The Did Codex Reset link points to the Chinese or English history page.
 
@@ -238,7 +242,7 @@ The data directory defaults to `data/lamplighter` in the plugin directory. On Li
 | `history/YYYY-MM-DD.jsonl` | Quota samples and events, one file per UTC day |
 | `instance.lock` | Instance lock |
 
-Each history line is one JSON object. A sample is `{"k":"s","t":seconds,"g":group,"w":window,"r":remaining,"x":reset,"s":"active|passive"}`, an event is `{"k":"e","t":seconds,"g":group,"e":type,"v":level,"m":text,"l":label,"d":detail,"p":params}`. `m` and `d` are Chinese text for the CPA log; `p` holds the values the page builds the event text from: `model` and `reset` for `ignite` and `ignite_manual`, `retry_seconds`, `error` and an optional `cooldown` for `ignite_failed`, `until` and `error` for `ignite_paused`, `model`, `fallback` and `hours` for `model_refused`, `title` for `notify`, `title` and `error` for `notify_failed`, `until` for `cooldown_stale`, and `count` for `codex_reset`; times are RFC 3339 UTC. Active samples are always written. Passive samples are written only when the value or reset changes, at most once per minute per window; a newer value inside that minute waits in `pendingSamp`. The history API keeps the last sample per 5-minute bucket for ranges over 2 days and per 30-minute bucket for ranges over 8 days. Each series has a `label` with the account suffix, such as `ChatGPT#rk`, and a `source_label` without it; the page merges the accounts of one quota by service and `source_label`.
+Each history line is one JSON object. A sample is `{"k":"s","t":seconds,"g":group,"w":window,"r":remaining,"x":reset,"s":"active|passive"}`, an event is `{"k":"e","t":seconds,"g":group,"e":type,"v":level,"m":text,"l":label,"d":detail,"p":params}`. `m` and `d` are Chinese text for the CPA log; `p` holds the values the page builds the event text from: `model` and `reset` for `ignite` and `ignite_manual`, `retry_seconds`, `error` and an optional `cooldown` for `ignite_failed`, `until` and `error` for `ignite_paused`, `model`, `fallback` and `hours` for `model_refused`, `title` for `notify`, `title` and `error` for `notify_failed` and `notify_partial`, `until` for `cooldown_stale`, and `count` for `codex_reset`; times are RFC 3339 UTC. Active samples are always written. Passive samples are written only when the value or reset changes, at most once per minute per window; a newer value inside that minute waits in `pendingSamp`. The history API keeps the last sample per 5-minute bucket for ranges over 2 days and per 30-minute bucket for ranges over 8 days. Each series has a `label` with the account suffix, such as `ChatGPT#rk`, and a `source_label` without it; the page merges the accounts of one quota by service and `source_label`.
 
 Group keys are `<service>:<auth_index>:<group>`, for example `codex:3:codex:main`, `claude:3:claude:seven-day-fable` and `antigravity:4:antigravity:gemini-models`. The group key is also the ignition target ID.
 
@@ -246,6 +250,6 @@ Group keys are `<service>:<auth_index>:<group>`, for example `codex:3:codex:main
 
 - Ignition goes only through `host.model.execute`, pinned to one credential; the plugin never builds a service's model request itself.
 - Quota requests must leave through the same exit as CPA's model requests; when the exit cannot be determined, the request is skipped instead of connecting directly.
-- Access tokens, `bark_url` and `models_api_key` never appear in logs, events, the status API or on disk.
+- Access tokens, `bark_url`, `feishu_webhook`, `feishu_secret` and `models_api_key` never appear in logs, events, the status API or on disk.
 - The JSON fields of host callbacks follow `sdk/pluginapi` and `internal/pluginhost` of CPA v8.0.4; check the CPA source before changing them.
 - Changes to `state.json` stay backward compatible: new fields have defaults, and missing old fields do not stop the plugin.
