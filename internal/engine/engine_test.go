@@ -552,9 +552,9 @@ func TestLanguageReportedByThePageIsUsedForNotifications(t *testing.T) {
 	}
 	e, sender := newTestEngine(t, h, c)
 	ctx := context.Background()
-	cmd := command{kind: "language", arg: "en-US", reply: make(chan error, 1)}
+	cmd := command{kind: "language", arg: "en-US", reply: make(chan commandReply, 1)}
 	e.runCommand(ctx, cmd)
-	if err := <-cmd.reply; err != nil {
+	if err := (<-cmd.reply).err; err != nil {
 		t.Fatal(err)
 	}
 	if e.Status().Language != "en" || e.state.Language != "en" {

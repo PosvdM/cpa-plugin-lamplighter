@@ -147,8 +147,9 @@ func (p *Plugin) registration() registration {
 			Author:           "PosvdM",
 			GitHubRepository: repository,
 			ConfigFields: []pluginapi.ConfigField{
-				field("bark_url", pluginapi.ConfigFieldTypeString, "Bark 推送地址，到 device key 为止；为空时不推送 / Bark push URL up to the device key; empty turns notifications off"),
+				field("bark_url", pluginapi.ConfigFieldTypeString, "Bark 推送地址，到 device key 为止；为空时不通过 Bark 推送 / Bark push URL up to the device key; empty disables Bark"),
 				field("bark_group", pluginapi.ConfigFieldTypeString, "Bark 通知分组 / Bark notification group"),
+				field("webhook", pluginapi.ConfigFieldTypeObject, "自定义 webhook：url、method、headers、body、success_json；url 为空时不启用 / Custom webhook: url, method, headers, body, success_json; empty url disables it"),
 				field("models_api_key", pluginapi.ConfigFieldTypeString, "读取 /v1/models 用的专用 CPA API key / Dedicated CPA API key for reading /v1/models"),
 				field("cpa_base_url", pluginapi.ConfigFieldTypeString, "插件访问 CPA 自身的地址 / Address the plugin uses to reach CPA"),
 				field("notice_threshold", pluginapi.ConfigFieldTypeNumber, "第一档提醒阈值（剩余百分比） / First alert threshold (percent remaining)"),
@@ -193,7 +194,7 @@ func managementRegistration() map[string]any {
 			{Method: http.MethodGet, Path: apiBase + "/history", Description: "Lamplighter quota history"},
 			{Method: http.MethodPost, Path: apiBase + "/refresh", Description: "Query quota now"},
 			{Method: http.MethodPost, Path: apiBase + "/ignite", Description: "Ignite one quota window now"},
-			{Method: http.MethodPost, Path: apiBase + "/test-bark", Description: "Send a Bark test notification"},
+			{Method: http.MethodPost, Path: apiBase + "/test-notify", Description: "Send a test notification to every channel"},
 			{Method: http.MethodPost, Path: apiBase + "/language", Description: "Set the notification language"},
 		},
 		"resources": []resource{
@@ -255,8 +256,16 @@ func (p *Plugin) handleManagement(req pluginapi.ManagementRequest) pluginapi.Man
 			return errorResponse(http.StatusBadRequest, errors.New("缺少 target"))
 		}
 		return actionResponse(p.engine.Ignite(strings.TrimSpace(body.Target)), p)
-	case "POST " + apiBase + "/test-bark":
-		return actionResponse(p.engine.TestBark(), p)
+	case "POST " + apiBase + "/test-notify":
+		results, err := p.engine.TestNotify()
+		if err != nil {
+			return actionResponse(err, p)
+		}
+		ok := true
+		for _, result := range results {
+			ok = ok && result.OK
+		}
+		return jsonResponse(http.StatusOK, map[string]any{"ok": ok, "results": results, "status": p.engine.Status()})
 	case "POST " + apiBase + "/language":
 		return actionResponse(p.engine.SetLanguage(body.Language), p)
 	}

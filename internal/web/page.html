@@ -103,7 +103,20 @@
         <div class="bark-row">
           <label><span data-i18n="bark_url">Bark 推送地址</span><input name="bark_url" type="text" autocomplete="off" placeholder="https://api.day.app/device_key"></label>
           <label><span data-i18n="bark_group">Bark 分组</span><input name="bark_group" type="text"></label>
-          <button id="test-bark" class="btn btn-secondary" type="button" title="按插件已应用的设置发送，修改地址后等几秒再测试" data-i18n="test_bark" data-i18n-title="test_bark_hint">测试推送</button>
+        </div>
+        <div class="webhook-row">
+          <label><span data-i18n="webhook_url">Webhook 地址</span><input name="webhook.url" type="text" autocomplete="off" placeholder="https://ntfy.sh/"></label>
+          <label><span data-i18n="webhook_method">请求方法</span><select name="webhook.method"><option>POST</option><option>PUT</option><option>GET</option></select></label>
+        </div>
+        <div class="webhook-grid">
+          <label><span data-i18n="webhook_headers">请求头（每行一个）</span><textarea name="webhook.headers" data-format="headers" rows="4" spellcheck="false" placeholder="Authorization: Bearer token"></textarea></label>
+          <label><span data-i18n="webhook_body">请求体</span><textarea name="webhook.body" rows="4" spellcheck="false" placeholder="留空时发送内置的 JSON 消息" data-i18n-placeholder="webhook_body_placeholder"></textarea></label>
+          <label><span data-i18n="webhook_success">成功条件（可选）</span><input name="webhook.success_json" data-format="json" type="text" spellcheck="false" placeholder='{"code":0}'><span class="hint" data-i18n="webhook_success_hint">JSON 响应必须包含这些字段和值才算发送成功；留空时只检查 HTTP 状态码</span></label>
+        </div>
+        <p class="hint" data-i18n="webhook_hint">地址、请求头和请求体中可以使用占位符：{{title}} {{body}} {{text}} {{url}} {{priority}} {{kind}} {{label}} {{time}}。各服务的写法见 README。</p>
+        <div class="test-row">
+          <button id="test-notify" class="btn btn-secondary" type="button" title="按插件已应用的设置发送到所有已配置的渠道，修改设置后等几秒再测试" data-i18n="test_notify" data-i18n-title="test_notify_hint">测试推送</button>
+          <div id="test-results" class="test-results" aria-live="polite"></div>
         </div>
         <div class="field">
           <span class="field-label" data-i18n="thresholds">提醒阈值</span>

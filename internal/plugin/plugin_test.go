@@ -101,7 +101,8 @@ func TestManagementRoutesAndPage(t *testing.T) {
 func TestStatusHidesSecrets(t *testing.T) {
 	p := New(nopHost{}, "1", t.TempDir(), "")
 	defer p.Shutdown()
-	req, _ := json.Marshal(map[string]any{"config_yaml": []byte("bark_url: https://api.day.app/secret\nmodels_api_key: sk-secret\n")})
+	req, _ := json.Marshal(map[string]any{"config_yaml": []byte("bark_url: https://api.day.app/secret\nmodels_api_key: sk-secret\n" +
+		"webhook:\n  url: https://example.com/hook/secret\n  headers:\n    Authorization: Bearer secret\n  body: '{\"topic\":\"secret\",\"message\":\"{{text}}\"}'\n")})
 	p.Handle("plugin.register", req)
 	req, _ = json.Marshal(pluginapi.ManagementRequest{Method: "GET", Path: "/v0/management/lamplighter/status"})
 	var resp pluginapi.ManagementResponse

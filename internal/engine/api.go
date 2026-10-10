@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/config"
@@ -88,36 +89,47 @@ func (e *Engine) loadRecentEvents() {
 type command struct {
 	kind  string
 	arg   string
-	reply chan error
+	reply chan commandReply
+}
+
+type commandReply struct {
+	err error
+	// results is the outcome per channel of test_notify.
+	results []ChannelResult
 }
 
 // ErrNotRunning means the background loop has not started yet.
 var ErrNotRunning = errors.New("Lamplighter 尚未就绪：CPA 启动后约 20 秒开始运行，或插件已在配置中停用")
 
 func (e *Engine) send(kind, arg string) error {
+	return e.dispatch(kind, arg).err
+}
+
+// dispatch hands a command to the loop and waits for its reply.
+func (e *Engine) dispatch(kind, arg string) commandReply {
 	e.mu.Lock()
 	ready := e.running && e.enabled
 	e.mu.Unlock()
 	if !ready {
-		return ErrNotRunning
+		return commandReply{err: ErrNotRunning}
 	}
-	cmd := command{kind: kind, arg: arg, reply: make(chan error, 1)}
+	cmd := command{kind: kind, arg: arg, reply: make(chan commandReply, 1)}
 	timer := time.NewTimer(commandTimeout)
 	defer timer.Stop()
 	select {
 	case e.cmdCh <- cmd:
 	case <-timer.C:
-		return errors.New("后台任务繁忙，请稍后再试")
+		return commandReply{err: errors.New("后台任务繁忙，请稍后再试")}
 	case <-e.stopCh:
-		return ErrNotRunning
+		return commandReply{err: ErrNotRunning}
 	}
 	select {
-	case err := <-cmd.reply:
-		return err
+	case reply := <-cmd.reply:
+		return reply
 	case <-timer.C:
-		return errors.New("操作超时")
+		return commandReply{err: errors.New("操作超时")}
 	case <-e.stopCh:
-		return ErrNotRunning
+		return commandReply{err: ErrNotRunning}
 	}
 }
 
@@ -128,17 +140,34 @@ func (e *Engine) Refresh(authIndex string) error { return e.send("refresh", auth
 // Ignite ignites one target now.
 func (e *Engine) Ignite(key string) error { return e.send("ignite", key) }
 
-// TestBark sends a test notification.
-func (e *Engine) TestBark() error { return e.send("test_bark", "") }
+// ChannelResult is the outcome of a test notification on one channel.
+type ChannelResult struct {
+	Channel string `json:"channel"`
+	OK      bool   `json:"ok"`
+	Error   string `json:"error,omitempty"`
+	// Response is the start of the webhook response.
+	Response string `json:"response,omitempty"`
+	// Unchecked is true for a webhook without success_json, where only the
+	// HTTP status was checked.
+	Unchecked bool `json:"unchecked,omitempty"`
+}
+
+// TestNotify sends a test notification to each configured channel. A
+// webhook whose settings were not applied is reported as failed.
+func (e *Engine) TestNotify() ([]ChannelResult, error) {
+	reply := e.dispatch("test_notify", "")
+	return reply.results, reply.err
+}
 
 func (e *Engine) runCommand(ctx context.Context, cmd command) {
 	defer func() {
 		if r := recover(); r != nil {
-			cmd.reply <- fmt.Errorf("内部错误：%v", r)
+			cmd.reply <- commandReply{err: fmt.Errorf("内部错误：%v", r)}
 		}
 	}()
 	cfg := e.config()
 	var err error
+	var results []ChannelResult
 	switch cmd.kind {
 	case "refresh":
 		e.poll(ctx, cfg, e.now(), cmd.arg, true)
@@ -159,17 +188,8 @@ func (e *Engine) runCommand(ctx context.Context, cmd command) {
 				break
 			}
 		}
-	case "test_bark":
-		if e.alerts == nil || e.alerts.Sender == nil {
-			err = notify.ErrNotConfigured
-			break
-		}
-		lang := e.language()
-		err = e.alerts.Sender.Send(ctx, notify.Message{
-			Title: notify.T(lang, "test_title"),
-			Body:  notify.T(lang, "test_body"),
-			Level: notify.LevelActive,
-		})
+	case "test_notify":
+		results, err = e.testNotify(ctx)
 	case "language":
 		lang := notify.NormalizeLang(cmd.arg)
 		e.mu.Lock()
@@ -185,7 +205,63 @@ func (e *Engine) runCommand(ctx context.Context, cmd command) {
 	}
 	e.refreshTargets(cfg)
 	e.saveState()
-	cmd.reply <- err
+	cmd.reply <- commandReply{err: err, results: results}
+}
+
+// testNotify sends the test message to all channels at once, so the test
+// takes as long as the slowest channel and stays within commandTimeout.
+func (e *Engine) testNotify(ctx context.Context) ([]ChannelResult, error) {
+	var results []ChannelResult
+	e.mu.Lock()
+	notifyErr := e.notifyErr
+	e.mu.Unlock()
+	if notifyErr != "" {
+		results = append(results, ChannelResult{Channel: "Webhook", Error: notifyErr})
+	}
+	var channels []notify.Channel
+	if e.alerts != nil {
+		if fanout, ok := e.alerts.Sender.(*notify.Fanout); ok {
+			channels = fanout.Channels
+		}
+	}
+	if len(results) == 0 && len(channels) == 0 {
+		return nil, notify.ErrNotConfigured
+	}
+	lang := e.language()
+	msg := notify.Message{
+		Kind:  notify.KindTest,
+		Title: notify.T(lang, "test_title"),
+		Body:  notify.T(lang, "test_body"),
+		Level: notify.LevelActive,
+	}
+	tested := make([]ChannelResult, len(channels))
+	var wg sync.WaitGroup
+	for i, channel := range channels {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			result := ChannelResult{Channel: channel.Name}
+			defer func() {
+				if r := recover(); r != nil {
+					result.OK, result.Error = false, fmt.Sprintf("内部错误：%v", r)
+				}
+				tested[i] = result
+			}()
+			var err error
+			if webhook, ok := channel.Sender.(*notify.Webhook); ok {
+				result.Response, err = webhook.Deliver(ctx, msg)
+				result.Unchecked = !webhook.Checked()
+			} else {
+				err = channel.Sender.Send(ctx, msg)
+			}
+			result.OK = err == nil
+			if err != nil {
+				result.Error = err.Error()
+			}
+		}()
+	}
+	wg.Wait()
+	return append(tested, results...), nil
 }
 
 // WindowStatus is one window on the status page.
@@ -232,6 +308,8 @@ type Status struct {
 	LockError   string `json:"lock_error,omitempty"`
 	ModelsError string `json:"models_error,omitempty"`
 	ListError   string `json:"list_error,omitempty"`
+	// NotifyError is the reason the webhook settings were not applied.
+	NotifyError string `json:"notify_error,omitempty"`
 	DataDir     string `json:"data_dir"`
 	// Language is the notification language, "zh" or "en".
 	Language string `json:"language"`
@@ -261,6 +339,20 @@ func (e *Engine) Status() Status {
 	if cfg.ModelsAPIKey != "" {
 		cfg.ModelsAPIKey = "已设置"
 	}
+	// The webhook URL, headers and body can hold tokens and topic names.
+	if cfg.Webhook.URL != "" {
+		cfg.Webhook.URL = "已设置"
+	}
+	if cfg.Webhook.Body != "" {
+		cfg.Webhook.Body = "已设置"
+	}
+	if len(cfg.Webhook.Headers) > 0 {
+		headers := make(map[string]string, len(cfg.Webhook.Headers))
+		for name := range cfg.Webhook.Headers {
+			headers[name] = "已设置"
+		}
+		cfg.Webhook.Headers = headers
+	}
 	status := Status{
 		Version:     e.version,
 		Running:     e.running,
@@ -270,6 +362,7 @@ func (e *Engine) Status() Status {
 		ModelsError: e.modelsErr,
 		NextModels:  maps.Clone(e.nextModels),
 		ListError:   e.pollErrs[""],
+		NotifyError: e.notifyErr,
 		Language:    notify.NormalizeLang(e.lang),
 		DataDir:     e.dataDir,
 		Timezone:    e.cfg.Location().String(),
@@ -515,7 +608,7 @@ func (e *Engine) notified(group string, msg notify.Message) {
 	e.addEventDetail("info", "notify", group, msg.Label, msg.Title, msg.Title, map[string]string{"title": msg.Title})
 }
 
-// notifyFailed records a notification that Bark did not accept.
+// notifyFailed records a notification that a channel did not accept.
 func (e *Engine) notifyFailed(group string, msg notify.Message, err error) {
 	e.addEventDetail("warn", "notify_failed", group, msg.Label, fmt.Sprintf("%s：%v", msg.Title, err),
 		fmt.Sprintf("推送失败 %s：%v", msg.Title, err), map[string]string{"title": msg.Title, "error": err.Error()})

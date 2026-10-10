@@ -42,7 +42,7 @@ type Group struct {
 	Windows []quota.Window
 }
 
-// Alerts turns quota changes into Bark notifications.
+// Alerts turns quota changes into notifications.
 type Alerts struct {
 	Cfg    config.Config
 	Sender Sender
@@ -190,6 +190,7 @@ func (a *Alerts) buildChangeMessage(g Group, changes []change, now time.Time) Me
 		level = LevelTimeSensitive
 	}
 	return Message{
+		Kind:  KindQuota,
 		Title: fmt.Sprintf("%s %s · %s", prefix, g.Label, strings.Join(parts, " / ")),
 		Body:  a.body(g, now),
 		Level: level,
@@ -214,6 +215,7 @@ func (a *Alerts) buildRecoveryMessage(g Group, recoveries []recovery, now time.T
 		body = T(a.Lang, "previous_cycle", strings.Join(previous, " / ")) + "\n" + body
 	}
 	return Message{
+		Kind:  KindRecovery,
 		Title: T(a.Lang, "recovered", g.Label, strings.Join(labels, " / ")),
 		Body:  body,
 		Level: LevelActive,
@@ -227,6 +229,7 @@ func (a *Alerts) buildReminderMessage(g Group, reminders []reminder, now time.Ti
 		labels = append(labels, quota.ShortLabel(r.window.Label))
 	}
 	return Message{
+		Kind:  KindReminder,
 		Title: T(a.Lang, "reset_reminder", g.Label, strings.Join(labels, " / ")),
 		Body:  a.body(g, now),
 		Level: LevelActive,
@@ -484,6 +487,7 @@ func (a *Alerts) ProcessGroup(ctx context.Context, st *store.State, g Group, now
 // although its quota has recovered.
 func CooldownMessage(lang, label string, until time.Time, loc *time.Location) Message {
 	return Message{
+		Kind:  KindCooldown,
 		Title: T(lang, "cooldown_title", label),
 		Body:  T(lang, "cooldown_body", until.In(loc).Format("01/02 15:04")),
 		Level: LevelTimeSensitive,
@@ -494,6 +498,7 @@ func CooldownMessage(lang, label string, until time.Time, loc *time.Location) Me
 // CircuitMessage is sent once when ignition pauses until the next day.
 func CircuitMessage(lang, label string, until time.Time, reason string, loc *time.Location) Message {
 	return Message{
+		Kind:  KindCircuit,
 		Title: T(lang, "circuit_title", label),
 		Body:  T(lang, "circuit_body", until.In(loc).Format("01/02 15:04"), truncate(reason, 220)),
 		Level: LevelTimeSensitive,
