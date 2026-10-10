@@ -134,14 +134,17 @@ header .meta { color: var(--text-tertiary); font-size: 12.5px; font-family: var(
 
 /* In the Management Center, a floating toolbar covers the top right corner
    of the page: 178 × 52 px, 24 px from the top and right edges of the
-   window (162 × 48 px, 12 px from the edges on phones). The header leaves
-   room for it on the right, and the quota heading, whose row holds the
-   refresh button, starts 8 px below it. From 1628 px on, the page margin
-   holds the toolbar. On phones the page starts below the toolbar. */
-@media (max-width: 1628px) {
-  .embedded header { padding-right: max(0px, calc(192px - max(0px, (100vw - 1244px) / 2))); margin-bottom: 32px; }
+   window. The header leaves room for it on the right (12 px gap to the
+   right edge of main, which is 1200 px wide including its 22 px padding),
+   and the quota heading, whose row holds the refresh button, starts 8 px
+   below it. Wider than 1584 px, the page margin holds the toolbar. Up to
+   768 px the Management Center may use its phone layout, with a 162 × 48 px
+   toolbar and a 48 × 48 px menu button 12 px from the top corners, so the
+   page starts below them. */
+@media (max-width: 1584px) {
+  .embedded header { padding-right: max(0px, calc(192px - max(0px, (100vw - 1200px) / 2))); margin-bottom: 32px; }
 }
-@media (max-width: 640px) {
+@media (max-width: 768px) {
   .embedded main { padding-top: 84px; }
   .embedded header { padding-right: 0; margin-bottom: 18px; }
 }

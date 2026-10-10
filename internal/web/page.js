@@ -1849,7 +1849,9 @@
     if (media.addEventListener) media.addEventListener("change", function () { applyTheme(); renderChart(); });
   }
 
-  if (parentRoot()) document.documentElement.classList.add("embedded");
+  // Checked without reading the parent, so the layout also clears the
+  // Management Center's toolbar when it is served from another origin.
+  if (window.self !== window.top) document.documentElement.classList.add("embedded");
   applyTheme();
   applyLanguage();
   watchParent();
