@@ -6,7 +6,7 @@
 
 > 名字来自《小王子》里的点灯人：他的星球每分钟转一圈，他就每分钟点一次灯、熄一次灯，从不误点。这个插件做的也是按时点灯：每个 5 小时额度窗口一重置，就点亮下一个窗口。
 
-Lamplighter（点灯人）是 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI)（CPA）的原生插件。它监控 ChatGPT（Codex）、Claude 和 Antigravity 账号的额度，通过 [Bark](https://github.com/Finb/Bark) 推送提醒，并在 5 小时额度窗口重置后发送一个极小的请求，让下一个窗口立即开始计时。
+Lamplighter（点灯人）是 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI)（CPA）的原生插件。它监控 ChatGPT（Codex）、Claude 和 Antigravity 账号的额度，通过 [Bark](https://github.com/Finb/Bark) 或自定义 webhook 推送提醒，并在 5 小时额度窗口重置后发送一个极小的请求，让下一个窗口立即开始计时。
 
 ![管理页面：各账号额度和自动点火计划](./docs/images/overview.png)
 
@@ -17,7 +17,7 @@ Lamplighter（点灯人）是 [CLIProxyAPI](https://github.com/router-for-me/CLI
 ## 功能
 
 - **额度监控**：定时主动查询额度，同时读取 CPA 处理真实请求时上游返回的额度信息。
-- **Bark 通知**：剩余额度降到 50%、20%、10% 和耗尽时提醒；可选的恢复通知和重置前提醒；可选转发 [Did Codex Reset](https://didcodexreset.com/zh.html) 的重置信号。
+- **通知**：通过 Bark 或 webhook（飞书、ntfy、钉钉、Telegram 等）推送。剩余额度降到 50%、20%、10% 和耗尽时提醒；可选的恢复通知和重置前提醒；可选转发 [Did Codex Reset](https://didcodexreset.com/zh.html) 的重置信号。
 - **自动点火**：每天 07:00 起，在每次 5 小时窗口重置后 3 秒发送最小请求，最晚到 22:30。请求经过 CPA 自己的模型执行器，并锁定到指定账号。
 - **管理页面**：在 CPA 管理中心查看各账号额度、点火计划、事件和额度变化图表，并修改设置。
 
@@ -33,7 +33,7 @@ Lamplighter（点灯人）是 [CLIProxyAPI](https://github.com/router-for-me/CLI
 
 - CPA v8.0.4 或更新版本，并开启插件（`plugins.enabled: true`）。插件提供 Linux amd64/arm64、macOS amd64/arm64 和 Windows amd64 版本；macOS 版本只在 CI 中构建和测试，还没有在实际运行的 CPA 上验证。
 - 一个专门给 Lamplighter 用的 CPA API key。插件用它读取模型列表来选择点火模型。
-- 需要通知时，一台装有 Bark 的 iPhone。
+- 需要通知时，一台装有 Bark 的 iPhone，或者一个能接收 webhook 的服务。
 
 ## 安装
 
@@ -86,7 +86,7 @@ Claude 和 Codex 的额度无论主动还是被动获取，都精确到 1%；Ant
 
 **失败保护**：
 
-- 认证失败、限流（429）、模型不可用，或请求成功但窗口没有开始，都会让这个额度组停止点火到第二天 07:00，并推送一次 Bark。
+- 认证失败、限流（429）、模型不可用，或请求成功但窗口没有开始，都会让这个额度组停止点火到第二天 07:00，并推送一次通知。
 - 网络错误和服务端错误先在 5 分钟、15 分钟后重试；第三次仍失败，同样停到第二天。
 - 额度在重置前用完时，CPA 会把账号冷却到重置后十几秒。点火撞上这段冷却时，等冷却结束后立即重试，不算失败。
 - 同一账号的 7 天额度（或其他非 5 小时窗口）用完时，这个额度组不再自动点火，等到该窗口重置、查询看到额度恢复后继续；页面状态显示“7 天额度已用完”。“立即点火”不受影响。
@@ -111,9 +111,10 @@ Claude 和 Codex 的额度无论主动还是被动获取，都精确到 1%；Ant
 
 | 配置项 | 默认值 | 说明 |
 | --- | --- | --- |
-| `bark_url` | 空 | Bark 推送地址，写到 device key 为止；为空时不推送 |
+| `bark_url` | 空 | Bark 推送地址，写到 device key 为止；为空时不通过 Bark 推送 |
 | `bark_group` | `CPA` | Bark 通知分组 |
 | `bark_icon` | Lamplighter 图标 | 通知图标 |
+| `webhook` | 空 | 自定义 webhook，见 [Webhook](#webhook) |
 | `notice_threshold` | `50` | 第一档提醒阈值（剩余百分比） |
 | `low_threshold` | `20` | 第二档提醒阈值 |
 | `critical_threshold` | `10` | 第三档提醒阈值 |
@@ -192,6 +193,69 @@ plugins:
         enabled: true
 ```
 
+## Webhook
+
+除了 Bark，还可以配置一个 webhook，把通知发到飞书、ntfy、钉钉、Telegram 等服务或者自己的程序。两个渠道都配置时，每条通知同时发给两边；只要有一边发送成功就算送达，不再重试，失败的一边在事件中记为“推送失败”。
+
+| 配置项 | 默认值 | 说明 |
+| --- | --- | --- |
+| `url` | 空 | 请求地址；为空时不启用 |
+| `method` | `POST` | `GET`、`POST` 或 `PUT` |
+| `headers` | 空 | 请求头，例如 `Authorization: Bearer <token>` |
+| `body` | 空 | 请求体；为空时发送内置的 JSON 消息。`GET` 请求不能设置 |
+| `success_json` | 空 | 成功条件：JSON 响应中这些顶层字段必须等于给定的值，例如 `code: 0`；为空时只要求 HTTP 状态码为 2xx |
+
+地址、请求头和请求体中可以使用占位符：
+
+| 占位符 | 内容 |
+| --- | --- |
+| `{{title}}` | 通知标题 |
+| `{{body}}` | 通知正文 |
+| `{{text}}` | 标题和正文，中间换行 |
+| `{{url}}` | 跳转链接，只有 Did Codex Reset 通知有，其余为空 |
+| `{{priority}}` | 额度降到第三档或耗尽、点火暂停、CPA 冷却未解除时为 `high`，其余为 `normal` |
+| `{{kind}}` | 通知类型：`quota` 额度下降、`recovery` 额度恢复、`reminder` 重置提醒、`cooldown` CPA 冷却未解除、`circuit` 点火暂停、`codex_reset` Did Codex Reset、`test` 测试推送 |
+| `{{label}}` | 额度组，例如 `ChatGPT#rk`；与额度组无关的通知为空 |
+| `{{time}}` | 发送时间，RFC 3339 格式，使用插件时区 |
+
+占位符按所在位置自动转义：地址中做 URL 编码；JSON 请求体中做 JSON 字符串转义，所以要写在引号里；表单请求体中做表单编码；请求头中把换行换成空格。没有设置 `Content-Type` 请求头时，请求体是 JSON（占位符写在引号里）就按 JSON 发送，否则按纯文本发送。
+
+不写 `body` 时发送的 JSON：
+
+```json
+{"source":"lamplighter","kind":"quota","title":"🔴 ChatGPT#rk · 5h 8% | 03h","body":"5h：8% | 03h | 10/10 19:00\n7d：60% | 04d | 10/14 09:00","text":"…","url":"","priority":"high","label":"ChatGPT#rk","time":"2026-10-10T16:00:00+08:00"}
+```
+
+常见服务的写法如下。这些是按各服务文档整理的格式示例，没有逐一实测。
+
+| 服务 | `url` | `body` | `success_json` |
+| --- | --- | --- | --- |
+| ntfy | `https://ntfy.sh/` | `{"topic":"<topic>","title":"{{title}}","message":"{{body}}"}` | 不需要 |
+| 飞书 | `https://open.feishu.cn/open-apis/bot/v2/hook/<token>` | `{"msg_type":"text","content":{"text":"{{text}}"}}` | `code: 0` |
+| 钉钉 | `https://oapi.dingtalk.com/robot/send?access_token=<token>` | `{"msgtype":"text","text":{"content":"{{text}}"}}` | `errcode: 0` |
+| 企业微信 | `https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=<key>` | `{"msgtype":"text","text":{"content":"{{text}}"}}` | `errcode: 0` |
+| Discord | `https://discord.com/api/webhooks/<id>/<token>` | `{"content":"{{text}}"}` | 不需要 |
+| Slack | `https://hooks.slack.com/services/<path>` | `{"text":"{{text}}"}` | 不需要 |
+| Telegram | `https://api.telegram.org/bot<token>/sendMessage` | `{"chat_id":"<chat_id>","text":"{{text}}"}` | 不需要 |
+
+以飞书为例，在 `config.yaml` 中写成下面这样。请求体含有 `{{`，要用单引号括起来：
+
+```yaml
+plugins:
+  configs:
+    lamplighter:
+      webhook:
+        url: "https://open.feishu.cn/open-apis/bot/v2/hook/<token>"
+        body: '{"msg_type":"text","content":{"text":"{{text}}"}}'
+        success_json:
+          code: 0
+```
+
+- 飞书、钉钉和企业微信在发送失败时也返回 HTTP 200，错误码写在响应里，所以要设置 `success_json`，否则失败的推送会被当作成功。
+- 插件不支持飞书和钉钉机器人的“签名校验”。请在机器人的安全设置中改用“自定义关键词”或 IP 白名单；使用关键词时，把它写进请求体，例如 `"text":"Lamplighter {{text}}"`。
+- 管理页面的“测试推送”逐个显示每个渠道的结果和 webhook 响应的开头。没有设置 `success_json` 时，页面会提示只检查了 HTTP 状态码，需要到客户端确认是否收到。
+- webhook 设置有误（例如占位符拼错）时，webhook 不启用，管理页面顶部显示原因，其他设置照常生效。
+
 ## 管理页面
 
 页面包含：
@@ -200,14 +264,14 @@ plugins:
 - 每个额度组的下次点火时间、最近一次结果和失败保护状态，可以立即点火；
 - 额度变化图表：先选 5 小时或 7 天额度，5 小时额度可看最近 1、3、6、12、24、26 小时（默认 6 小时），7 天额度可看最近 1、4、8、15 天、1 个月（上月这一天到今天）和 36 天（默认 8 天）。上半部分每个服务一行色带，颜色与额度条相同，默认按 Claude、ChatGPT、Gemini、Fable、Claude / GPT 排列，也可按剩余最低排序；同一服务有多个账号时显示合计，点击可展开各账号。下半部分是所选行的曲线，标出重置时刻和点火结果；
 - 最近的事件，按时间、类型、额度组和详情分列显示；
-- 设置表单。通知设置中可以发送测试推送，推送使用插件已应用的设置，修改 Bark 地址后等几秒再测试。点火模型留空时，输入框的提示文字显示下一次点火将使用的模型；Antigravity 显示 Gemini 组的模型。模型列表在插件启动、修改 `cpa_base_url` 或 `models_api_key` 和每次点火时读取，所以 CPA 列出的新模型在下一次点火后才显示，点火本身会直接使用新模型。
+- 设置表单。通知设置中可以发送测试推送：发到所有已配置的渠道并逐个显示结果，使用插件已应用的设置，修改设置后等几秒再测试。点火模型留空时，输入框的提示文字显示下一次点火将使用的模型；Antigravity 显示 Gemini 组的模型。模型列表在插件启动、修改 `cpa_base_url` 或 `models_api_key` 和每次点火时读取，所以 CPA 列出的新模型在下一次点火后才显示，点火本身会直接使用新模型。
 
 页面语言跟随 CPA 管理中心：简体或繁体中文显示中文，其他语言显示英文。
 
 ## 安全与风险
 
 - 插件只在内存中读取凭证文件里的 access token 用于查询额度，不写入日志或磁盘。管理页面和接口都需要 CPA 管理密钥。
-- `bark_url` 和 `models_api_key` 以明文保存在 CPA 的 `config.yaml` 中，有管理密钥的人可以看到。
+- `bark_url`、`webhook` 和 `models_api_key` 以明文保存在 CPA 的 `config.yaml` 中，有管理密钥的人可以看到。
 - 各服务对第三方工具使用订阅账号有不同限制。通过 CPA 使用账号、定时发送点火请求和查询额度，都可能带来账号风险，请自行判断。
 
 ## 开发

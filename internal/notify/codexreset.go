@@ -284,7 +284,7 @@ func ResetMessage(r ResetRecord, loc *time.Location, lang string) Message {
 	if body == "" {
 		body = T(lang, "reset_signal")
 	}
-	msg := Message{Title: title, Body: body, Level: LevelActive}
+	msg := Message{Kind: KindCodexReset, Title: title, Body: body, Level: LevelActive}
 	if announced := quota.ParseTime(r.str("announcedAt")); !announced.IsZero() {
 		msg.JumpURL = T(lang, "reset_history_link", announced.UnixMilli())
 	}

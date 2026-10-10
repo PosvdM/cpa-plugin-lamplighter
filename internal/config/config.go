@@ -87,11 +87,26 @@ func (m WindowModes) For(sevenDay bool) string {
 	return m.FiveHour
 }
 
+// Webhook is a user-defined HTTP endpoint that receives every notification.
+// Placeholders such as {{title}} in URL, Headers and Body are filled per
+// message; package notify lists them and checks the settings.
+type Webhook struct {
+	URL     string            `yaml:"url" json:"url"`
+	Method  string            `yaml:"method" json:"method"`
+	Headers map[string]string `yaml:"headers,omitempty" json:"headers,omitempty"`
+	// Body is the request body. Empty sends the built-in JSON message.
+	Body string `yaml:"body" json:"body"`
+	// SuccessJSON lists top-level fields the JSON response must contain for
+	// the delivery to count. Empty accepts any 2xx response.
+	SuccessJSON map[string]any `yaml:"success_json,omitempty" json:"success_json,omitempty"`
+}
+
 // Config is the effective plugin configuration.
 type Config struct {
 	BarkURL           string  `yaml:"bark_url" json:"bark_url"`
 	BarkGroup         string  `yaml:"bark_group" json:"bark_group"`
 	BarkIcon          string  `yaml:"bark_icon" json:"bark_icon"`
+	Webhook           Webhook `yaml:"webhook" json:"webhook"`
 	NoticeThreshold   float64 `yaml:"notice_threshold" json:"notice_threshold"`
 	LowThreshold      float64 `yaml:"low_threshold" json:"low_threshold"`
 	CriticalThreshold float64 `yaml:"critical_threshold" json:"critical_threshold"`
@@ -257,6 +272,11 @@ func (c *Config) normalize() {
 	c.BarkIcon = strings.TrimSpace(c.BarkIcon)
 	if c.BarkIcon == oldBarkIcon {
 		c.BarkIcon = DefaultBarkIcon
+	}
+	c.Webhook.URL = strings.TrimSpace(c.Webhook.URL)
+	c.Webhook.Method = strings.ToUpper(strings.TrimSpace(c.Webhook.Method))
+	if c.Webhook.Method == "" {
+		c.Webhook.Method = "POST"
 	}
 	c.CPABaseURL = strings.TrimRight(strings.TrimSpace(c.CPABaseURL), "/")
 	if c.CPABaseURL == "" {
