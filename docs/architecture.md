@@ -18,7 +18,7 @@ Lamplighter 是用 Go 编写、以 `-buildmode=c-shared` 构建的 CPA 原生插
 | `internal/egress` | 选择额度请求的网络出口 |
 | `internal/models` | 读取 CPA 模型列表，排列点火候选模型 |
 | `internal/ignite` | 点火时间计算、滑动重置判断、失败分类和失败保护 |
-| `internal/notify` | Bark 发送、额度提醒、Did Codex Reset 转发 |
+| `internal/notify` | Bark 和 webhook 发送、额度提醒、Did Codex Reset 转发 |
 | `internal/store` | `state.json`、额度历史和实例锁 |
 | `internal/web` | 管理页面，HTML、CSS、JS 分文件编辑，运行时合成一个文档 |
 
@@ -37,10 +37,10 @@ Lamplighter 是用 Go 编写、以 `-buildmode=c-shared` 构建的 CPA 原生插
 | `GET /v0/management/lamplighter/history?range=1h\|3h\|6h\|12h\|24h\|26h\|4d\|8d\|15d\|1mo\|36d` | 额度历史和点火事件，默认 `24h`。5 小时额度按小时、7 天额度按天，依次是：1 个单位；半个窗口加 1（`3h`、`4d`）；一个窗口加 1（`6h`、`8d`）；半天或半月，能完整显示两个窗口（`12h`、`15d`）；一天或一个月（`24h`、`1mo`）；五个窗口加 1（`26h`、`36d`）。`1mo` 从插件时区上个月的同一日期（该月没有这一天时取最后一天）到现在 |
 | `POST /v0/management/lamplighter/refresh` | 立即主动查询，`{"auth_index": "..."}` 只查一个账号 |
 | `POST /v0/management/lamplighter/ignite` | 立即点火，`{"target": "<额度组 key>"}` |
-| `POST /v0/management/lamplighter/test-bark` | 发送测试通知 |
+| `POST /v0/management/lamplighter/test-notify` | 逐个向已配置的渠道发送测试通知，`results` 中每个渠道一项：`channel`、`ok`、`error`，webhook 还有 `response`（响应的前 200 字）和 `unchecked`（没有设置 `success_json`，只检查了 HTTP 状态码） |
 | `POST /v0/management/lamplighter/language` | 记录通知语言，`{"language": "zh-CN"}`；中文的各种写法记为 `zh`，其他语言记为 `en` |
 
-页面注册为资源 `GET /v0/resource/plugins/lamplighter/page`，菜单名为 `Lamplighter`。资源本身不需要认证，页面中的数据请求都带管理密钥。页面从管理中心保存在 `localStorage` 的 `cli-proxy-auth` 中读取密钥（管理中心用主机名和 User-Agent 做了可逆混淆），读不到时让用户输入并只保存在 `sessionStorage`。设置通过 CPA 的 `PATCH /v0/management/plugins/lamplighter/config` 自动保存：表单的 `change` 事件触发保存，每次只提交改动字段所在的顶层键。该接口只合并顶层键，所以 `ignition`、`providers`、`recovery_notify` 等对象以已保存的对象为基础整体提交。保存依次进行，后一次以前一次写入的配置为基础；数字不满足输入框的范围或步长时不保存。最后一次保存 3 秒后，页面重新读取状态，把保存过的字段填成插件应用后的值，正在编辑的字段不回填；保存失败时恢复为已保存的值。测试推送等待未完成的保存后再发送。
+页面注册为资源 `GET /v0/resource/plugins/lamplighter/page`，菜单名为 `Lamplighter`。资源本身不需要认证，页面中的数据请求都带管理密钥。页面从管理中心保存在 `localStorage` 的 `cli-proxy-auth` 中读取密钥（管理中心用主机名和 User-Agent 做了可逆混淆），读不到时让用户输入并只保存在 `sessionStorage`。设置通过 CPA 的 `PATCH /v0/management/plugins/lamplighter/config` 自动保存：表单的 `change` 事件触发保存，每次只提交改动字段所在的顶层键。该接口只合并顶层键，所以 `ignition`、`providers`、`recovery_notify` 等对象以已保存的对象为基础整体提交。保存依次进行，后一次以前一次写入的配置为基础；数字不满足输入框的范围或步长时不保存。`webhook.headers` 和 `webhook.success_json` 在页面上以文本编辑（每行一个 `名称: 值`、JSON 对象），无法解析时不保存。状态接口只返回 webhook 的地址、请求头和请求体是否已设置，页面从 CPA 的插件配置接口读取原值填入表单。最后一次保存 3 秒后，页面重新读取状态，把保存过的字段填成插件应用后的值，正在编辑的字段不回填；保存失败时恢复为已保存的值。测试推送等待未完成的保存后再发送。
 
 页面标题旁的图标从 GitHub 加载仓库中的 `assets/logo.png`，更换图标不需要发布新版本；加载失败时不显示。
 
@@ -200,7 +200,7 @@ CPA 本地冷却带有 `reset_seconds` 且不超过 10 分钟时（`ignite.Coold
 
 **过期的 CPA 冷却**：CPA 收到账号级 429 后，把凭证冷却到上游报告的重置时间（7 天额度用完时可达数天），额度提前恢复（如重置卡）时不会自动解除。每轮查询后，`engine.checkCooldowns` 检查每个凭证：CPA 冷却还剩 10 分钟以上，且某个带 5 小时窗口的额度组在最近 15 分钟内的数据显示所有窗口都没有用完，就认为冷却已过期。每个冷却结束时间只推送一次（`state.json` 的 `cooldown_notices`），并记录 `cooldown_stale` 事件；状态接口的账号带 `cooldown_until` 和 `stale_cooldown`。插件不替用户清除冷却，因为那需要 CPA 管理密钥，并且会改变 CPA 的路由状态。
 
-暂停时推送一次 Bark（`circuit_notified_until_epoch` 防止重复），成功或看到固定的未来重置时间后清空失败状态。
+暂停时推送一次通知（`circuit_notified_until_epoch` 防止重复），成功或看到固定的未来重置时间后清空失败状态。
 
 ## 通知
 
@@ -216,11 +216,21 @@ CPA 本地冷却带有 `reset_seconds` 且不超过 10 分钟时（`ignite.Coold
 - 重置前提醒：5 小时类窗口在重置前 1 小时提醒一次（`reset_notice_1h_for`），7 天类窗口在重置前 1 天提醒一次（`reset_notice_1d_for`）。`has_remaining` 模式只在剩余高于 `critical_threshold` 时提醒。
 - 两个重置时间相差不超过 10 秒视为同一周期。
 - 第一次看到某个窗口只记录基线，不推送。
-- 推送失败时不更新已通知等级，下一次检查会重试。
+- 推送失败（所有渠道都失败）时不更新已通知等级，下一次检查会重试。
 
 Bark 请求为 `GET {bark_url}/{标题}/{正文}?group&level&icon&url`，标题和正文除 RFC 3986 非保留字符外全部百分号编码，返回 JSON 中 `code` 不为 200 视为失败。`icon` 默认使用仓库中的 `assets/logo.png`；配置中的 `bark_icon` 仍为旧默认值（CPA Management Center 图标）时，载入时替换为该默认值。
 
-通知文字在 `internal/notify/text.go` 中，中文和英文各一列，按 `state.json` 的 `language` 选择。语言由管理页面上报：Bark 推送时没有打开的页面，所以使用最近一次上报的语言，没有上报过时使用中文。窗口名在通知中始终写作 `5h`、`7d`。Did Codex Reset 的跳转链接按语言指向中文版或英文版的历史页面。
+### 渠道
+
+`engine.applyRuntimeConfig` 在配置变化时按 `bark_url` 和 `webhook.url` 建立渠道，交给 `notify.Fanout`。`Fanout` 同时向所有渠道发送，等全部返回后：至少一个渠道成功就算送达，失败的渠道各记一条 `notify_failed` 事件，`error` 以渠道名开头；所有渠道都失败才算推送失败，由调用方按上文的规则重试。只要有渠道成功就不重试，因为重试会让已经收到的渠道重复收到同一条通知。没有任何渠道时返回 `notify.ErrNotConfigured`。
+
+`notify.NewWebhook` 检查 webhook 设置：地址必须是 http 或 https，方法只能是 `GET`、`POST`、`PUT`，`GET` 不能带请求体，请求头名称必须合法，占位符必须在 `notify.Placeholders` 中。检查不通过时 webhook 不启用，原因写进状态接口的 `notify_error`，页面显示为提示，测试推送也把它作为失败结果返回；配置的其他部分照常生效。
+
+每条消息按位置转义占位符：地址中用与 Bark 相同的百分号编码，请求体按 `Content-Type` 做 JSON 字符串转义或表单编码，其他类型原样填入，请求头中把换行换成空格。没有写 `Content-Type` 时，去掉占位符后以 `{` 或 `[` 开头的请求体按 JSON 发送，其余按纯文本发送；请求体为空时发送内置 JSON（`source` 加上全部占位符）。`{{priority}}` 由 Bark 的级别换算：`timeSensitive` 为 `high`，其余为 `normal`；`{{kind}}` 取自 `Message.Kind`。
+
+webhook 响应最多读 64 KB。非 2xx 视为失败；设置了 `success_json` 时，响应还必须是 JSON 对象，并且其中每个指定的顶层字段都等于期望值。期望值先经过一次 JSON 编码和解码再比较，所以 YAML 中的整数 `0` 与响应中的 `0.0` 相等。错误和测试结果中的响应文字会去掉 `*url.Error` 带的请求地址，并把地址、较长的路径段和查询参数值、请求头的值替换为 `[redacted]`，因为这些位置常带有 token。
+
+通知文字在 `internal/notify/text.go` 中，中文和英文各一列，按 `state.json` 的 `language` 选择。语言由管理页面上报：推送时没有打开的页面，所以使用最近一次上报的语言，没有上报过时使用中文。窗口名在通知中始终写作 `5h`、`7d`。Did Codex Reset 的跳转链接按语言指向中文版或英文版的历史页面。
 
 Did Codex Reset 每 `poll_seconds` 秒（最少 300 秒，对齐时间边界）读取最新 10 条记录。非 `manual:` 记录按 ID 去重，`manual:` 记录的 ID 可能变化，按内容去重；最多保留 100 个已见记录。第一次运行把现有记录标为已见，只在 `notify_current_pending` 开启时推送当前待生效的排期。
 
@@ -246,6 +256,6 @@ Did Codex Reset 每 `poll_seconds` 秒（最少 300 秒，对齐时间边界）�
 
 - 点火只通过 `host.model.execute` 发送，并锁定到具体凭证；不要在插件中拼装服务的模型请求。
 - 额度请求的出口必须与 CPA 模型请求一致；出口无法确定时跳过请求，不能退回直连。
-- 不在日志、事件、状态接口或磁盘中输出 access token、`bark_url` 和 `models_api_key`。
+- 不在日志、事件、状态接口或磁盘中输出 access token、`bark_url`、`webhook` 的地址、请求头和请求体，以及 `models_api_key`。
 - 宿主回调的 JSON 字段以 CPA v8.0.4 的 `sdk/pluginapi` 和 `internal/pluginhost` 为准；修改前对照 CPA 源码。
 - 修改 `state.json` 结构时保持向后兼容：新字段使用缺省值，旧字段缺失时继续运行。

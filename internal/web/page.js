@@ -109,7 +109,15 @@
       settings: "设置",
       notifications: "通知",
       bark_url: "Bark 推送地址", bark_group: "Bark 分组",
-      test_bark: "测试推送", test_bark_hint: "按插件已应用的设置发送，修改地址后等几秒再测试",
+      webhook_url: "Webhook 地址", webhook_method: "请求方法", webhook_headers: "请求头（每行一个）", webhook_body: "请求体",
+      webhook_body_placeholder: "留空时发送内置的 JSON 消息",
+      webhook_success: "成功条件（可选）", webhook_success_hint: "JSON 响应必须包含这些字段和值才算发送成功；留空时只检查 HTTP 状态码",
+      webhook_hint: "地址、请求头和请求体中可以使用占位符：{{title}} {{body}} {{text}} {{url}} {{priority}} {{kind}} {{label}} {{time}}。各服务的写法见 README。",
+      headers_invalid: "每行写一个请求头，格式为 名称: 值", json_invalid: "请填写 JSON 对象，例如 {\"code\":0}",
+      test_notify: "测试推送", test_notify_hint: "按插件已应用的设置发送到所有已配置的渠道，修改设置后等几秒再测试",
+      test_ok: "{0}：已发送", test_failed: "{0}：失败，{1}", test_response: "响应：{0}",
+      test_unchecked: "只检查了 HTTP 状态码。飞书、钉钉、企业微信等服务失败时也返回 200，请到客户端确认是否收到，或设置成功条件。",
+      test_some_failed: "部分渠道测试失败",
       thresholds: "提醒阈值", remaining_le: "剩余 ≤",
       thresholds_hint: "额度降到每一档时推送一次，耗尽时再推送一次",
       window_5h: "5 小时窗口", window_7d: "7 天窗口",
@@ -150,7 +158,8 @@
       last_poll: "上次查询 {0}（{1}）", next_poll: "下次 {0}（{1}）",
       config_error: "配置无法解析，仍在使用上一份配置：{0}",
       models_error: "模型列表不可用：{0}",
-      no_bark: "未设置 Bark 推送地址，通知不会发送。",
+      no_channel: "未设置 Bark 推送地址或 Webhook 地址，通知不会发送。",
+      notify_error: "Webhook 设置无效，未启用：{0}",
       no_models_key: "未设置模型列表 API key，自动点火无法选择模型。",
       remaining_aria: "{0} {1} 剩余",
       source_passive: "被动", source_active: "主动", updated: "更新于 {0}",
@@ -223,7 +232,15 @@
       settings: "Settings",
       notifications: "Notifications",
       bark_url: "Bark push URL", bark_group: "Bark group",
-      test_bark: "Send test", test_bark_hint: "Uses the settings the plugin has applied; after changing the URL, wait a few seconds",
+      webhook_url: "Webhook URL", webhook_method: "Method", webhook_headers: "Headers (one per line)", webhook_body: "Body",
+      webhook_body_placeholder: "Empty sends the built-in JSON message",
+      webhook_success: "Success condition (optional)", webhook_success_hint: "The JSON response must contain these fields and values for the delivery to count; empty checks only the HTTP status",
+      webhook_hint: "The URL, headers and body can use placeholders: {{title}} {{body}} {{text}} {{url}} {{priority}} {{kind}} {{label}} {{time}}. See the README for each service.",
+      headers_invalid: "One header per line, as Name: value", json_invalid: "Enter a JSON object, such as {\"code\":0}",
+      test_notify: "Send test", test_notify_hint: "Sends to every configured channel using the settings the plugin has applied; after changing a setting, wait a few seconds",
+      test_ok: "{0}: sent", test_failed: "{0}: failed, {1}", test_response: "Response: {0}",
+      test_unchecked: "Only the HTTP status was checked. Feishu, DingTalk, WeCom and similar services answer 200 on failure too, so check that the message arrived or set a success condition.",
+      test_some_failed: "A channel failed the test",
       thresholds: "Alert thresholds", remaining_le: "Remaining ≤",
       thresholds_hint: "One notification when quota drops to each threshold, and one more when it runs out",
       window_5h: "5-hour window", window_7d: "7-day window",
@@ -264,7 +281,8 @@
       last_poll: "last query {0} ({1})", next_poll: "next {0} ({1})",
       config_error: "The config cannot be parsed; the previous config stays in use: {0}",
       models_error: "Model list unavailable: {0}",
-      no_bark: "No Bark push URL is set, so no notifications are sent.",
+      no_channel: "No Bark push URL or webhook URL is set, so no notifications are sent.",
+      notify_error: "The webhook settings are invalid, so the webhook is off: {0}",
       no_models_key: "No model list API key is set, so ignition cannot pick a model.",
       remaining_aria: "{0} {1} remaining",
       source_passive: "passive", source_active: "active", updated: "updated {0}",
@@ -564,7 +582,10 @@
     if (status.lock_error) box.appendChild(notice(status.lock_error));
     if (status.list_error) box.appendChild(notice(status.list_error));
     if (status.models_error) box.appendChild(notice(translate("models_error", status.models_error)));
-    if (status.config && !status.config.bark_url) box.appendChild(notice(translate("no_bark")));
+    if (status.notify_error) box.appendChild(notice(translate("notify_error", status.notify_error)));
+    if (status.config && !status.config.bark_url && !(status.config.webhook && status.config.webhook.url) && !status.notify_error) {
+      box.appendChild(notice(translate("no_channel")));
+    }
     if (status.config && status.config.ignition && status.config.ignition.enabled && !status.config.models_api_key) {
       box.appendChild(notice(translate("no_models_key")));
     }
@@ -1548,12 +1569,51 @@
     var effective = JSON.parse(JSON.stringify(status.config || {}));
     effective.bark_url = rawConfig.bark_url || "";
     effective.models_api_key = rawConfig.models_api_key || "";
+    var webhook = rawConfig.webhook || {};
+    effective.webhook = effective.webhook || {};
+    effective.webhook.url = webhook.url || "";
+    effective.webhook.body = webhook.body || "";
+    effective.webhook.headers = webhook.headers || {};
     return effective;
+  }
+
+  // Fields with data-format edit an object as text: "headers" as one
+  // "Name: value" line per header, "json" as JSON.
+  function formatValue(format, value) {
+    if (!value || typeof value !== "object" || !Object.keys(value).length) return "";
+    if (format === "headers") return Object.keys(value).map(function (name) { return name + ": " + value[name]; }).join("\n");
+    return JSON.stringify(value);
+  }
+
+  // parseValue returns the object for the text of a data-format field, null
+  // for empty text, or throws with a message for the field.
+  function parseValue(format, text) {
+    text = text.trim();
+    if (!text) return null;
+    if (format === "headers") {
+      var headers = {};
+      text.split(/\r?\n/).forEach(function (line) {
+        if (!line.trim()) return;
+        var at = line.indexOf(":");
+        var name = at > 0 ? line.slice(0, at).trim() : "";
+        if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name)) throw new Error(translate("headers_invalid"));
+        headers[name] = line.slice(at + 1).trim();
+      });
+      return headers;
+    }
+    var value;
+    try { value = JSON.parse(text); } catch (err) { throw new Error(translate("json_invalid")); }
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(translate("json_invalid"));
+    return value;
   }
 
   function fillInput(input, effective) {
     var value = getPath(effective, input.name);
-    if (input.type === "checkbox") input.checked = !!value;
+    var format = input.getAttribute("data-format");
+    if (format) {
+      input.value = formatValue(format, value);
+      input.setCustomValidity("");
+    } else if (input.type === "checkbox") input.checked = !!value;
     else if (input.type === "radio") input.checked = input.value === value;
     else input.value = value === undefined || value === null ? "" : value;
   }
@@ -1604,7 +1664,17 @@
     Array.prototype.forEach.call($("settings").elements, function (input) {
       if (!input.name || topKey(input.name) !== top) return;
       var value;
-      if (input.type === "checkbox") value = input.checked;
+      var format = input.getAttribute("data-format");
+      if (format) {
+        // Text that does not parse keeps the saved value.
+        try { value = parseValue(format, input.value); } catch (err) { return; }
+        if (value === null) {
+          var parts = input.name.split(".");
+          var parent = getPath(patch, parts.slice(0, -1).join("."));
+          if (parent) delete parent[parts[parts.length - 1]];
+          return;
+        }
+      } else if (input.type === "checkbox") value = input.checked;
       else if (input.type === "radio") {
         if (!input.checked) return;
         value = input.value;
@@ -1645,6 +1715,17 @@
       if (!input.checkValidity()) { input.reportValidity(); return; }
       if (input.value === "") { fillInput(input, effectiveConfig()); return; }
     }
+    var format = input.getAttribute("data-format");
+    if (format) {
+      try {
+        parseValue(format, input.value);
+        input.setCustomValidity("");
+      } catch (err) {
+        input.setCustomValidity(err.message);
+        input.reportValidity();
+        return;
+      }
+    }
     saveQueue = saveQueue.then(function () {
       return api("PATCH", CONFIG_API, buildPatch(top)).then(function () {
         toast(translate("saved"));
@@ -1666,6 +1747,19 @@
       var keys = refillKeys;
       refillKeys = {};
       return loadStatus().then(function () { fillSettings(keys); }).catch(function () {});
+    });
+  }
+
+  // One line per channel; a webhook also shows the start of its response and,
+  // without a success condition, that only the HTTP status was checked.
+  function renderTestResults(results) {
+    var box = $("test-results");
+    clear(box);
+    (results || []).forEach(function (r) {
+      var children = [el("span", { text: r.ok ? translate("test_ok", r.channel) : translate("test_failed", r.channel, r.error) })];
+      if (r.ok && r.response) children.push(el("span", { class: "hint", text: translate("test_response", r.response) }));
+      if (r.ok && r.unchecked) children.push(el("span", { class: "hint", text: translate("test_unchecked") }));
+      box.appendChild(el("div", { class: "test-result " + (r.ok ? "ok" : "failed") }, children));
     });
   }
 
@@ -1701,9 +1795,20 @@
   $("refresh-all").addEventListener("click", function (e) {
     runAction(e.currentTarget, API + "/refresh", {}, translate("refreshed_all"));
   });
-  $("test-bark").addEventListener("click", function (e) {
+  $("test-notify").addEventListener("click", function (e) {
     var button = e.currentTarget;
-    saveQueue.then(function () { runAction(button, API + "/test-bark", {}, translate("test_sent")); });
+    button.disabled = true;
+    clear($("test-results"));
+    saveQueue.then(function () {
+      return api("POST", API + "/test-notify", {});
+    }).then(function (data) {
+      if (data.status) { status = data.status; renderStatus(); }
+      renderTestResults(data.results);
+      if (data.ok) toast(translate("test_sent"));
+      else toast(data.results ? translate("test_some_failed") : translate("failed", data.error));
+    }).catch(function (err) {
+      if (err.message !== "unauthorized") toast(translate("failed", err.message));
+    }).then(function () { button.disabled = false; });
   });
   $("settings").addEventListener("change", saveField);
   $("settings").addEventListener("submit", function (e) { e.preventDefault(); });

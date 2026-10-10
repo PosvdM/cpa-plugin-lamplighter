@@ -1,5 +1,5 @@
-// Package notify sends Bark notifications for quota changes, ignition pauses
-// and Did Codex Reset signals.
+// Package notify sends notifications for quota changes, ignition pauses and
+// Did Codex Reset signals through Bark and a user-defined webhook.
 package notify
 
 import (
@@ -20,24 +20,36 @@ const (
 	LevelTimeSensitive = "timeSensitive"
 )
 
-// Message is one Bark notification.
+// Message kinds, sent to the webhook as {{kind}}.
+const (
+	KindQuota      = "quota"
+	KindRecovery   = "recovery"
+	KindReminder   = "reminder"
+	KindCooldown   = "cooldown"
+	KindCircuit    = "circuit"
+	KindCodexReset = "codex_reset"
+	KindTest       = "test"
+)
+
+// Message is one notification.
 type Message struct {
+	Kind    string
 	Title   string
 	Body    string
 	Level   string
 	JumpURL string
-	// Label is the quota group the message is about, for the event log.
-	// It is not sent to Bark.
+	// Label is the quota group the message is about, for the event log and
+	// the webhook. It is not sent to Bark.
 	Label string
 }
 
-// Sender delivers a message and reports whether Bark accepted it.
+// Sender delivers a message and reports whether the channel accepted it.
 type Sender interface {
 	Send(ctx context.Context, msg Message) error
 }
 
-// ErrNotConfigured means bark_url is empty.
-var ErrNotConfigured = errors.New("未配置 bark_url")
+// ErrNotConfigured means neither bark_url nor webhook.url is set.
+var ErrNotConfigured = errors.New("未配置推送渠道（bark_url 或 webhook.url）")
 
 // Bark sends messages to a Bark server.
 type Bark struct {
@@ -58,7 +70,7 @@ func escape(value string) string {
 func (b *Bark) Send(ctx context.Context, msg Message) error {
 	base := strings.TrimRight(strings.TrimSpace(b.URL), "/")
 	if base == "" {
-		return ErrNotConfigured
+		return errors.New("未配置 bark_url")
 	}
 	params := url.Values{}
 	if b.Group != "" {
@@ -89,7 +101,8 @@ func (b *Bark) Send(ctx context.Context, msg Message) error {
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("Bark 推送失败: %w", err)
+		// The *url.Error text holds the request URL with the device key.
+		return fmt.Errorf("Bark 推送失败: %w", unwrapURLError(err))
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
@@ -103,6 +116,16 @@ func (b *Bark) Send(ctx context.Context, msg Message) error {
 		return fmt.Errorf("Bark 返回 code=%d: %s", *payload.Code, truncate(string(raw), 200))
 	}
 	return nil
+}
+
+// unwrapURLError drops the request URL that *url.Error adds to the message,
+// since push URLs carry keys and tokens.
+func unwrapURLError(err error) error {
+	var urlErr *url.Error
+	for errors.As(err, &urlErr) {
+		err = urlErr.Err
+	}
+	return err
 }
 
 func truncate(text string, n int) string {

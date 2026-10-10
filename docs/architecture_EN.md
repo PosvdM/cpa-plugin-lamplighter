@@ -18,7 +18,7 @@ Lamplighter is a CPA native plugin written in Go and built with `-buildmode=c-sh
 | `internal/egress` | Picks the network exit of quota requests |
 | `internal/models` | Reads the CPA model list and orders ignition candidates |
 | `internal/ignite` | Ignition timing, rolling-reset detection, error classification and failure protection |
-| `internal/notify` | Bark delivery, quota alerts, Did Codex Reset forwarding |
+| `internal/notify` | Bark and webhook delivery, quota alerts, Did Codex Reset forwarding |
 | `internal/store` | `state.json`, quota history and the instance lock |
 | `internal/web` | Management page; HTML, CSS and JS are separate files combined into one document at runtime |
 
@@ -37,10 +37,10 @@ Management routes (require the CPA management key):
 | `GET /v0/management/lamplighter/history?range=1h\|3h\|6h\|12h\|24h\|26h\|4d\|8d\|15d\|1mo\|36d` | Quota history and ignition events, `24h` by default. In hours for the 5-hour quota and days for the 7-day quota, the ranges are: one unit; half a window plus one (`3h`, `4d`); a window plus one (`6h`, `8d`); half a day or month, which fits two whole windows (`12h`, `15d`); a day or a month (`24h`, `1mo`); five windows plus one (`26h`, `36d`). `1mo` runs from the same date of the previous month in the plugin's time zone, or its last day when that month is shorter, to now |
 | `POST /v0/management/lamplighter/refresh` | Query now; `{"auth_index": "..."}` limits it to one account |
 | `POST /v0/management/lamplighter/ignite` | Ignite now, `{"target": "<group key>"}` |
-| `POST /v0/management/lamplighter/test-bark` | Send a test notification |
+| `POST /v0/management/lamplighter/test-notify` | Send a test notification to each configured channel in turn. `results` holds one entry per channel: `channel`, `ok`, `error`, and for the webhook `response` (the first 200 characters of the response) and `unchecked` (no `success_json`, so only the HTTP status was checked) |
 | `POST /v0/management/lamplighter/language` | Record the notification language, `{"language": "zh-CN"}`; any form of Chinese is stored as `zh`, every other language as `en` |
 
-The page is the resource `GET /v0/resource/plugins/lamplighter/page` with the menu label `Lamplighter`. The resource itself needs no authentication; its data requests carry the management key. The page reads the key from `cli-proxy-auth` in `localStorage`, where the Management Center stores it with a reversible obfuscation derived from the host and user agent; otherwise it asks for the key and keeps it in `sessionStorage` only. Settings save automatically through CPA's `PATCH /v0/management/plugins/lamplighter/config`: the form's `change` event triggers a save that sends only the top-level key of the changed field. The endpoint merges top-level keys only, so objects such as `ignition`, `providers` and `recovery_notify` are sent whole, starting from the saved object. Saves run one at a time, each starting from the config the previous one wrote; a number outside its field's range or step is not saved. Three seconds after the last save, the page reads the status again and fills the saved fields with the values the plugin applied, leaving the field being edited alone; a failed save puts the saved values back. A test notification waits for pending saves.
+The page is the resource `GET /v0/resource/plugins/lamplighter/page` with the menu label `Lamplighter`. The resource itself needs no authentication; its data requests carry the management key. The page reads the key from `cli-proxy-auth` in `localStorage`, where the Management Center stores it with a reversible obfuscation derived from the host and user agent; otherwise it asks for the key and keeps it in `sessionStorage` only. Settings save automatically through CPA's `PATCH /v0/management/plugins/lamplighter/config`: the form's `change` event triggers a save that sends only the top-level key of the changed field. The endpoint merges top-level keys only, so objects such as `ignition`, `providers` and `recovery_notify` are sent whole, starting from the saved object. Saves run one at a time, each starting from the config the previous one wrote; a number outside its field's range or step is not saved. `webhook.headers` and `webhook.success_json` are edited as text on the page (one `Name: value` line per header, a JSON object) and are not saved when they do not parse. The status API only reports whether the webhook URL, headers and body are set; the page fills the form with the saved values from CPA's plugin config endpoint. Three seconds after the last save, the page reads the status again and fills the saved fields with the values the plugin applied, leaving the field being edited alone; a failed save puts the saved values back. A test notification waits for pending saves.
 
 The icon next to the page title is `assets/logo.png` loaded from the GitHub repository, so it can change without a release; it is hidden when it fails to load.
 
@@ -200,7 +200,7 @@ When a CPA local cooldown carries a `reset_seconds` of 10 minutes or less (`igni
 
 **Stale CPA cooldowns**: after an account-level 429, CPA cools the credential down until the reset the provider reported, which can be days away when the 7-day quota is used up, and does not lift it when the quota comes back early, for example after a reset card. After each poll, `engine.checkCooldowns` checks every credential: when the CPA cooldown has more than 10 minutes left and a quota group with a 5-hour window shows, in data from the last 15 minutes, that no window is used up, the cooldown is stale. One notification is sent per cooldown end time (`cooldown_notices` in `state.json`) and a `cooldown_stale` event is recorded; accounts in the status API carry `cooldown_until` and `stale_cooldown`. The plugin does not clear the cooldown itself, because that needs the CPA management key and changes CPA's routing state.
 
-A pause sends one Bark notification (`circuit_notified_until_epoch` prevents repeats). A success or a fixed future reset clears the failure state.
+A pause sends one notification (`circuit_notified_until_epoch` prevents repeats). A success or a fixed future reset clears the failure state.
 
 ## Notifications
 
@@ -216,9 +216,19 @@ A pause sends one Bark notification (`circuit_notified_until_epoch` prevents rep
 - Reset reminders: 5-hour-kind windows are reminded once 1 hour before the reset (`reset_notice_1h_for`), 7-day-kind windows once 1 day before (`reset_notice_1d_for`). `has_remaining` reminds only when more than `critical_threshold` is left.
 - Two reset times within 10 seconds belong to the same cycle.
 - A window seen for the first time only records its baseline.
-- A failed delivery leaves the notified level unchanged, so the next check retries.
+- A failed delivery (every channel failed) leaves the notified level unchanged, so the next check retries.
 
 A Bark request is `GET {bark_url}/{title}/{body}?group&level&icon&url`, with title and body percent-encoded except RFC 3986 unreserved characters. A JSON `code` other than 200 is a failure. `icon` defaults to the repository's `assets/logo.png`; a `bark_icon` that still holds the old default (the CPA Management Center logo) is replaced with it on load.
+
+### Channels
+
+`engine.applyRuntimeConfig` builds the channels from `bark_url` and `webhook.url` when the config changes and hands them to `notify.Fanout`. `Fanout` sends to all channels at once and waits for all of them. When at least one channel succeeds, the message counts as delivered and each failed channel gets a `notify_failed` event whose `error` starts with the channel name. Only when every channel fails is the delivery a failure, which the caller retries under the rules above. A message is not retried once a channel has it, because a retry would repeat it on the channels that already received it. Without any channel, `Send` returns `notify.ErrNotConfigured`.
+
+`notify.NewWebhook` checks the webhook settings: the URL must be http or https, the method `GET`, `POST` or `PUT`, a `GET` request has no body, header names must be valid, and every placeholder must be in `notify.Placeholders`. Settings that fail the check leave the webhook off; the reason goes into `notify_error` in the status API, the page shows it as a notice, and the test returns it as a failed result. The rest of the config still applies.
+
+Placeholders are escaped per message for where they appear: in the URL with the same percent-encoding as Bark; in the body JSON-string-escaped or form-encoded according to `Content-Type`, and as they are for other types; in headers with line breaks replaced by spaces. Without a `Content-Type` header, a body that starts with `{` or `[` once placeholders are removed is sent as JSON and anything else as plain text. An empty body sends the built-in JSON (`source` plus every placeholder). `{{priority}}` comes from the Bark level, `high` for `timeSensitive` and `normal` otherwise; `{{kind}}` comes from `Message.Kind`.
+
+At most 64 KB of a webhook response is read. A non-2xx status is a failure. With `success_json`, the response must also be a JSON object whose listed top-level fields equal the expected values. The expected values go through a JSON encode and decode before the comparison, so a YAML integer `0` equals `0.0` in a response. Errors and test results drop the request URL that `*url.Error` adds and replace the URL, longer path segments and query values, and header values with `[redacted]`, because tokens usually sit there.
 
 Notification texts are in `internal/notify/text.go`, one column each for Chinese and English, chosen by `language` in `state.json`. The management page reports the language: notifications are sent without a page open, so they use the language reported last, and Chinese until one has been reported. Window names in notifications are always `5h` and `7d`. The Did Codex Reset link points to the Chinese or English history page.
 
@@ -246,6 +256,6 @@ Group keys are `<service>:<auth_index>:<group>`, for example `codex:3:codex:main
 
 - Ignition goes only through `host.model.execute`, pinned to one credential; the plugin never builds a service's model request itself.
 - Quota requests must leave through the same exit as CPA's model requests; when the exit cannot be determined, the request is skipped instead of connecting directly.
-- Access tokens, `bark_url` and `models_api_key` never appear in logs, events, the status API or on disk.
+- Access tokens, `bark_url`, the `webhook` URL, headers and body, and `models_api_key` never appear in logs, events, the status API or on disk.
 - The JSON fields of host callbacks follow `sdk/pluginapi` and `internal/pluginhost` of CPA v8.0.4; check the CPA source before changing them.
 - Changes to `state.json` stay backward compatible: new fields have defaults, and missing old fields do not stop the plugin.

@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime/debug"
 	"sync"
 	"time"
@@ -74,6 +75,8 @@ type Engine struct {
 	nextPoll  time.Time
 	pollErrs  map[string]string
 	modelsErr string
+	// notifyErr is the reason the webhook settings were not applied.
+	notifyErr string
 	lang      string // notification language, a copy of state.Language
 	// nextModels is the model automatic selection picks next, per provider.
 	nextModels map[string]string
@@ -366,16 +369,39 @@ func (e *Engine) saveState() {
 
 func (e *Engine) applyRuntimeConfig(cfg config.Config) {
 	e.egress.Timeout = cfg.RequestTimeout()
-	e.alerts = &notify.Alerts{
-		Cfg:  cfg,
-		Lang: e.language(),
-		Sender: &notify.Bark{
+	userAgent := "cpa-plugin-lamplighter/" + e.version
+	client := &http.Client{Timeout: cfg.RequestTimeout()}
+	fanout := &notify.Fanout{
+		OnChannelError: func(msg notify.Message, err error) { e.notifyFailed("", msg, err) },
+	}
+	if cfg.BarkURL != "" {
+		fanout.Channels = append(fanout.Channels, notify.Channel{Name: "Bark", Sender: &notify.Bark{
 			URL:       cfg.BarkURL,
 			Group:     cfg.BarkGroup,
 			Icon:      cfg.BarkIcon,
-			UserAgent: "cpa-plugin-lamplighter/" + e.version,
-			Client:    &http.Client{Timeout: cfg.RequestTimeout()},
-		},
+			UserAgent: userAgent,
+			Client:    client,
+		}})
+	}
+	webhook, err := notify.NewWebhook(cfg.Webhook)
+	notifyErr := ""
+	if err != nil {
+		notifyErr = err.Error()
+		e.logf("warn", "Webhook 设置无效，未启用：%v", err)
+	} else if webhook != nil {
+		webhook.UserAgent = userAgent
+		webhook.Client = client
+		webhook.Loc = cfg.Location()
+		webhook.Now = e.now
+		fanout.Channels = append(fanout.Channels, notify.Channel{Name: "Webhook", Sender: webhook})
+	}
+	e.mu.Lock()
+	e.notifyErr = notifyErr
+	e.mu.Unlock()
+	e.alerts = &notify.Alerts{
+		Cfg:     cfg,
+		Lang:    e.language(),
+		Sender:  fanout,
 		OnSent:  func(msg notify.Message) { e.notified("", msg) },
 		OnError: func(msg notify.Message, err error) { e.notifyFailed("", msg, err) },
 	}
@@ -517,10 +543,11 @@ func (e *Engine) run() {
 	e.saveState()
 }
 
-// sameRuntimeConfig reports whether the settings used to build the Bark
-// sender and HTTP clients are unchanged.
+// sameRuntimeConfig reports whether the settings used to build the
+// notification channels and HTTP clients are unchanged.
 func sameRuntimeConfig(a, b config.Config) bool {
 	return a.BarkURL == b.BarkURL && a.BarkGroup == b.BarkGroup && a.BarkIcon == b.BarkIcon &&
+		reflect.DeepEqual(a.Webhook, b.Webhook) &&
 		a.RequestTimeoutSeconds == b.RequestTimeoutSeconds && a.NoticeThreshold == b.NoticeThreshold &&
 		a.LowThreshold == b.LowThreshold && a.CriticalThreshold == b.CriticalThreshold &&
 		a.RecoveryNotify == b.RecoveryNotify && a.ResetReminder == b.ResetReminder &&

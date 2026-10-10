@@ -4,7 +4,7 @@
 
 [中文](./README.md)
 
-Lamplighter is a native plugin for [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) (CPA). It monitors the quota of ChatGPT (Codex), Claude and Antigravity accounts, sends alerts through [Bark](https://github.com/Finb/Bark), and sends one minimal request after each 5-hour quota window resets so that the next window starts right away.
+Lamplighter is a native plugin for [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) (CPA). It monitors the quota of ChatGPT (Codex), Claude and Antigravity accounts, sends alerts through [Bark](https://github.com/Finb/Bark) or a custom webhook, and sends one minimal request after each 5-hour quota window resets so that the next window starts right away.
 
 ![Management page: quota per account and ignition plans](./docs/images/overview.png)
 
@@ -15,7 +15,7 @@ Lamplighter is a native plugin for [CLIProxyAPI](https://github.com/router-for-m
 ## Features
 
 - **Quota monitoring**: queries quota on a schedule and also reads the quota that upstream providers return while CPA serves real requests.
-- **Bark notifications**: alerts when remaining quota drops to 50%, 20%, 10% and zero; optional recovery and pre-reset reminders; optional forwarding of [Did Codex Reset](https://didcodexreset.com/) signals.
+- **Notifications** through Bark or a webhook (Feishu, ntfy, DingTalk, Telegram and others): alerts when remaining quota drops to 50%, 20%, 10% and zero; optional recovery and pre-reset reminders; optional forwarding of [Did Codex Reset](https://didcodexreset.com/) signals.
 - **Window ignition**: from 07:00 every day, sends a minimal request 3 seconds after each 5-hour reset, until 22:30. The request goes through CPA's own model executor and is pinned to one account.
 - **Management page**: shows quota, ignition plans, events and a quota chart in the CPA Management Center, and edits the settings.
 
@@ -31,7 +31,7 @@ When a service has several accounts, notifications and the page tell them apart 
 
 - CPA v8.0.4 or later with plugins enabled (`plugins.enabled: true`). The plugin is built for Linux amd64/arm64, macOS amd64/arm64 and Windows amd64; the macOS builds are only built and tested in CI and have not been tried on a running CPA.
 - A CPA API key reserved for Lamplighter. The plugin reads the model list with it to pick ignition models.
-- An iPhone with Bark, if you want notifications.
+- For notifications, an iPhone with Bark or a service that accepts webhooks.
 
 ## Installation
 
@@ -84,7 +84,7 @@ A 5-hour window starts with the first request after a reset. If nobody uses the 
 
 **Failure protection**:
 
-- Authentication failures, rate limits (429), unavailable models, or a request that succeeded without starting the window pause ignition for that quota group until 07:00 the next day, with one Bark notification.
+- Authentication failures, rate limits (429), unavailable models, or a request that succeeded without starting the window pause ignition for that quota group until 07:00 the next day, with one notification.
 - Network and server errors are retried after 5 and 15 minutes; a third failure also pauses until the next day.
 - When the quota ran out before the reset, CPA cools the account down until a dozen or so seconds after the reset. An ignition that hits this cooldown retries as soon as it ends and is not counted as a failure.
 - When the account's 7-day quota (or another window other than the 5-hour one) is used up, scheduled ignition for the quota group stops until that window resets and a query shows the quota is back; the page shows "7 天额度已用完". "Ignite now" still works.
@@ -109,9 +109,10 @@ All settings live under `plugins.configs.lamplighter` in `config.yaml`, and can 
 
 | Key | Default | Description |
 | --- | --- | --- |
-| `bark_url` | empty | Bark push URL up to the device key; empty disables notifications |
+| `bark_url` | empty | Bark push URL up to the device key; empty disables Bark |
 | `bark_group` | `CPA` | Bark notification group |
 | `bark_icon` | Lamplighter logo | Notification icon |
+| `webhook` | empty | Custom webhook, see [Webhook](#webhook) |
 | `notice_threshold` | `50` | First alert level (remaining percent) |
 | `low_threshold` | `20` | Second alert level |
 | `critical_threshold` | `10` | Third alert level |
@@ -190,6 +191,69 @@ plugins:
         enabled: true
 ```
 
+## Webhook
+
+Besides Bark, you can set up one webhook to send notifications to Feishu, ntfy, DingTalk, Telegram and other services, or to your own program. With both channels set, every notification goes to both; it counts as delivered as soon as one of them accepts it and is not retried, and the channel that failed is logged as a "Notification failed" event.
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `url` | empty | Request URL; empty disables the webhook |
+| `method` | `POST` | `GET`, `POST` or `PUT` |
+| `headers` | empty | Request headers, such as `Authorization: Bearer <token>` |
+| `body` | empty | Request body; empty sends the built-in JSON message. Not allowed with `GET` |
+| `success_json` | empty | Success condition: these top-level fields of the JSON response must have the given values, such as `code: 0`; empty only requires a 2xx HTTP status |
+
+The URL, headers and body can use placeholders:
+
+| Placeholder | Content |
+| --- | --- |
+| `{{title}}` | Notification title |
+| `{{body}}` | Notification body |
+| `{{text}}` | Title and body, separated by a line break |
+| `{{url}}` | Link; only Did Codex Reset notifications have one, empty otherwise |
+| `{{priority}}` | `high` when quota drops to the third threshold or runs out, ignition pauses or a CPA cooldown is not cleared; `normal` otherwise |
+| `{{kind}}` | Notification type: `quota` quota drop, `recovery` quota recovered, `reminder` reset reminder, `cooldown` CPA cooldown not cleared, `circuit` ignition paused, `codex_reset` Did Codex Reset, `test` test notification |
+| `{{label}}` | Quota group, such as `ChatGPT#rk`; empty for notifications not about a quota group |
+| `{{time}}` | Time sent, in RFC 3339 format and the plugin time zone |
+
+Placeholders are escaped for where they appear: URL-encoded in the URL; JSON-string-escaped in a JSON body, so put them inside quotes; form-encoded in a form body; with line breaks replaced by spaces in headers. Without a `Content-Type` header, a body that starts with `{` or `[` is sent as JSON and anything else as plain text.
+
+Without `body`, the webhook receives this JSON:
+
+```json
+{"source":"lamplighter","kind":"quota","title":"🔴 ChatGPT#rk · 5h 8% | 03h","body":"5h: 8% | 03h | 10/10 19:00\n7d: 60% | 04d | 10/14 09:00","text":"…","url":"","priority":"high","label":"ChatGPT#rk","time":"2026-10-10T16:00:00+08:00"}
+```
+
+Settings for common services follow. They are format examples based on each service's documentation and have not all been tested.
+
+| Service | `url` | `body` | `success_json` |
+| --- | --- | --- | --- |
+| ntfy | `https://ntfy.sh/` | `{"topic":"<topic>","title":"{{title}}","message":"{{body}}"}` | not needed |
+| Feishu / Lark | `https://open.feishu.cn/open-apis/bot/v2/hook/<token>` | `{"msg_type":"text","content":{"text":"{{text}}"}}` | `code: 0` |
+| DingTalk | `https://oapi.dingtalk.com/robot/send?access_token=<token>` | `{"msgtype":"text","text":{"content":"{{text}}"}}` | `errcode: 0` |
+| WeCom | `https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=<key>` | `{"msgtype":"text","text":{"content":"{{text}}"}}` | `errcode: 0` |
+| Discord | `https://discord.com/api/webhooks/<id>/<token>` | `{"content":"{{text}}"}` | not needed |
+| Slack | `https://hooks.slack.com/services/<path>` | `{"text":"{{text}}"}` | not needed |
+| Telegram | `https://api.telegram.org/bot<token>/sendMessage` | `{"chat_id":"<chat_id>","text":"{{text}}"}` | not needed |
+
+For Feishu, `config.yaml` looks like this. The body contains `{{`, so put it in single quotes:
+
+```yaml
+plugins:
+  configs:
+    lamplighter:
+      webhook:
+        url: "https://open.feishu.cn/open-apis/bot/v2/hook/<token>"
+        body: '{"msg_type":"text","content":{"text":"{{text}}"}}'
+        success_json:
+          code: 0
+```
+
+- Feishu, DingTalk and WeCom answer HTTP 200 when a message fails too, with the error code in the response, so set `success_json`; otherwise failed deliveries count as successful.
+- Signature verification of Feishu and DingTalk bots is not supported. Use a custom keyword or an IP allowlist in the bot's security settings instead; with a keyword, put it in the body, such as `"text":"Lamplighter {{text}}"`.
+- "Send test" on the management page shows the result of each channel and the start of the webhook response. Without `success_json`, the page notes that only the HTTP status was checked, so confirm that the message arrived.
+- When the webhook settings are invalid, for example a misspelled placeholder, the webhook stays off and the management page shows the reason at the top; the other settings still apply.
+
 ## Management page
 
 The page shows:
@@ -198,14 +262,14 @@ The page shows:
 - the next ignition, last result and failure protection state of each quota group, with an "ignite now" button;
 - a quota chart for either the 5-hour quota, over the last 1, 3, 6, 12, 24 or 26 hours (6 by default), or the 7-day quota, over the last 1, 4, 8 or 15 days, one month (from this date last month), or 36 days (8 days by default). The top part has one colored band per service, colored like the quota bars, in the order Claude, ChatGPT, Gemini, Fable, Claude / GPT by default or by lowest remaining; a service with several accounts shows their total and expands into one row per account. The bottom part plots the selected row with its resets and ignition results;
 - recent events in columns for time, type, quota group and detail;
-- the settings form, with a test notification button in the notification settings. The test uses the settings the plugin has applied, so after changing the Bark URL, wait a few seconds before testing. An empty ignition model field shows the model the next ignition will use in its hint; for Antigravity, the model of the Gemini group. The model list is read when the plugin starts, when `cpa_base_url` or `models_api_key` changes and for every ignition, so a model newly listed by CPA shows after the next ignition, which already uses it.
+- the settings form, with a test notification button in the notification settings. The test goes to every configured channel and shows the result of each; it uses the settings the plugin has applied, so after changing a setting, wait a few seconds before testing. An empty ignition model field shows the model the next ignition will use in its hint; for Antigravity, the model of the Gemini group. The model list is read when the plugin starts, when `cpa_base_url` or `models_api_key` changes and for every ignition, so a model newly listed by CPA shows after the next ignition, which already uses it.
 
 The page follows the language of the CPA Management Center: Chinese for Simplified or Traditional Chinese, English for every other language.
 
 ## Security and risk
 
 - The plugin reads the access token from the credential file into memory only to query quota, and never writes it to logs or disk. The page and its API require the CPA management key.
-- `bark_url` and `models_api_key` are stored in plain text in CPA's `config.yaml`, visible to anyone with the management key.
+- `bark_url`, `webhook` and `models_api_key` are stored in plain text in CPA's `config.yaml`, visible to anyone with the management key.
 - Each service restricts the use of subscription accounts through third-party tools in its own way. Using accounts through CPA, sending scheduled ignition requests and querying quota may all put accounts at risk. Use it at your own discretion.
 
 ## Development
