@@ -50,6 +50,8 @@ Lamplighter 是用 Go 编写、以 `-buildmode=c-shared` 构建的 CPA 原生插
 
 页面的视觉样式与管理中心一致：CSS 变量沿用管理中心 `src/styles/themes.scss` 的名称和取值（浅色、纯白、深色三套），额度条和图表按前两档提醒阈值着色（默认剩余高于 50% 绿色、高于 20% 黄色、其余红色），与通知标题的 🟡、🔴 一致，遥测数字使用等宽字体。页面与管理中心同源，主题直接读取父页面根元素的 `data-theme`，并监听其变化；单独打开时退回到管理中心保存在 `localStorage` 的 `cli-proxy-theme`。管理中心改了配色时，同步更新 `internal/web/page.css` 中的变量。
 
+管理中心把插件页面的 iframe 铺满内容区，顶部不留空白，右上角的浮动工具栏（178 × 52 px，距窗口顶边和右边各 24 px）盖在 iframe 上。窗口宽度在 768 px 及以下时管理中心使用手机布局：侧栏收起，iframe 与窗口同宽，工具栏为 162 × 48 px、距边缘 12 px，左上角另有一个 48 × 48 px 的菜单按钮。页面在 iframe 中打开时（`window.self !== window.top`，不需要读取父页面，所以管理中心与插件不同源时也生效）给根元素加 `embedded` 类：标题行右侧留出工具栏的宽度，放不下时换行；“立即刷新全部”放在“额度”标题行的右侧，这一行从工具栏下方 8 px 开始；宽度在 768 px 及以下时整个页面从工具栏和菜单按钮下方开始；宽度超过 1584 px 时工具栏落在页面边距中，不做调整。这些数值来自管理中心的 `src/styles/layout.scss`（`.main-header .header-actions`、`.mobile-sidebar-actions`），管理中心改了这些控件的位置或大小时，同步更新 `page.css` 中的对应规则。
+
 额度变化图表的数据处理都在页面中完成：
 
 - **缺数据**：相邻样本间隔超过 3.5 个查询间隔（或接口的分段长度）时视为缺数据，画成斜线纹理，不延续前一个值。启用被动跳过时，阈值至少为 `passive_skip_max_minutes` 加 1.5 个查询间隔：响应头里没有的窗口（如没在使用的 Fable）在跳过期间只能等下一次主动查询，这段间隔不算缺数据。
@@ -222,7 +224,7 @@ Bark 请求为 `GET {bark_url}/{标题}/{正文}?group&level&icon&url`，标题�
 
 ### 渠道
 
-`engine.applyRuntimeConfig` 在配置变化时按 `bark_url` 和 `webhook.url` 建立渠道，交给 `notify.Fanout`。`Fanout` 同时向所有渠道发送，等全部返回后：至少一个渠道成功就算送达，失败的渠道各记一条 `notify_failed` 事件，`error` 以渠道名开头，事件不带额度组 key，只带标签；所有渠道都失败才算推送失败，由调用方按上文的规则重试。只要有渠道成功就不重试，因为重试会让已经收到的渠道重复收到同一条通知。没有任何渠道时返回 `notify.ErrNotConfigured`。
+`engine.applyRuntimeConfig` 在配置变化时按 `bark_url` 和 `webhook.url` 建立渠道，交给 `notify.Fanout`。`Fanout` 同时向所有渠道发送，等全部返回后：至少一个渠道成功就算送达，失败的渠道各记一条 `notify_failed` 事件，`error` 以渠道名开头，事件不带额度组 key，只带标签；所有渠道都失败才算推送失败，由调用方按上文的规则重试。只要有渠道成功就不重试，因为重试会让已经收到的渠道重复收到同一条通知。没有任何渠道时返回 `notify.ErrNotConfigured`，表示通知已关闭：额度提醒照常更新已通知等级、待发送的恢复和重置提醒，就像已经送达，这样之后再配置渠道时不会补发旧提醒；点火暂停和冷却提醒不记 `notify_failed`；Did Codex Reset 的记录不标为已见，配置渠道后仍可推送的照常推送。只配了 webhook 但设置无效时，`Fanout.Invalid` 让发送返回设置错误，按推送失败处理，并按上文的规则重试。
 
 `notify.NewWebhook` 检查 webhook 设置：地址必须是 http 或 https，方法只能是 `GET`、`POST`、`PUT`，`GET` 不能带请求体，请求头名称必须合法且不区分大小写地不重复，请求头的值去掉首尾空白后不能含换行或控制字符（YAML 块标量末尾的换行会被去掉），占位符必须在 `notify.Placeholders` 中。检查不通过时 webhook 不启用，原因写进状态接口的 `notify_error`，页面显示为提示，测试推送也把它作为失败结果返回；配置的其他部分照常生效。
 

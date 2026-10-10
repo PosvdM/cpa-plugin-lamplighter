@@ -131,6 +131,8 @@ Claude 和 Codex 的额度无论主动还是被动获取，都精确到 1%；Ant
 | `history_retention_days` | `40` | 额度历史保留天数 |
 | `data_dir` | 插件目录下的 `data/lamplighter` | 状态和历史目录 |
 
+`bark_url` 和 `webhook.url` 都为空时通知关闭：不发送任何通知，也不在事件中记录推送失败。之后再填上地址，关闭期间的额度提醒不会补发；Did Codex Reset 的信号还没过期的会照常推送。
+
 恢复通知和重置前提醒按窗口分别设置，`five_hour` 对应 5 小时窗口，`seven_day` 对应 7 天窗口：
 
 | 配置项 | 取值 | 说明 |

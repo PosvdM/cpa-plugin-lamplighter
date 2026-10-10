@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -103,9 +104,12 @@ func (e *Engine) checkCooldowns(ctx context.Context, cfg config.Config) {
 		if e.alerts == nil || e.alerts.Sender == nil {
 			continue
 		}
-		if err := e.alerts.Sender.Send(ctx, msg); err != nil {
+		switch err := e.alerts.Sender.Send(ctx, msg); {
+		case errors.Is(err, notify.ErrNotConfigured):
+			// Notifications are off.
+		case err != nil:
 			e.notifyFailed("", msg, err)
-		} else {
+		default:
 			e.notified("", msg)
 		}
 	}

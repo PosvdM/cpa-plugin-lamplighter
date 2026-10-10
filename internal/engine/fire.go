@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -228,9 +229,12 @@ func (e *Engine) igniteTarget(ctx context.Context, cfg config.Config, t target, 
 				map[string]string{"until": eventTime(outcome.Until), "error": err.Error()})
 			if outcome.NotifyCircuit && e.alerts != nil && e.alerts.Sender != nil {
 				msg := notify.CircuitMessage(e.language(), t.group.Label, outcome.Until, err.Error(), cfg.Location())
-				if sendErr := e.alerts.Sender.Send(ctx, msg); sendErr != nil {
+				switch sendErr := e.alerts.Sender.Send(ctx, msg); {
+				case errors.Is(sendErr, notify.ErrNotConfigured):
+					// Notifications are off.
+				case sendErr != nil:
 					e.notifyFailed(t.group.Key, msg, sendErr)
-				} else {
+				default:
 					e.notified(t.group.Key, msg)
 				}
 			}
