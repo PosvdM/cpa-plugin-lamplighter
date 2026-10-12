@@ -47,7 +47,9 @@ Pushing a `v*` tag runs GitHub Actions (`.github/workflows/build.yml`):
 1. run the tests;
 2. build five platforms with `scripts/ci-build.sh`: Linux amd64 and arm64 in a `golang:1.26-bookworm` container on `ubuntu-latest` and `ubuntu-24.04-arm`; macOS amd64 and arm64 both on `macos-latest` (arm64), with clang cross-compiling amd64; Windows amd64 on `windows-latest`;
 3. package each platform as `lamplighter_<version>_<os>_<arch>.zip` with only `lamplighter-v<version>.<so|dylib|dll>` at the root;
-4. create a GitHub Release with the five zips and `checksums.txt` in `sha256sum` format.
+4. create a draft GitHub Release with the five zips and `checksums.txt` in `sha256sum` format, with generated notes listing the commits.
+
+A draft is not public, and the CPA plugin store cannot see it. Replace its notes with user-facing release notes, then publish it, so the release goes public with its final notes.
 
 The CPA plugin store installs from the latest release: it looks up the zip and `checksums.txt` by these names and checks the SHA-256 before installing. The store requires all five platforms in every release; a plugin missing any of them is not listed.
 
