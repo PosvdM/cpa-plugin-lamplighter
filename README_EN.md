@@ -4,7 +4,7 @@
 
 [中文](./README.md)
 
-Lamplighter is a native plugin for [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) (CPA). It monitors the quota of ChatGPT (Codex), Claude and Antigravity accounts, sends alerts through [Bark](https://github.com/Finb/Bark) or a custom webhook, and sends one minimal request after each 5-hour quota window resets so that the next window starts right away.
+Lamplighter is a native plugin for [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) (CPA). It monitors the quota of ChatGPT (Codex), Claude and Antigravity accounts, sends alerts through [Bark](https://github.com/Finb/Bark) or a generic webhook, and sends one minimal request after each 5-hour quota window resets so that the next window starts right away.
 
 ![Management page: quota per account and ignition plans](./docs/images/overview.png)
 
@@ -112,7 +112,7 @@ All settings live under `plugins.configs.lamplighter` in `config.yaml`, and can 
 | `bark_url` | empty | Bark push URL up to the device key; empty disables Bark |
 | `bark_group` | `CPA` | Bark notification group |
 | `bark_icon` | Lamplighter logo | Notification icon |
-| `webhook` | empty | Custom webhook, see [Webhook](#webhook) |
+| `webhook` | empty | Generic webhook, see [Webhook](#webhook) |
 | `notice_threshold` | `50` | First alert level (remaining percent) |
 | `low_threshold` | `20` | Second alert level |
 | `critical_threshold` | `10` | Third alert level |
