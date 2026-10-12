@@ -38,7 +38,7 @@
     <div id="accounts" class="accounts"></div>
   </section>
 
-  <section class="card">
+  <section id="ignition-card" class="card" hidden>
     <h2 class="card-title" data-i18n="ignition">自动点火</h2>
     <div class="table-wrap">
       <table>
@@ -94,8 +94,8 @@
     <button id="events-more" class="btn btn-ghost btn-sm events-more" type="button" hidden></button>
   </section>
 
-  <section class="card">
-    <h2 class="card-title" data-i18n="settings">设置</h2>
+  <details class="card settings-card">
+    <summary><h2 class="card-title" data-i18n="settings">设置</h2></summary>
     <p class="hint settings-note" data-i18n="save_hint">修改后自动保存到 CPA 的 config.yaml，插件几秒内应用。文本和数字在离开输入框或按回车时保存。</p>
     <form id="settings">
       <fieldset>
@@ -214,8 +214,15 @@
           <label class="inline"><input name="codex_reset_updates.notify_current_pending" type="checkbox"><span data-i18n="codex_reset_pending">首次开启时推送当前待生效的排期</span></label>
         </div>
       </fieldset>
+      <fieldset>
+        <legend data-i18n="page_prefs">页面</legend>
+        <div class="checks">
+          <label class="inline"><input name="remember_chart_filters" type="checkbox"><span data-i18n="remember_chart_filters">记住额度变化的筛选条件</span></label>
+        </div>
+        <p class="hint" data-i18n="remember_chart_filters_hint">在当前浏览器中记住上次选择的额度窗口、时间范围和排序；关闭后每次打开页面都使用默认选择。</p>
+      </fieldset>
     </form>
-  </section>
+  </details>
 </main>
 <div id="toast" class="toast" hidden></div>
 <script>/*JS*/</script>

@@ -127,6 +127,7 @@ All settings live under `plugins.configs.lamplighter` in `config.yaml`, and can 
 | `models_api_key` | empty | CPA API key for reading the model list; without it ignition cannot pick a model |
 | `cpa_base_url` | `http://127.0.0.1:8317` | Address the plugin uses to reach CPA; change it when CPA uses another port or TLS |
 | `history_retention_days` | `40` | Days of quota history to keep |
+| `remember_chart_filters` | `false` | The management page remembers, in the current browser, the quota window, time range and order last chosen in the quota chart; when off, the page opens with the defaults |
 | `data_dir` | `data/lamplighter` in the plugin directory | State and history directory |
 
 With both `bark_url` and `webhook.url` empty, notifications are off: nothing is sent and no failed notifications are logged as events. Quota alerts from that time are not sent once a URL is set; Did Codex Reset signals that have not expired are still sent.
@@ -261,10 +262,10 @@ plugins:
 The page shows:
 
 - the quota windows of each account with reset times and data sources, with a refresh button per account;
-- the next ignition, last result and failure protection state of each quota group, with an "ignite now" button;
-- a quota chart for either the 5-hour quota, over the last 1, 3, 6, 12, 24 or 26 hours (6 by default), or the 7-day quota, over the last 1, 4, 8 or 15 days, one month (from this date last month), or 36 days (8 days by default). The top part has one colored band per service, colored like the quota bars, in the order Claude, ChatGPT, Gemini, Fable, Claude / GPT by default or by lowest remaining; a service with several accounts shows their total and expands into one row per account. The bottom part plots the selected row with its resets and ignition results;
+- the next ignition, last result and failure protection state of each quota group, with an "ignite now" button; hidden while ignition is off;
+- a quota chart for either the 5-hour quota, over the last 1, 3, 6, 12, 24 or 26 hours (6 by default), or the 7-day quota, over the last 1, 4, 8 or 15 days, one month (from this date last month), or 36 days (8 days by default). The top part has one colored band per service, colored like the quota bars, in the order Claude, ChatGPT, Gemini, Fable, Claude / GPT by default or by lowest remaining; a service with several accounts shows their total and expands into one row per account. The bottom part plots the selected row with its resets and ignition results. With `remember_chart_filters` on, the page keeps the last choices;
 - recent events in columns for time, type, quota group and detail;
-- the settings form, with a test notification button in the notification settings. The test goes to every configured channel and shows the result of each; it uses the settings the plugin has applied, so after changing a setting, wait a few seconds before testing. An empty ignition model field shows the model the next ignition will use in its hint; for Antigravity, the model of the Gemini group. The model list is read when the plugin starts, when `cpa_base_url` or `models_api_key` changes and for every ignition, so a model newly listed by CPA shows after the next ignition, which already uses it.
+- the settings form at the bottom, folded until you click "设置" (Settings), with a test notification button in the notification settings. The test goes to every configured channel and shows the result of each; it uses the settings the plugin has applied, so after changing a setting, wait a few seconds before testing. An empty ignition model field shows the model the next ignition will use in its hint; for Antigravity, the model of the Gemini group. The model list is read when the plugin starts, when `cpa_base_url` or `models_api_key` changes and for every ignition, so a model newly listed by CPA shows after the next ignition, which already uses it.
 
 The page follows the language of the CPA Management Center: Chinese for Simplified or Traditional Chinese, English for every other language.
 
