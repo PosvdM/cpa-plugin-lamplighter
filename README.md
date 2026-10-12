@@ -6,7 +6,7 @@
 
 > 名字来自《小王子》里的点灯人：他的星球每分钟转一圈，他就每分钟点一次灯、熄一次灯，从不误点。这个插件做的也是按时点灯：每个 5 小时额度窗口一重置，就点亮下一个窗口。
 
-Lamplighter（点灯人）是 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI)（CPA）的原生插件。它监控 ChatGPT（Codex）、Claude 和 Antigravity 账号的额度，通过 [Bark](https://github.com/Finb/Bark) 或自定义 webhook 推送提醒，并在 5 小时额度窗口重置后发送一个极小的请求，让下一个窗口立即开始计时。
+Lamplighter（点灯人）是 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI)（CPA）的原生插件。它监控 ChatGPT（Codex）、Claude 和 Antigravity 账号的额度，通过 [Bark](https://github.com/Finb/Bark) 或通用 webhook 推送提醒，并在 5 小时额度窗口重置后发送一个极小的请求，让下一个窗口立即开始计时。
 
 ![管理页面：各账号额度和自动点火计划](./docs/images/overview.png)
 
@@ -114,7 +114,7 @@ Claude 和 Codex 的额度无论主动还是被动获取，都精确到 1%；Ant
 | `bark_url` | 空 | Bark 推送地址，写到 device key 为止；为空时不通过 Bark 推送 |
 | `bark_group` | `CPA` | Bark 通知分组 |
 | `bark_icon` | Lamplighter 图标 | 通知图标 |
-| `webhook` | 空 | 自定义 webhook，见 [Webhook](#webhook) |
+| `webhook` | 空 | 通用 webhook，见 [Webhook](#webhook) |
 | `notice_threshold` | `50` | 第一档提醒阈值（剩余百分比） |
 | `low_threshold` | `20` | 第二档提醒阈值 |
 | `critical_threshold` | `10` | 第三档提醒阈值 |
