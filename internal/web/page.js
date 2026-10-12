@@ -147,6 +147,8 @@
       ag_groups_hint: "Antigravity 按模型分成多个独立的 5 小时额度组。只有勾选的额度组会自动点火；Claude / GPT 额度组较小，默认不点。",
       codex_reset_enabled: "转发 Did Codex Reset 发布的 Codex 重置信号",
       codex_reset_pending: "首次开启时推送当前待生效的排期",
+      page_prefs: "页面", remember_chart_filters: "记住额度变化的筛选条件",
+      remember_chart_filters_hint: "在当前浏览器中记住上次选择的额度窗口、时间范围和排序；关闭后每次打开页面都使用默认选择。",
       save_hint: "修改后自动保存到 CPA 的 config.yaml，插件几秒内应用。文本和数字在离开输入框或按回车时保存。",
       language_note: "通知语言跟随最近打开此页面时管理中心的语言，当前为{0}。",
       lang_zh: "中文", lang_en: "English",
@@ -172,7 +174,6 @@
       blocked_until: "{0} 重置后恢复点火", blocked_wait: "额度恢复后恢复点火",
       paused_until: "暂停至 {0}", failures: "失败 {0} 次", rolling: "窗口未开始", normal: "正常",
       ignition_note: "每天 {0}:00 开始，之后在每次重置后 {1} 秒点火，最晚到 {2}。",
-      ignition_off: "自动点火已关闭。",
       no_targets: "没有启用点火的额度组。",
       ignite_now: "立即点火",
       ignite_confirm: "立即向 {0} 发送一次点火请求？这会开始一个新的 5 小时窗口。",
@@ -270,6 +271,8 @@
       ag_groups_hint: "Antigravity splits quota into separate 5-hour groups by model. Only checked groups are ignited; the Claude / GPT group is small and off by default.",
       codex_reset_enabled: "Forward Codex reset signals published by Did Codex Reset",
       codex_reset_pending: "When first turned on, send the pending schedule",
+      page_prefs: "Page", remember_chart_filters: "Remember the Quota history filters",
+      remember_chart_filters_hint: "This browser remembers the last quota window, time range and order. When off, the page opens with the default choices.",
       save_hint: "Changes save to CPA's config.yaml automatically, and the plugin applies them within a few seconds. Text and numbers save when you leave the field or press Enter.",
       language_note: "Notifications use the Management Center language from the last time this page was opened, now {0}.",
       lang_zh: "中文", lang_en: "English",
@@ -295,7 +298,6 @@
       blocked_until: "Ignition resumes after the reset at {0}", blocked_wait: "Ignition resumes when the quota recovers",
       paused_until: "Paused until {0}", failures: "{0} failures", rolling: "Window not started", normal: "Normal",
       ignition_note: "Starts at {0}:00 every day, then ignites {1} seconds after each reset, until {2}.",
-      ignition_off: "Ignition is off.",
       no_targets: "No quota group has ignition enabled.",
       ignite_now: "Ignite now",
       ignite_confirm: "Send an ignition request to {0} now? This starts a new 5-hour window.",
@@ -678,14 +680,15 @@
     return { kind: "success", text: tr("normal") };
   }
 
+  // The ignition card shows only while ignition is on.
   function renderTargets() {
     var body = $("targets");
     clear(body);
     var ignition = (status.config && status.config.ignition) || {};
+    $("ignition-card").hidden = !ignition.enabled;
+    if (!ignition.enabled) return;
     var endMinutes = (ignition.end_hour || 0) * 60 + (ignition.end_grace_minutes || 0);
-    $("ignition-note").textContent = ignition.enabled
-      ? translate("ignition_note", pad(ignition.start_hour), ignition.grace_seconds, pad(Math.floor(endMinutes / 60) % 24) + ":" + pad(endMinutes % 60))
-      : translate("ignition_off");
+    $("ignition-note").textContent = translate("ignition_note", pad(ignition.start_hour), ignition.grace_seconds, pad(Math.floor(endMinutes / 60) % 24) + ":" + pad(endMinutes % 60));
     if (!status.targets.length) {
       body.appendChild(el("tr", {}, [el("td", { colspan: "7", class: "empty", text: translate("no_targets") })]));
       return;
@@ -701,7 +704,7 @@
       if (st.title) statusCell.appendChild(el("div", { class: "cell-note", text: st.title }));
       body.appendChild(el("tr", {}, [
         el("td", { class: "strong", text: t.label }),
-        el("td", { class: "mono", text: ignition.enabled && next ? fmtDateTime(next) : "—" }),
+        el("td", { class: "mono", text: next ? fmtDateTime(next) : "—" }),
         el("td", { class: "mono", text: reset ? fmtDateTime(reset) : "—" }),
         el("td", { class: "mono", text: last ? fmtDateTime(last) : "—" }),
         el("td", { class: "mono", text: t.last_model || "—" }),
@@ -1497,10 +1500,58 @@
     RANGES[chartWindow].forEach(function (r) {
       box.appendChild(el("button", { type: "button", class: "seg", "aria-pressed": r[0] === range ? "true" : "false", text: translate("range_" + r[2], r[1]), onclick: function () {
         range = r[0];
+        saveChartFilters();
         renderRangeButtons();
         loadHistory();
       } }));
     });
+  }
+
+  // With remember_chart_filters on, the chart filters are kept in this
+  // browser's localStorage as {window, sort, ranges: {"5h": ..., "7d": ...}}
+  // and restored when the page opens. Each window keeps its own range because
+  // the two windows offer different ranges.
+  var CHART_STORE = "lamplighter-chart-filters";
+
+  function rememberChart() {
+    var input = $("settings").elements["remember_chart_filters"];
+    return !!(input && input.checked);
+  }
+
+  function storedChartFilters() {
+    try {
+      var saved = JSON.parse(localStorage.getItem(CHART_STORE) || "null");
+      if (saved && typeof saved === "object") return saved;
+    } catch (err) {}
+    return {};
+  }
+
+  function saveChartFilters() {
+    if (!rememberChart()) return;
+    var saved = storedChartFilters();
+    var ranges = saved.ranges && typeof saved.ranges === "object" ? saved.ranges : {};
+    ranges[chartWindow] = range;
+    try {
+      localStorage.setItem(CHART_STORE, JSON.stringify({ window: chartWindow, sort: chartSort, ranges: ranges }));
+    } catch (err) {}
+  }
+
+  // The remembered range of a window, or its default when nothing valid is saved.
+  function rangeFor(kind) {
+    var ranges = rememberChart() ? storedChartFilters().ranges : null;
+    var saved = ranges && typeof ranges === "object" ? ranges[kind] : null;
+    return RANGES[kind].some(function (r) { return r[0] === saved; }) ? saved : DEFAULT_RANGE[kind];
+  }
+
+  function restoreChartFilters() {
+    if (!rememberChart()) return;
+    var saved = storedChartFilters();
+    if (saved.window === "5h" || saved.window === "7d") chartWindow = saved.window;
+    if (saved.sort === "default" || saved.sort === "low") chartSort = saved.sort;
+    range = rangeFor(chartWindow);
+    pressSegment("window-buttons", chartWindow);
+    pressSegment("sort-buttons", chartSort);
+    renderRangeButtons();
   }
 
   function loadHistory() {
@@ -1774,6 +1825,7 @@
     $("app").hidden = false;
     Promise.all([loadStatus(), loadConfig()]).then(function () {
       fillSettings();
+      restoreChartFilters();
       return loadHistory();
     }).catch(function (err) {
       if (err.message !== "unauthorized") toast(translate("load_failed", err.message));
@@ -1812,6 +1864,11 @@
     }).then(function () { button.disabled = false; });
   });
   $("settings").addEventListener("change", saveField);
+  // Turning remembering on keeps the current filters; turning it off forgets them.
+  $("settings").elements["remember_chart_filters"].addEventListener("change", function (e) {
+    if (e.target.checked) saveChartFilters();
+    else try { localStorage.removeItem(CHART_STORE); } catch (err) {}
+  });
   $("settings").addEventListener("submit", function (e) { e.preventDefault(); });
   // Enter commits a text or number field; leaving it fires the change that saves it.
   $("settings").addEventListener("keydown", function (e) {
@@ -1821,23 +1878,32 @@
     }
   });
   $("events-more").addEventListener("click", function () { eventsExpanded = !eventsExpanded; renderEvents(); });
+  function pressSegment(id, value) {
+    Array.prototype.forEach.call($(id).querySelectorAll("button"), function (b) {
+      b.setAttribute("aria-pressed", b.getAttribute("data-value") === value ? "true" : "false");
+    });
+  }
   function bindSegmented(id, onPick) {
     Array.prototype.forEach.call($(id).querySelectorAll("button"), function (button) {
       button.addEventListener("click", function () {
-        Array.prototype.forEach.call($(id).querySelectorAll("button"), function (b) {
-          b.setAttribute("aria-pressed", b === button ? "true" : "false");
-        });
-        onPick(button.getAttribute("data-value"));
+        var value = button.getAttribute("data-value");
+        pressSegment(id, value);
+        onPick(value);
       });
     });
   }
   bindSegmented("window-buttons", function (value) {
     chartWindow = value;
-    range = DEFAULT_RANGE[value];
+    range = rangeFor(value);
+    saveChartFilters();
     renderRangeButtons();
     loadHistory();
   });
-  bindSegmented("sort-buttons", function (value) { chartSort = value; renderChart(); });
+  bindSegmented("sort-buttons", function (value) {
+    chartSort = value;
+    saveChartFilters();
+    renderChart();
+  });
   renderRangeButtons();
   window.addEventListener("resize", function () { if (history) renderChart(); });
   window.addEventListener("storage", function (e) {

@@ -162,6 +162,19 @@ header .meta { color: var(--text-tertiary); font-size: 12.5px; font-family: var(
 .block-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
 .block-head .block-title { margin: 0; }
 .hint.settings-note { margin: -8px 0 14px; }
+/* Settings fold into one row; the chevron turns down when open. */
+.settings-card > summary {
+  display: flex; align-items: center; gap: 8px; margin: 0;
+  list-style: none; color: var(--text-primary); font-size: inherit;
+}
+.settings-card > summary::-webkit-details-marker { display: none; }
+.settings-card > summary::before {
+  content: "›"; width: 12px; color: var(--text-secondary); font-size: 18px; line-height: 1;
+  text-align: center; transition: transform 0.15s ease;
+}
+.settings-card[open] > summary::before { transform: rotate(90deg); }
+.settings-card > summary .card-title { margin: 0; }
+.settings-card[open] > summary { margin-bottom: 14px; }
 .block { margin-bottom: 18px; }
 
 /* Buttons, matching .btn in the Management Center */
@@ -265,6 +278,7 @@ input[type="checkbox"] { width: 16px; height: 16px; padding: 0; accent-color: va
 @media (prefers-reduced-motion: reduce) {
   .quota-fill { animation: none; } .card.account { transition: none; }
   .mode-thumb, .mode-option span { transition: none; } .mode-thumb.bounce { animation: none; }
+  .settings-card > summary::before { transition: none; }
 }
 .fill-high { background: var(--viz-success); }
 .fill-medium { background: var(--quota-medium-color); }

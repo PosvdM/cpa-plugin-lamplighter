@@ -138,6 +138,10 @@ type Config struct {
 
 	HistoryRetentionDays int    `yaml:"history_retention_days" json:"history_retention_days"`
 	DataDir              string `yaml:"data_dir" json:"data_dir"`
+
+	// RememberChartFilters makes the page keep the chart filters in the
+	// browser and restore them when it opens.
+	RememberChartFilters bool `yaml:"remember_chart_filters" json:"remember_chart_filters"`
 }
 
 // SupportedProviders lists the providers Lamplighter monitors, in display order.
