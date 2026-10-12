@@ -90,7 +90,8 @@ jobs:
           cd dist
           sha256sum *.zip > checksums.txt
           cat checksums.txt
+      # A draft, so the release goes public only with its final notes.
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes dist/*
+        run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes --draft dist/*

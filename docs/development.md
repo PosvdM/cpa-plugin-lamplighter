@@ -47,7 +47,9 @@ sh scripts/build.sh 0.1.0
 1. 运行测试；
 2. 用 `scripts/ci-build.sh` 构建五个平台：Linux amd64 和 arm64 分别在 `ubuntu-latest` 和 `ubuntu-24.04-arm` 上的 `golang:1.26-bookworm` 容器中构建；macOS amd64 和 arm64 都在 `macos-latest`（arm64）上构建，amd64 由 clang 交叉编译；Windows amd64 在 `windows-latest` 上构建；
 3. 每个平台打包为 `lamplighter_<版本>_<系统>_<架构>.zip`，zip 根目录只有 `lamplighter-v<版本>.<so|dylib|dll>`；
-4. 创建 GitHub Release，附带五个 zip 和 `sha256sum` 格式的 `checksums.txt`。
+4. 创建草稿 GitHub Release，附带五个 zip 和 `sha256sum` 格式的 `checksums.txt`，说明为自动生成的提交列表。
+
+草稿不公开，CPA 插件商店也读不到。把说明换成面向使用者的发布说明后再发布草稿，这样 release 公开时说明已是定稿。
 
 CPA 插件商店从最新的 Release 安装插件：它按上面的名称查找 zip 和 `checksums.txt`，安装前校验 SHA-256。商店要求每个版本都提供这五个平台，缺少任何一个都无法上架。
 
