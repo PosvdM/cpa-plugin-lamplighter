@@ -527,7 +527,7 @@ func TestHistoryRecordsActiveAndPassiveSamples(t *testing.T) {
 	e.applyUsage(ctx, usageEvent{provider: "claude", authIndex: "3", header: header("0.50")})
 	e.flushSamples(c.t, true)
 
-	resp, err := e.History(24 * time.Hour)
+	resp, err := e.History(24*time.Hour, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -543,6 +543,69 @@ func TestHistoryRecordsActiveAndPassiveSamples(t *testing.T) {
 		}
 	}
 	t.Fatalf("claude series missing: %+v", resp.Series)
+}
+
+func TestHistoryFiltersWindowKindAndBucketsLongSpans(t *testing.T) {
+	c := &clock{t: time.Date(2026, 10, 4, 10, 0, 0, 0, shanghai)}
+	h := standardHost(c)
+	e, _ := newTestEngine(t, h, c)
+	ctx := context.Background()
+	start := c.t
+	for _, offset := range []time.Duration{0, 5 * time.Minute, 10 * time.Minute, 16 * time.Minute} {
+		c.t = start.Add(offset)
+		e.poll(ctx, e.config(), c.t, "", false)
+	}
+
+	kindsOf := func(kind string) map[string]bool {
+		resp, err := e.History(24*time.Hour, kind)
+		if err != nil {
+			t.Fatal(err)
+		}
+		kinds := map[string]bool{}
+		for _, s := range resp.Series {
+			kinds[s.Kind] = true
+		}
+		return kinds
+	}
+	// No filter or an unknown value returns every window.
+	for _, kind := range []string{"", "30d"} {
+		if kinds := kindsOf(kind); !kinds[quota.KindFiveHour] || !kinds[quota.KindSevenDay] {
+			t.Fatalf("window %q: want both kinds, got %v", kind, kinds)
+		}
+	}
+	if kinds := kindsOf(quota.KindFiveHour); len(kinds) != 1 || !kinds[quota.KindFiveHour] {
+		t.Fatalf("5h history has kinds %v", kinds)
+	}
+
+	week, err := e.History(8*24*time.Hour, quota.KindSevenDay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if week.Bucket != 900 || len(week.Series) == 0 {
+		t.Fatalf("bucket %d, series %d", week.Bucket, len(week.Series))
+	}
+	for _, s := range week.Series {
+		if s.Kind != quota.KindSevenDay {
+			t.Fatalf("series of kind %q in the 7d history", s.Kind)
+		}
+		// 10:00, 10:05 and 10:10 share a 15-minute bucket, which keeps the
+		// last of them; 10:16 starts the next one.
+		if len(s.Points) != 2 || int64(s.Points[0][0]) != start.Add(10*time.Minute).Unix() {
+			t.Fatalf("points %v", s.Points)
+		}
+	}
+}
+
+func TestHistoryBucketKeepsAbout800Points(t *testing.T) {
+	day := 24 * time.Hour
+	for _, tc := range []struct {
+		span   time.Duration
+		bucket int64
+	}{{26 * time.Hour, 0}, {2 * day, 0}, {4 * day, 600}, {8 * day, 900}, {15 * day, 1800}, {31 * day, 3600}, {36 * day, 3600}} {
+		if got := historyBucket(tc.span); got != tc.bucket {
+			t.Errorf("historyBucket(%v) = %d, want %d", tc.span, got, tc.bucket)
+		}
+	}
 }
 
 func TestLanguageReportedByThePageIsUsedForNotifications(t *testing.T) {
