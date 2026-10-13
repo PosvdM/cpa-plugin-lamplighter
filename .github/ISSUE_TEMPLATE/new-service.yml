@@ -1,0 +1,53 @@
+name: 支持新服务 / New service
+description: 希望 Lamplighter 支持 CPA 中的其他服务 / Ask Lamplighter to support another service in CPA
+title: "支持 "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Lamplighter 按 CPA 管理中心额度页的方式查询额度。截图和接口返回请先去掉邮箱、token 等账号信息。
+        Lamplighter reads quota the same way as the CPA Management Center quota page. Remove emails, tokens and other account details from screenshots and responses.
+  - type: input
+    id: service
+    attributes:
+      label: 服务 / Service
+      placeholder: Kimi
+    validations:
+      required: true
+  - type: textarea
+    id: windows
+    attributes:
+      label: 额度窗口 / Quota windows
+      description: 有哪些额度窗口，例如 5 小时、7 天、月度 / Which quota windows the plan has, such as 5-hour, 7-day or monthly
+    validations:
+      required: true
+  - type: dropdown
+    id: five-hour-start
+    attributes:
+      label: 5 小时窗口何时开始计时 / When the 5-hour window starts
+      options:
+        - 重置后第一次请求时 / At the first request after a reset
+        - 固定按时间滚动 / On a fixed schedule
+        - 没有 5 小时窗口 / No 5-hour window
+        - 不确定 / Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: CPA 管理中心额度页截图 / Screenshot of the CPA Management Center quota page
+    validations:
+      required: true
+  - type: textarea
+    id: response
+    attributes:
+      label: 额度接口返回 / Quota API response
+      description: 在额度页打开浏览器开发者工具的网络面板，复制 api-call 请求的响应 / On the quota page, open the browser's developer tools, Network tab, and copy the response of the api-call request
+      render: json
+  - type: checkboxes
+    id: test
+    attributes:
+      label: 测试 / Testing
+      options:
+        - label: 我可以帮忙测试新版本 / I can test a new build
