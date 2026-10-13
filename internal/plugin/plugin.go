@@ -245,7 +245,7 @@ func (p *Plugin) handleManagement(req pluginapi.ManagementRequest) pluginapi.Man
 	case "GET " + apiBase + "/status":
 		return jsonResponse(http.StatusOK, p.engine.Status())
 	case "GET " + apiBase + "/history":
-		resp, err := p.engine.HistoryRange(req.Query.Get("range"))
+		resp, err := p.engine.HistoryRange(req.Query.Get("range"), req.Query.Get("window"))
 		if err != nil {
 			return errorResponse(http.StatusInternalServerError, err)
 		}

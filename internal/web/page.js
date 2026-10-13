@@ -15,6 +15,9 @@
   var chartExpanded = {};
   var chartSelected = null;
   var history = null;
+  // The window kind of the series in history. The chart keeps drawing it
+  // until the history of a newly chosen window arrives.
+  var historyWindow = "";
   var refreshTimer = null;
 
   function $(id) { return document.getElementById(id); }
@@ -857,7 +860,8 @@
     // Rows built after the first fill need their values.
     if (renderServiceRows() && settingsFilled) fillSettings({ providers: true });
     renderServiceText();
-    if (renderWindowButtons() && history) loadHistory();
+    // Before the first load starts, start() loads the chosen window.
+    if (renderWindowButtons() && (history || historyLoading)) loadHistory();
     renderAccounts();
     renderTargets();
     renderEvents();
@@ -877,7 +881,7 @@
     return api("POST", path, body).then(function (data) {
       if (data.status) { status = data.status; renderStatus(); }
       toast(data.ok ? success : translate("failed", data.error));
-      loadHistory();
+      loadHistory(true);
     }).catch(function (err) {
       if (err.message !== "unauthorized") toast(translate("failed", err.message));
     }).then(function () { button.disabled = false; });
@@ -1016,11 +1020,11 @@
     var limit = gapLimit();
     var byLabel = {}, order = [];
     history.series.forEach(function (s) {
-      if (!s.points || !s.points.length || windowKind(s) !== chartWindow) return;
+      if (!s.points || !s.points.length || windowKind(s) !== historyWindow) return;
       var meta = info[s.group + "|" + s.window] || {};
       // A window with its own label, such as "7 Day Opus" next to the
       // 7-day window of the same group label, gets a row of its own.
-      var extra = s.window_label && s.window_label !== chartWindow ? " · " + s.window_label : "";
+      var extra = s.window_label && s.window_label !== historyWindow ? " · " + s.window_label : "";
       var source = (s.source_label || s.label) + extra;
       var id = s.provider + "|" + source;
       if (!byLabel[id]) { byLabel[id] = []; order.push(id); }
@@ -1361,7 +1365,7 @@
     snapPoints = row.points;
     var group = !!row.children;
     var lowest = Math.min.apply(null, row.points.map(function (p) { return group ? p[3] : p[1]; }));
-    head.appendChild(el("span", { class: "detail-name", text: row.name + " · " + translate(chartWindow === "5h" ? "quota_5h" : "quota_7d") }));
+    head.appendChild(el("span", { class: "detail-name", text: row.name + " · " + translate(historyWindow === "5h" ? "quota_5h" : "quota_7d") }));
     head.appendChild(el("span", { class: "muted", text: group ? translate("pooled_note", row.children.length) : row.sub }));
     [[translate(group ? "stat_total" : "stat_current"), pct(row.last)], [translate(group ? "stat_min_account" : "stat_min"), pct(lowest)],
       [translate("stat_to_reset"), row.reset ? fmtCountdown(row.reset * 1000 - Date.now()) : "—"]].forEach(function (stat) {
@@ -1548,14 +1552,14 @@
 
   function renderChart() {
     var overview = $("chart"), head = $("chart-detail-head"), detail = $("chart-detail");
-    overview.classList.remove("loading");
+    overview.classList.toggle("loading", historyLoading !== "" && historyLoading !== historyKey(historyWindow, historyRange));
     clear(overview); clear(head); clear(detail);
     clear($("chart-table"));
     hoverListeners = [];
     snapPoints = [];
     head.hidden = true;
     if (!history || !status) {
-      overview.appendChild(el("div", { class: "empty", text: translate("loading") }));
+      overview.appendChild(el("div", { class: "empty", text: historyFailed ? translate("history_failed", historyFailed) : translate("loading") }));
       return;
     }
     var rows = chartRows();
@@ -1634,14 +1638,85 @@
     renderRangeButtons();
   }
 
-  function loadHistory() {
-    $("chart").classList.add("loading");
-    return api("GET", API + "/history?range=" + range).then(function (data) {
-      history = data;
-      renderChart();
+  // History responses by window and range. A chosen chart that is cached is
+  // drawn at once and redrawn when the new response arrives. historyLoading
+  // is the window and range being loaded for the chosen chart, and the chart
+  // is grayed out while it differs from the one drawn. Each loadHistory call
+  // draws only its own response, and only while it is the latest call.
+  var historyCache = {};
+  var historyPending = {};
+  var historySeq = 0;
+  var historyTicket = 0;
+  var historyRange = "";
+  var historyLoading = "";
+  var historyFailed = "";
+
+  function historyKey(kind, name) { return kind + "|" + name; }
+
+  // Requests a history, or joins the request for it that is under way unless
+  // fresh is set. The cache keeps the response of the latest request, and
+  // the promise resolves to it.
+  function fetchHistory(kind, name, fresh) {
+    var key = historyKey(kind, name);
+    if (historyPending[key] && !fresh) return historyPending[key].promise;
+    var seq = ++historySeq;
+    var entry = { seq: seq };
+    var done = function () { if (historyPending[key] === entry) delete historyPending[key]; };
+    entry.promise = api("GET", API + "/history?range=" + name + "&window=" + kind).then(function (data) {
+      var cached = historyCache[key];
+      if (!cached || cached.seq < seq) historyCache[key] = { seq: seq, data: data };
+      done();
+      return historyCache[key].data;
+    }, function (err) {
+      done();
+      throw err;
+    });
+    historyPending[key] = entry;
+    return entry.promise;
+  }
+
+  function showHistory(kind, name, data) {
+    history = data;
+    historyWindow = kind;
+    historyRange = name;
+    historyFailed = "";
+    renderChart();
+  }
+
+  // Loads the chosen chart; fresh skips a request already under way, for
+  // data that an action has just changed. Resolves to true when the chart
+  // was drawn from the response.
+  function loadHistory(fresh) {
+    var kind = chartWindow, name = range, key = historyKey(kind, name), ticket = ++historyTicket;
+    historyLoading = key;
+    if (historyCache[key]) showHistory(kind, name, historyCache[key].data);
+    else if (historyFailed) { historyFailed = ""; renderChart(); }
+    else $("chart").classList.add("loading");
+    return fetchHistory(kind, name, fresh).then(function (data) {
+      if (ticket !== historyTicket) return false;
+      historyLoading = "";
+      showHistory(kind, name, data);
+      return true;
     }).catch(function (err) {
+      if (ticket !== historyTicket) return false;
+      historyLoading = "";
       if (err.message !== "unauthorized") toast(translate("history_failed", err.message));
-      $("chart").classList.remove("loading");
+      // Without data of the chosen chart, the old chart gives way to the error.
+      if (err.message !== "unauthorized" && historyKey(historyWindow, historyRange) !== key) {
+        history = null;
+        historyFailed = err.message;
+      }
+      renderChart();
+      return false;
+    });
+  }
+
+  // After the first chart loads, the other window's chart is fetched so that
+  // switching to it does not wait.
+  function prefetchHistory() {
+    windowKinds().forEach(function (kind) {
+      var name = rangeFor(kind);
+      if (kind !== chartWindow && !historyCache[historyKey(kind, name)]) fetchHistory(kind, name).catch(function () {});
     });
   }
 
@@ -1919,7 +1994,7 @@
       fillSettings();
       restoreChartFilters();
       return loadHistory();
-    }).catch(function (err) {
+    }).then(function (loaded) { if (loaded) prefetchHistory(); }).catch(function (err) {
       if (err.message !== "unauthorized") toast(translate("load_failed", err.message));
     });
     clearInterval(refreshTimer);
