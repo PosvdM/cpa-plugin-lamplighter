@@ -168,3 +168,23 @@ func TestLegacyNotificationSwitches(t *testing.T) {
 		t.Fatalf("legacy switches set to false keep both windows off: %+v %+v", cfg.RecoveryNotify, cfg.ResetReminder)
 	}
 }
+
+func TestProviderDefaultsAndAliases(t *testing.T) {
+	cfg := Default()
+	if p := cfg.Provider("kimi"); !p.Monitor || !p.Ignite {
+		t.Fatalf("kimi defaults %+v", p)
+	}
+	if p := cfg.Provider("xai"); !p.Monitor || p.Ignite {
+		t.Fatalf("Grok is monitored and cannot be ignited: %+v", p)
+	}
+	cfg, err := Parse([]byte("providers:\n  kimi-ai:\n    ignite: false\n  xai:\n    ignite: true\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p := cfg.Provider("kimi"); !p.Monitor || p.Ignite {
+		t.Fatalf("an alias key must set the provider: %+v", p)
+	}
+	if _, ok := cfg.Providers["kimi-ai"]; ok {
+		t.Fatal("the alias key must be stored under the provider ID")
+	}
+}

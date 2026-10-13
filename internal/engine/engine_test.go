@@ -797,3 +797,56 @@ func TestGrokIsMonitoredButNeverIgnited(t *testing.T) {
 		t.Fatal("Grok billing must be queried once")
 	}
 }
+
+func TestKimiAliasIgnitesThroughItsCPAProvider(t *testing.T) {
+	old := confirmDelays
+	confirmDelays = []time.Duration{time.Millisecond}
+	t.Cleanup(func() { confirmDelays = old })
+	c := &clock{t: time.Date(2026, 10, 4, 10, 0, 0, 0, shanghai)}
+	started := false
+	h := &fakeHost{
+		auths: []pluginapi.HostAuthFileEntry{{ID: "kimi-a.json", AuthIndex: "7", Name: "kimi-a.json", Provider: "kimi-ai", Email: "k@example.com"}},
+		files: map[string]string{"7": `{"access_token":"t7","type":"kimi-ai"}`},
+		http: func(req pluginapi.HTTPRequest) pluginapi.HTTPResponse {
+			if req.URL != providers.KimiAIUsageURL {
+				return pluginapi.HTTPResponse{StatusCode: 404}
+			}
+			// The window ended a minute ago until the ignition starts a new one.
+			reset := c.t.Add(-time.Minute)
+			if started {
+				reset = c.t.Add(5 * time.Hour)
+			}
+			return pluginapi.HTTPResponse{StatusCode: 200, Body: []byte(`{"limits":[{"detail":{"used":"0","limit":"100","resetTime":"` +
+				reset.UTC().Format(time.RFC3339) + `"},"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"}}]}`)}
+		},
+		execute: func(req pluginapi.HostModelExecutionRequest) (pluginapi.HostModelExecutionResponse, error) {
+			started = true
+			return pluginapi.HostModelExecutionResponse{StatusCode: 200}, nil
+		},
+	}
+	e, _ := newTestEngine(t, h, c)
+	models := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"data":[{"id":"kimi-k2-thinking"},{"id":"kimi-k2.8"},{"id":"kimi-k2.5"}]}`))
+	}))
+	t.Cleanup(models.Close)
+	cfg := e.config()
+	cfg.CPABaseURL = models.URL
+	e.Configure(cfg, nil)
+	ctx := context.Background()
+	e.poll(ctx, cfg, c.t, "", false)
+	if account := e.Status().Accounts[0]; account.Provider != "kimi" || account.Title != "Kimi" {
+		t.Fatalf("account %+v", account)
+	}
+	e.performDue(ctx, cfg)
+
+	if len(h.executed) != 1 {
+		t.Fatalf("want one ignition, got %d", len(h.executed))
+	}
+	req := h.executed[0]
+	if req.ForcedProvider != "kimi-ai" || req.EntryProtocol != "openai" || req.Model != "kimi-k2.8" || req.AuthID != "kimi-a.json" {
+		t.Fatalf("ignition request %+v", req)
+	}
+	if ts := e.state.Target("kimi:7:kimi:main"); ts.LastSuccessEpoch == 0 || ts.LastModel != "kimi-k2.8" {
+		t.Fatalf("target state %+v", ts)
+	}
+}

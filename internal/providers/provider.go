@@ -67,7 +67,7 @@ type Text struct {
 	En string `json:"en"`
 }
 
-var registry = []*Provider{codex, claude, antigravity, xai}
+var registry = []*Provider{codex, claude, antigravity, kimi, xai}
 
 // All returns the providers in display order.
 func All() []*Provider { return registry }
@@ -122,7 +122,7 @@ func Title(provider string) string {
 // groupOrder lists quota groups in the order the page shows them: the main
 // group of each service, then the separately counted ones. Other groups
 // follow.
-var groupOrder = []string{"Claude", "ChatGPT", "Gemini", "Grok", "Fable", "Claude / GPT"}
+var groupOrder = []string{"Claude", "ChatGPT", "Gemini", "Kimi", "Grok", "Fable", "Claude / GPT"}
 
 // GroupOrder returns the display order of quota groups by source label.
 func GroupOrder() []string { return groupOrder }

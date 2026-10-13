@@ -314,3 +314,82 @@ func (d *recordingDoer) Do(_ context.Context, _ string, req quota.Request) (quot
 	d.req = req
 	return quota.Response{Status: 200, Body: []byte(d.body)}, nil
 }
+
+func TestParseKimiUsageMatchesTheManagementCenter(t *testing.T) {
+	now := time.Date(2099, 7, 31, 4, 0, 0, 0, time.UTC)
+	// The payload of the Management Center's Kimi ordering test.
+	groups, err := ParseKimiUsage(decode(t, `{
+		"usage":{"used":"1","limit":"100","remaining":"99","resetTime":"2099-08-06T13:59:23.136523Z"},
+		"limits":[{"detail":{"used":"2","limit":"100","remaining":"98","resetTime":"2099-07-31T06:59:23.136523Z"},
+			"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"}}]}`), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(groups) != 1 || groups[0].Key != "kimi:main" || groups[0].SourceLabel != "Kimi" {
+		t.Fatalf("groups %+v", groups)
+	}
+	w := groups[0].Windows
+	if len(w) != 2 {
+		t.Fatalf("windows %+v", w)
+	}
+	if w[0].ID != quota.WindowFiveHour || w[0].Label != quota.LabelFiveHour || w[0].Remaining != 98 || w[0].Period != quota.FiveHours ||
+		!w[0].Reset.Equal(time.Date(2099, 7, 31, 6, 59, 23, 136523000, time.UTC)) {
+		t.Fatalf("5-hour window %+v", w[0])
+	}
+	if w[1].ID != quota.WindowSevenDay || w[1].Remaining != 99 || quota.Kind(w[1]) != quota.KindSevenDay {
+		t.Fatalf("weekly window %+v", w[1])
+	}
+
+	// A relative reset, a remaining count instead of used, and a window of
+	// another length.
+	groups, err = ParseKimiUsage(decode(t, `{"limits":[
+		{"detail":{"limit":200,"remaining":150,"reset_in":3600},"window":{"duration":1,"timeUnit":"TIME_UNIT_DAY"}},
+		{"detail":{"limit":0,"used":0}}]}`), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w = groups[0].Windows
+	if len(w) != 1 || w[0].ID != "limit-0" || w[0].Label != "1d" || w[0].Remaining != 75 || !w[0].Reset.Equal(now.Add(time.Hour)) || quota.Kind(w[0]) != "" {
+		t.Fatalf("other window %+v", w)
+	}
+	if _, err := ParseKimiUsage(decode(t, `{"limits":[]}`), now); err == nil {
+		t.Fatal("no windows must fail")
+	}
+}
+
+func TestKimiUsageURLFollowsTheDomain(t *testing.T) {
+	cases := []struct {
+		provider, file, want string
+	}{
+		{"kimi", `{"access_token":"t"}`, KimiUsageURL},
+		{"kimi-ai", `{"access_token":"t"}`, KimiAIUsageURL},
+		{"kimi_ai", `{"access_token":"t"}`, KimiAIUsageURL},
+		{"kimi", `{"access_token":"t","domain":"kimi.ai"}`, KimiAIUsageURL},
+		{"kimi-ai", `{"access_token":"t","domain":"other"}`, KimiUsageURL},
+		{"kimi", `{"access_token":"t","base_url":"https://api.kimi.ai/coding/v1"}`, KimiAIUsageURL},
+		{"kimi", `{"access_token":"t","type":"kimi-ai"}`, KimiAIUsageURL},
+	}
+	for _, c := range cases {
+		cred := ParseCredential(json.RawMessage(c.file))
+		cred.Provider = c.provider
+		if got := kimiUsageURL(cred); got != c.want {
+			t.Errorf("%s %s: %s, want %s", c.provider, c.file, got, c.want)
+		}
+	}
+	for _, name := range []string{"kimi", "kimi-ai", "kimi_ai", "kimi.com", "Kimi.AI"} {
+		if Lookup(name) != kimi {
+			t.Errorf("%s is not Kimi", name)
+		}
+	}
+}
+
+func TestKimiCandidatesSkipThinkingAndHighSpeed(t *testing.T) {
+	available := []string{"kimi-k2", "kimi-k2-thinking", "kimi-k2.5", "kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.8", "gpt-6-luna"}
+	got, err := Candidates(kimi, "Kimi", "", available)
+	if err != nil || strings.Join(got, ",") != "kimi-k2.8,kimi-k2.7-code,kimi-k2.5,kimi-k2" {
+		t.Fatalf("got %v %v", got, err)
+	}
+	if kimi.Ignition.Protocol != "openai" || kimi.Headers != nil {
+		t.Fatal("Kimi ignites over the OpenAI protocol and sends no quota headers")
+	}
+}
