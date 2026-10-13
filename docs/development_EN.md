@@ -20,13 +20,13 @@ Tests use a fake host and local HTTP servers and never send real requests. CI ru
 
 Coverage:
 
-- active quota parsing and passive header parsing for the three services;
+- active quota parsing, passive header parsing and window periods for each service (Codex, Claude, Antigravity, Kimi, Grok), window kinds, and the choice of Kimi endpoint;
 - network exit selection, including that an invalid `proxy_url` never falls back to a direct connection;
 - ignition timing, rolling-reset detection, error classes and failure protection;
 - candidate model order and model list reading;
 - quota alerts, per-window recovery notifications and reset reminders, the Bark request format, and Did Codex Reset deduplication, filtering and schedule times;
 - webhook placeholder escaping, the built-in body, `success_json`, the settings check and hiding secrets in errors, that one successful channel delivers a message, and that no channel turns notifications off while an invalid webhook alone fails and retries;
-- the engine: account suffixes, the passive skip rule, queries around resets, ignition confirmation, retry with the next model, pause notifications and history sampling;
+- the engine: account suffixes, the passive skip rule, that passive data adds no windows, queries around resets, ignition confirmation, retry with the next model, `forced_provider` for a Kimi alias account, that Grok is not ignited, pause notifications, history sampling and the provider list in the status;
 - plugin RPC: registration, management routes, the page, and that the status contains no secrets;
 - the instance lock being exclusive, and reading the plugin directory from the CPA config.
 
