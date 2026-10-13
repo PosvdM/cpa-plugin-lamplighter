@@ -41,6 +41,10 @@ var antigravity = &Provider{
 		// The settings show the Gemini model, which matches "latest Flash".
 		HintGroup: "Gemini",
 		Groups:    []string{"Gemini", "Claude / GPT"},
+		GroupsHint: Text{
+			Zh: "Antigravity 按模型分成多个独立的 5 小时额度组。只有勾选的额度组会自动点火；Claude / GPT 额度组较小，默认不点。",
+			En: "Antigravity splits quota into separate 5-hour groups by model. Only checked groups are ignited; the Claude / GPT group is small and off by default.",
+		},
 		// The Claude / GPT group is much smaller than the Gemini one, so only
 		// Gemini is ignited unless groups says otherwise.
 		DefaultGroups: []string{"Gemini"},

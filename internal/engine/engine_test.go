@@ -680,3 +680,26 @@ func TestPassiveRelativeResetCountsFromTheRequest(t *testing.T) {
 	}
 	t.Fatal("no Codex group")
 }
+
+func TestStatusListsProvidersForTheSettings(t *testing.T) {
+	c := &clock{t: time.Date(2026, 10, 4, 10, 0, 0, 0, shanghai)}
+	e, _ := newTestEngine(t, standardHost(c), c)
+	status := e.Status()
+	var ids []string
+	for _, p := range status.Providers {
+		ids = append(ids, p.ID)
+	}
+	if strings.Join(ids, ",") != strings.Join(providers.IDs(), ",") {
+		t.Fatalf("providers %v", ids)
+	}
+	ag := status.Providers[2]
+	if ag.ID != "antigravity" || !ag.Ignite || strings.Join(ag.Groups, ",") != "Gemini,Claude / GPT" || ag.GroupsHint == nil || ag.ModelHint.Zh != "最新的 Flash" {
+		t.Fatalf("antigravity %+v", ag)
+	}
+	if status.Providers[0].Groups != nil || status.Providers[0].GroupsHint != nil {
+		t.Fatalf("codex offers no groups: %+v", status.Providers[0])
+	}
+	if len(status.GroupOrder) == 0 || status.GroupOrder[0] != "Claude" {
+		t.Fatalf("group order %v", status.GroupOrder)
+	}
+}

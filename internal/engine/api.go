@@ -326,6 +326,42 @@ type Status struct {
 	Events    []Event         `json:"events"`
 	// NextModels is the model automatic selection picks next, per provider.
 	NextModels map[string]string `json:"next_models,omitempty"`
+	// Providers lists the supported providers in display order, for the
+	// settings, and GroupOrder the display order of quota groups.
+	Providers  []ProviderInfo `json:"providers"`
+	GroupOrder []string       `json:"group_order"`
+}
+
+// ProviderInfo describes a provider for the settings page.
+type ProviderInfo struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	// Ignite is false for providers that cannot be ignited.
+	Ignite bool `json:"ignite"`
+	// ModelHint describes the automatic ignition model.
+	ModelHint *providers.Text `json:"model_hint,omitempty"`
+	// Groups are the quota groups offered as ignition checkboxes, explained
+	// by GroupsHint.
+	Groups     []string        `json:"groups,omitempty"`
+	GroupsHint *providers.Text `json:"groups_hint,omitempty"`
+}
+
+func providerInfos() []ProviderInfo {
+	var out []ProviderInfo
+	for _, p := range providers.All() {
+		info := ProviderInfo{ID: p.ID, Title: p.Title, Ignite: p.Ignition != nil}
+		if p.Ignition != nil {
+			hint := p.Ignition.Hint
+			info.ModelHint = &hint
+			info.Groups = p.Ignition.Groups
+			if len(p.Ignition.Groups) > 0 {
+				groupsHint := p.Ignition.GroupsHint
+				info.GroupsHint = &groupsHint
+			}
+		}
+		out = append(out, info)
+	}
+	return out
 }
 
 // Status returns a snapshot for the management page. Secrets are removed
@@ -372,6 +408,8 @@ func (e *Engine) Status() Status {
 		NextPoll:    e.nextPoll,
 		Config:      cfg,
 		Targets:     append([]TargetView{}, e.targets...),
+		Providers:   providerInfos(),
+		GroupOrder:  providers.GroupOrder(),
 	}
 	_, status.UTCOffset = e.now().In(e.cfg.Location()).Zone()
 	creds := make([]*Cred, 0, len(e.creds))
