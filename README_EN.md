@@ -24,10 +24,10 @@ Lamplighter is a native plugin for [CLIProxyAPI](https://github.com/router-for-m
 | ChatGPT / Codex | 5-hour and 7-day windows | On |
 | Claude | 5-hour and 7-day windows, plus separately counted quotas such as Fable | On, 5-hour window only |
 | Antigravity | Quota groups such as Gemini and Claude / GPT | Off; when on, Gemini only |
-| Kimi | 5-hour, 7-day and other windows | On |
+| Kimi | 5-hour, 7-day and other windows | Not supported: the windows switch at fixed times |
 | Grok | 7-day window | Not supported: a new period starts when the previous one ends |
 
-Kimi quota queries and ignition follow the CPA Management Center and have not been tried with a real account yet. Accounts without a 5-hour window, such as ChatGPT Pro, are monitored for their other windows and not ignited.
+Kimi quota queries follow the CPA Management Center; parsing is tested with a real response a user provided, but the requests have not run against a real account yet. Grok accounts billed by API usage have no quota to read and show an error. Accounts without a 5-hour window, such as ChatGPT Pro, are monitored for their other windows and not ignited.
 
 When a service has several accounts, notifications and the page tell them apart by the last two characters of the email user name, for example `ChatGPT#rk`.
 
@@ -68,7 +68,7 @@ The plugin keeps its state and quota history in `data/lamplighter/` under the pl
 
 **Active queries** run every 5 minutes by default, at minutes `00 / 05 / 10 / ... / 55` of each hour. In addition, the plugin queries the account once 30 seconds before and once 30 seconds after each quota window resets: the first records what is left at the end of the cycle, the second confirms the new cycle and sends the recovery notification without waiting for the next poll. A query is skipped when a newer reading already exists. Queries use the same URLs and headers as the quota page of the CPA Management Center.
 
-**Passive data**: when a Claude or Codex model request passes through CPA, the provider returns the current quota in the response, and the plugin uses it without an extra request. Antigravity, Kimi and Grok return no such data and are only queried actively. A window that only appears in the response headers and not in the usage API is not shown, such as the 5-hour window of a ChatGPT Pro account.
+**Passive data**: when a Claude or Codex model request passes through CPA, the provider returns the current quota in the response, and the plugin uses it without an extra request. Antigravity, Kimi and Grok return no such data and are only queried actively. A window that only appears in the response headers and not in the usage API is no longer shown after an active query, such as the 5-hour window of a ChatGPT Pro account.
 
 If an account produced passive data in the 60 seconds before a scheduled query, that query is skipped for the account. An account is skipped for at most 30 minutes in a row; after that it is queried actively, so that quotas missing from the response headers, such as an unused Claude Fable quota, stay current. The chart does not draw this planned interval as missing data.
 
@@ -78,12 +78,12 @@ Claude and Codex quotas have 1% precision, whether queried or read passively. An
 
 ## Window ignition
 
-A 5-hour window starts with the first request after a reset. If nobody uses the account after a reset, no window runs. Lamplighter sends a request right after each reset so that the windows follow each other. Grok has no 5-hour window and is not ignited. The rules:
+A 5-hour window starts with the first request after a reset. If nobody uses the account after a reset, no window runs. Lamplighter sends a request right after each reset so that the windows follow each other. Kimi windows switch at fixed times and Grok has no 5-hour window, so neither is ignited. The rules:
 
 - Times use the plugin time zone, which follows the CPA server by default.
 - The first ignition each day is at `07:00`; after that, 3 seconds after each reset, until `22:30`. A reset later than that waits for 07:00 the next day.
 - The request asks the model to reply `OK`, declares no tools and allows at most 4 output tokens.
-- Models are picked automatically: the newest Luna for ChatGPT, the newest Haiku for Claude, the newest Flash for Antigravity's Gemini group, and the newest Kimi model (without thinking and high-speed variants) for Kimi. A model is used from the first ignition after CPA lists it; when the provider refuses it, that ignition falls back to the next candidate; when the fallback works, an event is recorded and the quota group skips the refused model for 24 hours. They can also be set in the config.
+- Models are picked automatically: the newest Luna for ChatGPT, the newest Haiku for Claude, and the newest Flash for Antigravity's Gemini group. A model is used from the first ignition after CPA lists it; when the provider refuses it, that ignition falls back to the next candidate; when the fallback works, an event is recorded and the quota group skips the refused model for 24 hours. They can also be set in the config.
 - An ignition counts as successful only when the 5-hour window afterwards has a fixed reset time in the future.
 
 **Failure protection**:
@@ -161,7 +161,7 @@ Ignition settings live under `ignition`:
 | `max_transient_failures` | `3` | Transient errors that pause ignition until the next day |
 | `post_success_hold_seconds` | `60` | Minimum wait after a successful ignition |
 
-Per-service settings live under `providers`, keyed `codex`, `claude`, `antigravity`, `kimi` and `xai` (Grok). CPA can name Kimi accounts `kimi-ai` and similar; any of these keys counts as `kimi`. Grok cannot be ignited, so `ignite` has no effect for it:
+Per-service settings live under `providers`, keyed `codex`, `claude`, `antigravity`, `kimi` and `xai` (Grok). CPA can name Kimi accounts `kimi-ai` and similar; any of these keys counts as `kimi`. Kimi and Grok cannot be ignited, so `ignite` has no effect for them:
 
 | Key | Description |
 | --- | --- |

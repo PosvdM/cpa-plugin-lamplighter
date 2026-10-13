@@ -34,7 +34,7 @@ Lamplighter 是用 Go 编写、以 `-buildmode=c-shared` 构建的 CPA 原生插
 
 | 方法和路径 | 作用 |
 | --- | --- |
-| `GET /v0/management/lamplighter/status` | 状态页数据，配置中的密钥只显示是否已设置。`providers` 按显示顺序列出支持的服务（`id`、`title`、能否点火 `ignite`、中英文的模型提示 `model_hint`、可勾选的点火额度组 `groups` 及说明 `groups_hint`），`group_order` 是额度组的显示顺序；每个窗口带 `kind`（`5h`、`7d`，其他长度为空） |
+| `GET /v0/management/lamplighter/status` | 状态页数据，配置中的密钥只显示是否已设置。`providers` 按显示顺序列出支持的服务（`id`、`title`、能否点火 `ignite`、中英文的模型提示 `model_hint`、可勾选的点火额度组 `groups` 及说明 `groups_hint`），`group_order` 是额度组的显示顺序；每个窗口带 `kind`（`5h` 或 `7d`，其他长度的窗口没有这个字段） |
 | `GET /v0/management/lamplighter/history?range=1h\|3h\|6h\|12h\|24h\|26h\|4d\|8d\|15d\|1mo\|36d` | 额度历史和点火事件，默认 `24h`。5 小时额度按小时、7 天额度按天，依次是：1 个单位；半个窗口加 1（`3h`、`4d`）；一个窗口加 1（`6h`、`8d`）；半天或半月，能完整显示两个窗口（`12h`、`15d`）；一天或一个月（`24h`、`1mo`）；五个窗口加 1（`26h`、`36d`）。`1mo` 从插件时区上个月的同一日期（该月没有这一天时取最后一天）到现在 |
 | `POST /v0/management/lamplighter/refresh` | 立即主动查询，`{"auth_index": "..."}` 只查一个账号 |
 | `POST /v0/management/lamplighter/ignite` | 立即点火，`{"target": "<额度组 key>"}` |
@@ -82,7 +82,7 @@ Lamplighter 是用 Go 编写、以 `-buildmode=c-shared` 构建的 CPA 原生插
 
 | 字段 | 内容 |
 | --- | --- |
-| `ID`、`Aliases`、`Title` | 配置键和额度组 key 使用的服务名；CPA 中的其他写法（Kimi 的 `kimi-ai`、`kimi.ai`、`kimi.com`）；显示名 |
+| `ID`、`Aliases`、`Title` | 配置键和额度组 key 使用的服务名；CPA 中的其他写法（Kimi 的 `kimi-ai`、`kimi.ai`、`kimi.com`，Grok 的 `x-ai`、`x.ai`、`grok`）；显示名 |
 | `Monitor`、`Ignite` | 默认是否监控、点火 |
 | `Fetch` | 主动查询，返回额度组 |
 | `Headers` | 解析模型请求的响应头；为空表示响应头里没有额度，被动跳过对该服务不生效 |
@@ -90,7 +90,7 @@ Lamplighter 是用 Go 编写、以 `-buildmode=c-shared` 构建的 CPA 原生插
 
 `providers.Lookup` 按服务名或别名查找（忽略大小写，`_` 视同 `-`）。凭证列表中的服务名换成 `ID` 存进 `Cred.Provider`，原始写法存进 `Cred.HostProvider`。配置中用别名写的服务键在解析时换成 `ID`。
 
-**窗口种类**：`quota.Window.Period` 是窗口长度，由各服务从接口数据填入：Codex 的 `limit_window_seconds` 和 `Window-Minutes`，Claude 的字段名，Antigravity 的 `window`，Kimi 的 `duration` 和 `timeUnit`，Grok 的周期起止时间。`quota.Kind` 先看周期（与 5 小时或 7 天相差 5% 以内），没有周期时按 ID 和标签判断。5 小时和 7 天窗口使用固定的 ID 和标签（`five-hour`、`seven-day`），其他长度的窗口带自己的 ID，标签为 `quota.PeriodLabel` 给出的长度，例如 `30d`。点火、冷却判断、图表和通知都按种类处理，所以没有 5 小时窗口的账号（Grok、ChatGPT Pro）不点火，图表也不显示 5 小时标签页。
+**窗口种类**：`quota.Window.Period` 是窗口长度，由各服务从接口数据填入：Codex 的 `limit_window_seconds` 和 `Window-Minutes`，Claude 的字段名，Antigravity 的 `window`，Kimi 的 `duration` 和 `timeUnit`，Grok 的周期起止时间。`quota.Kind` 先看周期（与 5 小时或 7 天相差 5% 以内），没有周期时按 ID 和标签判断。5 小时和 7 天窗口使用固定的 ID 和标签（`five-hour`、`seven-day`），其他长度的窗口带自己的 ID，标签为 `quota.PeriodLabel` 给出的长度，例如 `30d`；Grok 的周期长度会随月份变化，固定使用 `credits`。点火、冷却判断、图表和通知都按种类处理，所以没有 5 小时窗口的账号（例如 ChatGPT Pro）不点火，图表也不显示 5 小时标签页。
 
 **新增服务**：在 `internal/providers` 中新建一个文件，参照 CPA 管理中心额度页的请求实现 `Fetch`，有额度响应头时实现 `Headers`，窗口填上 `Period`；能点火时填写 `Ignition`；把服务加入 `registry`，需要固定位置时把主额度组的名称加入 `groupOrder`；在 `internal/web/page.css` 中加上管理中心同名服务的标签颜色（`--type-<id>-bg` 等）。同步更新 README 的服务表和本文档的主动查询、被动数据、点火请求和模型选择各节。
 
@@ -123,8 +123,8 @@ Lamplighter 是用 Go 编写、以 `-buildmode=c-shared` 构建的 CPA 原生插
 | Codex | `GET https://chatgpt.com/backend-api/wham/usage`，带 `Chatgpt-Account-Id` |
 | Claude | `GET https://api.anthropic.com/api/oauth/usage`，`anthropic-beta: oauth-2025-04-20` |
 | Antigravity | `POST .../v1internal:retrieveUserQuotaSummary`，依次尝试三个地址，正文为 `{"project": "<project_id>"}` |
-| Kimi | `GET https://api.kimi.com/coding/v1/usages`；凭证的 `domain`、`base_url`、`type` 或服务名指向 kimi.ai 时用 `api.kimi.ai` |
-| Grok | `GET https://cli-chat-proxy.grok.com/v1/billing?format=credits`，带 Grok CLI 的请求头和凭证 `sub` 作为 `x-userid` |
+| Kimi | `GET https://api.kimi.com/coding/v1/usages`；与 CPA 的 Kimi 执行器一样，依次看凭证的 `domain`、`base_url`、`type`、服务名，最后看运行时 ID 或文件名是否含 `kimi-ai`、`kimi.ai`，指向 kimi.ai 时用 `api.kimi.ai` |
+| Grok | `GET https://cli-chat-proxy.grok.com/v1/billing?format=credits`，带 Grok CLI 的请求头和凭证 `sub` 作为 `x-userid`。`currentPeriod` 为每周时是 7 天窗口；没有 `currentPeriod` 时才用按月的 `billingPeriodStart`/`End`。其他长度的周期固定使用 ID `credits`，让历史和提醒在周期之间延续 |
 
 请求头与 CPA 管理中心额度页相同，常量在 `internal/providers` 中各服务的文件里。Codex 的 User-Agent 与 CPA 的 Codex 执行器一致；Claude 的 User-Agent 与 CPA 默认的 Claude Code 指纹一致。
 
@@ -175,14 +175,13 @@ Antigravity、Kimi 和 Grok 的响应头里没有额度。
 
 ### 请求
 
-点火通过 `host.model.execute` 发送，`auth_id` 为凭证的运行时 ID，`forced_provider` 为 CPA 报告的服务名（`Cred.HostProvider`，例如 Kimi 的 `kimi-ai`）。请求体由各服务的 `Ignition.Body` 给出，经 `providers.Request` 编码。Grok 的每周额度在上一周期结束时自动开始，没有点火：
+点火通过 `host.model.execute` 发送，`auth_id` 为凭证的运行时 ID，`forced_provider` 为 CPA 报告的服务名（`Cred.HostProvider`）。请求体由各服务的 `Ignition.Body` 给出，经 `providers.Request` 编码。Kimi 和 Grok 没有点火：Kimi 订阅的 5 小时和 7 天窗口从开通时间起按固定时间切换，不论是否使用；Grok 的每周额度在上一周期结束时自动开始。其余服务的请求如下：
 
 | 服务 | 入口协议 | 请求要点 |
 | --- | --- | --- |
 | Codex | `openai-response` | `reasoning.effort: none`，`tools: []`，`max_output_tokens: 4` |
 | Claude | `claude` | `max_tokens: 4` |
 | Antigravity | `openai` | `max_tokens: 4`，`temperature: 0`，`reasoning_effort: none` |
-| Kimi | `openai`（CPA Kimi 执行器的原生协议） | `max_tokens: 4` |
 
 ### 模型选择
 
@@ -192,7 +191,6 @@ CPA 没有按凭证列出模型的宿主回调，插件用 `models_api_key` 读�
 - Claude：`claude-` 开头的非 thinking Haiku 由新到旧，然后 Sonnet。
 - Antigravity Gemini 组：Flash 由新到旧，然后其他非 Pro 模型，Pro 最后；排除图片模型。
 - Antigravity Claude / GPT 组：Haiku、Sonnet、Opus（均为非 thinking）、GPT-OSS、其他非 thinking 模型。
-- Kimi：`kimi-` 开头、不含 `thinking` 和 `highspeed` 的模型由新到旧。
 
 “由新到旧”比较模型名中的数字段，新版本无需改代码。每次点火都从最新的候选开始。新模型发布后，旧模型通常还会在列表里保留很久，所以候选顺序不参考上次成功的模型。配置了 `model` 或 `models` 时只用指定模型，且它必须在列表中。
 
@@ -210,7 +208,7 @@ CPA 的模型列表来自它内置并定期更新的模型表，同一服务的�
 
 1. Claude 的响应头里直接带新的重置时间，立即确认。
 2. Codex 的额度信息通过同一请求的用量记录到达；等待期间继续处理被动数据。
-3. 按 5、10、15、30、15 秒的间隔检查，每次检查前主动查询该凭证一次。Antigravity 和 Kimi 的响应头里没有额度，只靠这一步确认。
+3. 按 5、10、15、30、15 秒的间隔检查，每次检查前主动查询该凭证一次。Antigravity 的响应头里没有额度，只靠这一步确认。
 
 全部检查都没有确认时，返回 `ErrNotConfirmed`。
 

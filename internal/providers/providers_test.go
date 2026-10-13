@@ -383,13 +383,66 @@ func TestKimiUsageURLFollowsTheDomain(t *testing.T) {
 	}
 }
 
-func TestKimiCandidatesSkipThinkingAndHighSpeed(t *testing.T) {
-	available := []string{"kimi-k2", "kimi-k2-thinking", "kimi-k2.5", "kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.8", "gpt-6-luna"}
-	got, err := Candidates(kimi, "Kimi", "", available)
-	if err != nil || strings.Join(got, ",") != "kimi-k2.8,kimi-k2.7-code,kimi-k2.5,kimi-k2" {
-		t.Fatalf("got %v %v", got, err)
+func TestParseKimiUsageReadsARealResponse(t *testing.T) {
+	// The response an Allegretto subscriber posted in #20, read at 10:34
+	// UTC+8 on 2026-10-13 without using the account.
+	now := time.Date(2026, 10, 13, 2, 34, 0, 0, time.UTC)
+	groups, err := ParseKimiUsage(decode(t, `{
+		"usage":{"limit":"100","remaining":"100","resetTime":"2026-10-14T01:40:01.023884Z"},
+		"limits":[{"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"},"detail":{"limit":"100","remaining":"100","resetTime":"2026-10-13T06:40:01.023884Z"}}],
+		"usages":{"limit_5h":{"used_ratio":0,"reset_time":"2026-10-13T06:40:00Z"},"limit_7d":{"used_ratio":0,"reset_time":"2026-10-14T01:40:00Z"}}}`), now)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if kimi.Ignition.Protocol != "openai" || kimi.Headers != nil {
-		t.Fatal("Kimi ignites over the OpenAI protocol and sends no quota headers")
+	w := groups[0].Windows
+	if len(w) != 2 || w[0].ID != quota.WindowFiveHour || w[0].Remaining != 100 || w[0].Reset.Format(time.RFC3339) != "2026-10-13T06:40:01Z" ||
+		w[1].ID != quota.WindowSevenDay || w[1].Remaining != 100 || w[1].Reset.Format(time.RFC3339) != "2026-10-14T01:40:01Z" {
+		t.Fatalf("windows %+v", w)
+	}
+	if kimi.Ignition != nil || kimi.Headers != nil {
+		t.Fatal("Kimi windows switch at fixed times and its headers carry no quota")
+	}
+}
+
+func TestKimiDomainFallsBackToTheFileName(t *testing.T) {
+	cred := ParseCredential(json.RawMessage(`{"access_token":"t"}`))
+	// Like CPA, the file name only decides when nothing else names a domain;
+	// the provider name kimi already means kimi.com.
+	cred.ID, cred.Name = "kimi-ai-1.json", "kimi-ai-1.json"
+	if got := kimiUsageURL(cred); got != KimiAIUsageURL {
+		t.Fatalf("file name fallback: %s", got)
+	}
+	cred.Provider = "kimi"
+	if got := kimiUsageURL(cred); got != KimiUsageURL {
+		t.Fatalf("provider before file name: %s", got)
+	}
+	if p := kimiPeriod(0, "", "1 hour limit"); p == quota.FiveHours {
+		t.Fatal("only a 5-hour name is the 5-hour window")
+	}
+	if p := kimiPeriod(0, "", "5h limit"); p != quota.FiveHours {
+		t.Fatalf("5h limit: %v", p)
+	}
+}
+
+func TestParseXAIBillingKeepsOneIDForOtherPeriods(t *testing.T) {
+	for _, body := range []string{
+		`{"config":{"creditUsagePercent":10,"billingPeriodStart":"2026-02-01T00:00:00Z","billingPeriodEnd":"2026-03-01T00:00:00Z"}}`,
+		`{"config":{"creditUsagePercent":10,"billingPeriodStart":"2026-03-01T00:00:00Z","billingPeriodEnd":"2026-04-01T00:00:00Z"}}`,
+	} {
+		groups, err := ParseXAIBilling(decode(t, body))
+		if err != nil || groups[0].Windows[0].ID != "credits" || quota.Kind(groups[0].Windows[0]) != "" {
+			t.Fatalf("%s: %+v %v", body, groups, err)
+		}
+	}
+	// A weekly current period without an end does not borrow the monthly billing period.
+	groups, err := ParseXAIBilling(decode(t, `{"config":{"creditUsagePercent":10,"currentPeriod":{"type":"USAGE_PERIOD_TYPE_WEEKLY","start":"2026-10-06T04:01:28Z"},
+		"billingPeriodStart":"2026-10-01T00:00:00Z","billingPeriodEnd":"2026-11-01T00:00:00Z"}}`))
+	if err != nil || groups[0].Windows[0].ID != quota.WindowSevenDay || !groups[0].Windows[0].Reset.IsZero() {
+		t.Fatalf("weekly without end: %+v %v", groups, err)
+	}
+	for _, name := range []string{"xai", "x-ai", "x.ai", "grok"} {
+		if Lookup(name) != xai {
+			t.Errorf("%s is not Grok", name)
+		}
 	}
 }

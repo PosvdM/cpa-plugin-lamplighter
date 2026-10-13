@@ -9,8 +9,11 @@ import (
 // Credential holds the fields Lamplighter reads from a credential file.
 type Credential struct {
 	// Provider is the provider name CPA reports for the credential, which
-	// can be an alias such as "kimi-ai".
+	// can be an alias such as "kimi-ai". ID and Name are its runtime ID and
+	// file name in CPA.
 	Provider    string
+	ID          string
+	Name        string
 	AccessToken string
 	AccountID   string
 	ProjectID   string

@@ -34,7 +34,7 @@ Management routes (require the CPA management key):
 
 | Method and path | Purpose |
 | --- | --- |
-| `GET /v0/management/lamplighter/status` | Status page data; secrets in the config only show whether they are set. `providers` lists the supported services in display order (`id`, `title`, whether it can be ignited `ignite`, the model hint `model_hint` and the quota groups offered for ignition `groups` with their note `groups_hint`, in Chinese and English), and `group_order` is the display order of quota groups; each window carries `kind` (`5h`, `7d`, empty for other lengths) |
+| `GET /v0/management/lamplighter/status` | Status page data; secrets in the config only show whether they are set. `providers` lists the supported services in display order (`id`, `title`, whether it can be ignited `ignite`, the model hint `model_hint` and the quota groups offered for ignition `groups` with their note `groups_hint`, in Chinese and English), and `group_order` is the display order of quota groups; each window carries `kind` (`5h` or `7d`; windows of other lengths have no such field) |
 | `GET /v0/management/lamplighter/history?range=1h\|3h\|6h\|12h\|24h\|26h\|4d\|8d\|15d\|1mo\|36d` | Quota history and ignition events, `24h` by default. In hours for the 5-hour quota and days for the 7-day quota, the ranges are: one unit; half a window plus one (`3h`, `4d`); a window plus one (`6h`, `8d`); half a day or month, which fits two whole windows (`12h`, `15d`); a day or a month (`24h`, `1mo`); five windows plus one (`26h`, `36d`). `1mo` runs from the same date of the previous month in the plugin's time zone, or its last day when that month is shorter, to now |
 | `POST /v0/management/lamplighter/refresh` | Query now; `{"auth_index": "..."}` limits it to one account |
 | `POST /v0/management/lamplighter/ignite` | Ignite now, `{"target": "<group key>"}` |
@@ -82,7 +82,7 @@ Each service is a `providers.Provider` in `internal/providers`, registered in di
 
 | Field | Content |
 | --- | --- |
-| `ID`, `Aliases`, `Title` | The provider name used in config keys and quota group keys; other names CPA uses (`kimi-ai`, `kimi.ai`, `kimi.com` for Kimi); the display name |
+| `ID`, `Aliases`, `Title` | The provider name used in config keys and quota group keys; other names CPA uses (`kimi-ai`, `kimi.ai`, `kimi.com` for Kimi; `x-ai`, `x.ai`, `grok` for Grok); the display name |
 | `Monitor`, `Ignite` | Whether the service is monitored and ignited by default |
 | `Fetch` | The active query, returning quota groups |
 | `Headers` | Parses the response headers of a model request; nil when the headers carry no quota, which also turns the passive skip off for the service |
@@ -90,7 +90,7 @@ Each service is a `providers.Provider` in `internal/providers`, registered in di
 
 `providers.Lookup` finds a service by name or alias (case-insensitive, `_` counts as `-`). The provider name of a credential is stored as the `ID` in `Cred.Provider` and as reported in `Cred.HostProvider`. A provider key written with an alias in the config is stored under the `ID`.
 
-**Window kinds**: `quota.Window.Period` is the window length, filled by each service from its data: `limit_window_seconds` and `Window-Minutes` for Codex, the field name for Claude, `window` for Antigravity, `duration` and `timeUnit` for Kimi, and the period's start and end for Grok. `quota.Kind` decides by the period (within 5% of 5 hours or 7 days) and, without one, by ID and label. 5-hour and 7-day windows use fixed IDs and labels (`five-hour`, `seven-day`); windows of other lengths keep their own ID, with the length from `quota.PeriodLabel` as label, such as `30d`. Ignition, the cooldown check, the chart and notifications all go by kind, so accounts without a 5-hour window (Grok, ChatGPT Pro) are not ignited and the chart shows no 5-hour tab for them.
+**Window kinds**: `quota.Window.Period` is the window length, filled by each service from its data: `limit_window_seconds` and `Window-Minutes` for Codex, the field name for Claude, `window` for Antigravity, `duration` and `timeUnit` for Kimi, and the period's start and end for Grok. `quota.Kind` decides by the period (within 5% of 5 hours or 7 days) and, without one, by ID and label. 5-hour and 7-day windows use fixed IDs and labels (`five-hour`, `seven-day`); windows of other lengths keep their own ID, with the length from `quota.PeriodLabel` as label, such as `30d`; Grok, whose period length can vary by month, always uses `credits`. Ignition, the cooldown check, the chart and notifications all go by kind, so accounts without a 5-hour window (such as ChatGPT Pro) are not ignited and the chart shows no 5-hour tab for them.
 
 **Adding a service**: create a file in `internal/providers`; implement `Fetch` after the request of the CPA Management Center quota page, `Headers` when the provider sends quota headers, and set `Period` on the windows; fill in `Ignition` when the service can be ignited; add the service to `registry`, and its main quota group name to `groupOrder` when it needs a fixed position; add the Management Center's badge colors of the service to `internal/web/page.css` (`--type-<id>-bg` and so on). Update the service table in the README and the active query, passive data, ignition request and model selection sections of this document.
 
@@ -123,8 +123,8 @@ If the loop panics, `supervise` logs it and restarts the loop after 30 seconds. 
 | Codex | `GET https://chatgpt.com/backend-api/wham/usage` with `Chatgpt-Account-Id` |
 | Claude | `GET https://api.anthropic.com/api/oauth/usage`, `anthropic-beta: oauth-2025-04-20` |
 | Antigravity | `POST .../v1internal:retrieveUserQuotaSummary`, three URLs in order, body `{"project": "<project_id>"}` |
-| Kimi | `GET https://api.kimi.com/coding/v1/usages`; `api.kimi.ai` when the credential's `domain`, `base_url`, `type` or provider name points at kimi.ai |
-| Grok | `GET https://cli-chat-proxy.grok.com/v1/billing?format=credits`, with the Grok CLI headers and the credential's `sub` as `x-userid` |
+| Kimi | `GET https://api.kimi.com/coding/v1/usages`; like CPA's Kimi executor, the credential's `domain`, `base_url`, `type`, provider name and finally `kimi-ai` or `kimi.ai` in its runtime ID or file name decide, and kimi.ai uses `api.kimi.ai` |
+| Grok | `GET https://cli-chat-proxy.grok.com/v1/billing?format=credits`, with the Grok CLI headers and the credential's `sub` as `x-userid`. A weekly `currentPeriod` is a 7-day window; the monthly `billingPeriodStart`/`End` is only used without a `currentPeriod`. A period of another length always uses the ID `credits`, so that history and alerts continue across periods |
 
 The headers match the CPA Management Center quota page; the constants are in each service's file in `internal/providers`. The Codex user agent equals the one of CPA's Codex executor, and the Claude user agent equals CPA's default Claude Code fingerprint.
 
@@ -175,14 +175,13 @@ While a window of the quota group other than the 5-hour one is used up (0.01% or
 
 ### Request
 
-Ignition uses `host.model.execute` with `auth_id` set to the credential's runtime ID and `forced_provider` set to the provider name CPA reports (`Cred.HostProvider`, such as `kimi-ai` for Kimi). Each service's `Ignition.Body` gives the body, which `providers.Request` encodes. Grok's weekly period starts when the previous one ends, so Grok has no ignition:
+Ignition uses `host.model.execute` with `auth_id` set to the credential's runtime ID and `forced_provider` set to the provider name CPA reports (`Cred.HostProvider`). Each service's `Ignition.Body` gives the body, which `providers.Request` encodes. Kimi and Grok have no ignition: a Kimi subscription's 5-hour and 7-day windows switch at fixed times counted from the subscription start, used or not, and Grok's weekly period starts when the previous one ends. The requests of the other services:
 
 | Service | Entry protocol | Notable fields |
 | --- | --- | --- |
 | Codex | `openai-response` | `reasoning.effort: none`, `tools: []`, `max_output_tokens: 4` |
 | Claude | `claude` | `max_tokens: 4` |
 | Antigravity | `openai` | `max_tokens: 4`, `temperature: 0`, `reasoning_effort: none` |
-| Kimi | `openai` (the native protocol of CPA's Kimi executor) | `max_tokens: 4` |
 
 ### Model selection
 
@@ -192,7 +191,6 @@ CPA has no host callback that lists the models of one credential, so the plugin 
 - Claude: non-thinking Haiku models starting with `claude-`, newest first, then Sonnet.
 - Antigravity Gemini group: Flash newest first, then other non-Pro models, Pro last; image models excluded.
 - Antigravity Claude / GPT group: Haiku, Sonnet, Opus (all non-thinking), GPT-OSS, then other non-thinking models.
-- Kimi: models starting with `kimi-` without `thinking` or `highspeed`, newest first.
 
 "Newest first" compares the numeric segments of model names, so new releases need no code change. Every ignition starts with the newest candidate. Older models usually stay in the list long after a new release, so the order does not depend on the last successful model. A configured `model` or `models` entry is the only candidate and must be in the list.
 
@@ -210,7 +208,7 @@ After a 2xx response, the plugin confirms that the 5-hour window has a fixed fut
 
 1. Claude responses carry the new reset in their headers, so it is confirmed at once.
 2. Codex quota arrives through the usage record of the same request; passive data keeps being applied while waiting.
-3. Checks run after 5, 10, 15, 30 and 15 seconds, each preceded by one active query of the credential. Antigravity and Kimi send no quota in their headers and are confirmed by this step only.
+3. Checks run after 5, 10, 15, 30 and 15 seconds, each preceded by one active query of the credential. Antigravity sends no quota in its headers and is confirmed by this step only.
 
 If no check confirms, the result is `ErrNotConfirmed`.
 

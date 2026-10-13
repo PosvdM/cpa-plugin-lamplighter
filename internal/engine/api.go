@@ -587,7 +587,11 @@ func (e *Engine) History(span time.Duration) (HistoryResponse, error) {
 		s, ok := series[key]
 		if !ok {
 			// Windows no longer reported are known by their ID.
-			s = &Series{Group: record.Group, Window: record.Window, WindowLabel: record.Window, Kind: quota.Kind(quota.Window{ID: record.Window})}
+			kind := quota.Kind(quota.Window{ID: record.Window})
+			s = &Series{Group: record.Group, Window: record.Window, WindowLabel: record.Window, Kind: kind}
+			if kind != "" {
+				s.WindowLabel = kind
+			}
 			if group, ok := labels[record.Group]; ok {
 				s.Label = group.Label
 				s.SourceLabel = group.SourceLabel

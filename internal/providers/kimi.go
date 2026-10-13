@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/PosvdM/cpa-plugin-lamplighter/internal/models"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/quota"
 )
 
@@ -21,31 +20,15 @@ const (
 	kimiTitle      = "Kimi"
 )
 
-// kimi has not been tried with a real account yet: requests and parsing
-// follow the CPA Management Center.
+// kimi follows the CPA Management Center's Kimi quota page. A subscription's
+// 5-hour and 7-day windows switch at fixed times counted from the
+// subscription start, used or not (#20), so there is nothing to ignite.
 var kimi = &Provider{
 	ID:      "kimi",
 	Aliases: []string{"kimi-ai", "kimi.ai", "kimi.com"},
 	Title:   kimiTitle,
 	Monitor: true,
-	Ignite:  true,
 	Fetch:   fetchKimi,
-	Ignition: &Ignition{
-		// CPA's Kimi executor speaks the OpenAI protocol, so the request
-		// needs no translation.
-		Protocol:   "openai",
-		Body:       func(model string) map[string]any { return chatBody(model, nil) },
-		Candidates: kimiCandidates,
-		Hint:       Text{Zh: "最新的 Kimi", En: "latest Kimi"},
-	},
-}
-
-// kimiCandidates prefers the newest Kimi model without thinking or a
-// high-speed variant.
-func kimiCandidates(_ string, available []string) []string {
-	return models.Newest(available, func(m string) bool {
-		return strings.HasPrefix(m, "kimi-") && !strings.Contains(m, "thinking") && !strings.Contains(m, "highspeed")
-	})
 }
 
 func fetchKimi(ctx context.Context, doer quota.Doer, cred Credential, now time.Time) ([]quota.RawGroup, error) {
@@ -58,8 +41,9 @@ func fetchKimi(ctx context.Context, doer quota.Doer, cred Credential, now time.T
 	return ParseKimiUsage(payload, now)
 }
 
-// kimiUsageURL picks the endpoint like CPA's credential loader: an explicit
-// domain, then base_url, then the credential type and provider name.
+// kimiUsageURL picks the endpoint like CPA's Kimi executor: an explicit
+// domain, then base_url, the credential type, the provider name, and
+// finally "kimi-ai" or "kimi.ai" in the credential's ID or file name.
 func kimiUsageURL(cred Credential) string {
 	if kimiDomain(cred) == "ai" {
 		return KimiAIUsageURL
@@ -88,6 +72,10 @@ func kimiDomain(cred Credential) string {
 		if d := kimiDomainOf(value); d != "" {
 			return d
 		}
+	}
+	names := strings.ToLower(cred.ID + " " + cred.Name)
+	if strings.Contains(names, "kimi-ai") || strings.Contains(names, "kimi.ai") {
+		return "ai"
 	}
 	return "com"
 }
@@ -191,6 +179,7 @@ func kimiWindow(data map[string]any, name string, period time.Duration, now time
 
 // kimiPeriod returns the window length from a duration and a unit such as
 // TIME_UNIT_MINUTE, where no unit means minutes, or from words in the name.
+// Only an explicit 5-hour name counts as the 5-hour window.
 func kimiPeriod(duration float64, unit, name string) time.Duration {
 	if duration > 0 {
 		unit = strings.TrimPrefix(strings.ToUpper(strings.TrimSpace(unit)), "TIME_UNIT_")
@@ -215,7 +204,7 @@ func kimiPeriod(duration float64, unit, name string) time.Duration {
 		return quota.SevenDays
 	case strings.Contains(text, "month"):
 		return 30 * 24 * time.Hour
-	case strings.Contains(text, "5h") || strings.Contains(text, "hour"):
+	case strings.Contains(text, "5h") || strings.Contains(text, "5 hour") || strings.Contains(text, "5-hour") || strings.Contains(text, "five hour"):
 		return quota.FiveHours
 	}
 	return 0

@@ -324,7 +324,7 @@ func (e *Engine) refreshCred(ctx context.Context, cfg config.Config, cred *Cred)
 		return fmt.Errorf("不支持的额度 provider: %s", cred.Provider)
 	}
 	credential := providers.ParseCredential(raw)
-	credential.Provider = cred.HostProvider
+	credential.Provider, credential.ID, credential.Name = cred.HostProvider, cred.ID, cred.Name
 	groups, err := providers.Fetch(ctx, p, e.egress, credential, e.now())
 	if err != nil {
 		return err

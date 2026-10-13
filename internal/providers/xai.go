@@ -23,6 +23,7 @@ const (
 // whether or not the account is used, so there is nothing to ignite.
 var xai = &Provider{
 	ID:      "xai",
+	Aliases: []string{"x-ai", "x.ai", "grok"},
 	Title:   xaiTitle,
 	Monitor: true,
 	Fetch:   fetchXAI,
@@ -57,30 +58,30 @@ func ParseXAIBilling(payload map[string]any) ([]quota.RawGroup, error) {
 	}
 	used, ok := floatValue(field(config, "creditUsagePercent", "credit_usage_percent"))
 	if !ok {
-		return nil, errors.New("Grok 未返回额度用量")
+		return nil, errors.New("Grok 未返回额度用量；按 API 用量计费的账号没有额度可查")
 	}
+	// The billing period is monthly and only describes the credits when the
+	// response has no current period.
 	period, _ := field(config, "currentPeriod", "current_period").(map[string]any)
-	start := quota.ParseTime(field(period, "start"))
-	end := quota.ParseTime(field(period, "end"))
-	if end.IsZero() {
+	var start, end time.Time
+	if period != nil {
+		start, end = quota.ParseTime(field(period, "start")), quota.ParseTime(field(period, "end"))
+	} else {
 		start = quota.ParseTime(field(config, "billingPeriodStart", "billing_period_start"))
 		end = quota.ParseTime(field(config, "billingPeriodEnd", "billing_period_end"))
 	}
 	var length time.Duration
-	if !start.IsZero() && end.After(start) {
+	switch {
+	case strings.Contains(strings.ToLower(scalarString(field(period, "type"))), "weekly"):
+		length = quota.SevenDays
+	case !start.IsZero() && end.After(start):
 		length = end.Sub(start)
 	}
-	kind := strings.ToLower(scalarString(field(period, "type")))
-	if length == 0 && strings.Contains(kind, "weekly") {
-		length = quota.SevenDays
-	}
+	// A period of another length, such as a calendar month, keeps one ID so
+	// that its history and alerts continue from one period to the next.
 	id, label, ok := quota.Standard(length)
 	if !ok {
 		id, label = "credits", xaiTitle
-		if length > 0 {
-			label = quota.PeriodLabel(length)
-			id = "window-" + label
-		}
 	}
 	return []quota.RawGroup{{Key: "xai:main", SourceLabel: xaiTitle, Windows: []quota.Window{{
 		ID:        id,

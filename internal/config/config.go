@@ -6,6 +6,7 @@ import (
 	_ "time/tzdata"
 
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -232,7 +233,18 @@ func Parse(raw []byte) (Config, error) {
 		for _, id := range providers.IDs() {
 			cfg.Providers[id] = DefaultProvider(id)
 		}
-		for name, node := range overlay.Providers {
+		// A key written as the provider ID wins over an alias or another
+		// spelling of the same provider, whatever the order in the file.
+		names := make([]string, 0, len(overlay.Providers))
+		for name := range overlay.Providers {
+			names = append(names, name)
+		}
+		sort.SliceStable(names, func(i, j int) bool {
+			return providerKeyRank(names[i]) < providerKeyRank(names[j]) ||
+				providerKeyRank(names[i]) == providerKeyRank(names[j]) && names[i] < names[j]
+		})
+		for _, name := range names {
+			node := overlay.Providers[name]
 			key := strings.ToLower(strings.TrimSpace(name))
 			if p := providers.Lookup(key); p != nil {
 				key = p.ID
@@ -246,6 +258,14 @@ func Parse(raw []byte) (Config, error) {
 	}
 	cfg.normalize()
 	return cfg, nil
+}
+
+// providerKeyRank orders provider keys so that exact provider IDs come last.
+func providerKeyRank(name string) int {
+	if p := providers.Lookup(name); p != nil && p.ID == name {
+		return 1
+	}
+	return 0
 }
 
 func clamp(value, minimum, maximum int) int {
