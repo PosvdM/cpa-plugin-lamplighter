@@ -15,6 +15,9 @@
   var chartExpanded = {};
   var chartSelected = null;
   var history = null;
+  // The window kind of the series in history. The chart keeps drawing it
+  // until the history of a newly chosen window arrives.
+  var historyWindow = "";
   var refreshTimer = null;
 
   function $(id) { return document.getElementById(id); }
@@ -1016,11 +1019,11 @@
     var limit = gapLimit();
     var byLabel = {}, order = [];
     history.series.forEach(function (s) {
-      if (!s.points || !s.points.length || windowKind(s) !== chartWindow) return;
+      if (!s.points || !s.points.length || windowKind(s) !== historyWindow) return;
       var meta = info[s.group + "|" + s.window] || {};
       // A window with its own label, such as "7 Day Opus" next to the
       // 7-day window of the same group label, gets a row of its own.
-      var extra = s.window_label && s.window_label !== chartWindow ? " · " + s.window_label : "";
+      var extra = s.window_label && s.window_label !== historyWindow ? " · " + s.window_label : "";
       var source = (s.source_label || s.label) + extra;
       var id = s.provider + "|" + source;
       if (!byLabel[id]) { byLabel[id] = []; order.push(id); }
@@ -1361,7 +1364,7 @@
     snapPoints = row.points;
     var group = !!row.children;
     var lowest = Math.min.apply(null, row.points.map(function (p) { return group ? p[3] : p[1]; }));
-    head.appendChild(el("span", { class: "detail-name", text: row.name + " · " + translate(chartWindow === "5h" ? "quota_5h" : "quota_7d") }));
+    head.appendChild(el("span", { class: "detail-name", text: row.name + " · " + translate(historyWindow === "5h" ? "quota_5h" : "quota_7d") }));
     head.appendChild(el("span", { class: "muted", text: group ? translate("pooled_note", row.children.length) : row.sub }));
     [[translate(group ? "stat_total" : "stat_current"), pct(row.last)], [translate(group ? "stat_min_account" : "stat_min"), pct(lowest)],
       [translate("stat_to_reset"), row.reset ? fmtCountdown(row.reset * 1000 - Date.now()) : "—"]].forEach(function (stat) {
@@ -1548,7 +1551,7 @@
 
   function renderChart() {
     var overview = $("chart"), head = $("chart-detail-head"), detail = $("chart-detail");
-    overview.classList.remove("loading");
+    overview.classList.toggle("loading", historyLoading !== "" && historyLoading !== historyKey(historyWindow, historyRange));
     clear(overview); clear(head); clear(detail);
     clear($("chart-table"));
     hoverListeners = [];
@@ -1634,14 +1637,53 @@
     renderRangeButtons();
   }
 
+  // History responses by window and range. A chosen chart that is cached is
+  // drawn at once and redrawn when the new response arrives. historyLoading
+  // is the window and range being loaded for the chosen chart, and the chart
+  // is grayed out while it differs from the one drawn.
+  var historyCache = {};
+  var historyRange = "";
+  var historyLoading = "";
+
+  function historyKey(kind, name) { return kind + "|" + name; }
+
+  function fetchHistory(kind, name) {
+    return api("GET", API + "/history?range=" + name + "&window=" + kind).then(function (data) {
+      historyCache[historyKey(kind, name)] = data;
+      return data;
+    });
+  }
+
+  function showHistory(kind, name, data) {
+    history = data;
+    historyWindow = kind;
+    historyRange = name;
+    renderChart();
+  }
+
   function loadHistory() {
-    $("chart").classList.add("loading");
-    return api("GET", API + "/history?range=" + range).then(function (data) {
-      history = data;
-      renderChart();
+    var kind = chartWindow, name = range, key = historyKey(kind, name);
+    historyLoading = key;
+    if (historyCache[key]) showHistory(kind, name, historyCache[key]);
+    else $("chart").classList.add("loading");
+    return fetchHistory(kind, name).then(function (data) {
+      if (historyLoading !== key) return;
+      historyLoading = "";
+      showHistory(kind, name, data);
     }).catch(function (err) {
+      if (historyLoading !== key) return;
+      historyLoading = "";
       if (err.message !== "unauthorized") toast(translate("history_failed", err.message));
       $("chart").classList.remove("loading");
+    });
+  }
+
+  // After the first chart loads, the other window's chart is fetched so that
+  // switching to it does not wait.
+  function prefetchHistory() {
+    windowKinds().forEach(function (kind) {
+      var name = rangeFor(kind);
+      if (kind !== chartWindow && !historyCache[historyKey(kind, name)]) fetchHistory(kind, name).catch(function () {});
     });
   }
 
@@ -1919,7 +1961,7 @@
       fillSettings();
       restoreChartFilters();
       return loadHistory();
-    }).catch(function (err) {
+    }).then(prefetchHistory).catch(function (err) {
       if (err.message !== "unauthorized") toast(translate("load_failed", err.message));
     });
     clearInterval(refreshTimer);
