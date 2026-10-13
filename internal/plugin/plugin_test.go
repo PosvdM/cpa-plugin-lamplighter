@@ -91,6 +91,19 @@ func TestManagementRoutesAndPage(t *testing.T) {
 		t.Fatalf("status %d %s", resp.StatusCode, resp.Body)
 	}
 
+	// The range sets the bucket length, so swapped query parameters would
+	// answer with the 24-hour default and no buckets.
+	req, _ = json.Marshal(pluginapi.ManagementRequest{Method: "GET", Path: "/v0/management/lamplighter/history",
+		Query: map[string][]string{"range": {"8d"}, "window": {"7d"}}})
+	json.Unmarshal(result(t, p.Handle("management.handle", req)), &resp)
+	var history struct {
+		Bucket int64 `json:"bucket_seconds"`
+	}
+	json.Unmarshal(resp.Body, &history)
+	if resp.StatusCode != 200 || history.Bucket != 900 {
+		t.Fatalf("history %d %s", resp.StatusCode, resp.Body)
+	}
+
 	req, _ = json.Marshal(pluginapi.ManagementRequest{Method: "POST", Path: "/v0/management/lamplighter/refresh"})
 	json.Unmarshal(result(t, p.Handle("management.handle", req)), &resp)
 	if resp.StatusCode != 503 {

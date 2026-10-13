@@ -860,7 +860,8 @@
     // Rows built after the first fill need their values.
     if (renderServiceRows() && settingsFilled) fillSettings({ providers: true });
     renderServiceText();
-    if (renderWindowButtons() && history) loadHistory();
+    // Before the first load starts, start() loads the chosen window.
+    if (renderWindowButtons() && (history || historyLoading)) loadHistory();
     renderAccounts();
     renderTargets();
     renderEvents();
@@ -880,7 +881,7 @@
     return api("POST", path, body).then(function (data) {
       if (data.status) { status = data.status; renderStatus(); }
       toast(data.ok ? success : translate("failed", data.error));
-      loadHistory();
+      loadHistory(true);
     }).catch(function (err) {
       if (err.message !== "unauthorized") toast(translate("failed", err.message));
     }).then(function () { button.disabled = false; });
@@ -1558,7 +1559,7 @@
     snapPoints = [];
     head.hidden = true;
     if (!history || !status) {
-      overview.appendChild(el("div", { class: "empty", text: translate("loading") }));
+      overview.appendChild(el("div", { class: "empty", text: historyFailed ? translate("history_failed", historyFailed) : translate("loading") }));
       return;
     }
     var rows = chartRows();
@@ -1640,41 +1641,73 @@
   // History responses by window and range. A chosen chart that is cached is
   // drawn at once and redrawn when the new response arrives. historyLoading
   // is the window and range being loaded for the chosen chart, and the chart
-  // is grayed out while it differs from the one drawn.
+  // is grayed out while it differs from the one drawn. Each loadHistory call
+  // draws only its own response, and only while it is the latest call.
   var historyCache = {};
+  var historyPending = {};
+  var historySeq = 0;
+  var historyTicket = 0;
   var historyRange = "";
   var historyLoading = "";
+  var historyFailed = "";
 
   function historyKey(kind, name) { return kind + "|" + name; }
 
-  function fetchHistory(kind, name) {
-    return api("GET", API + "/history?range=" + name + "&window=" + kind).then(function (data) {
-      historyCache[historyKey(kind, name)] = data;
-      return data;
+  // Requests a history, or joins the request for it that is under way unless
+  // fresh is set. The cache keeps the response of the latest request, and
+  // the promise resolves to it.
+  function fetchHistory(kind, name, fresh) {
+    var key = historyKey(kind, name);
+    if (historyPending[key] && !fresh) return historyPending[key].promise;
+    var seq = ++historySeq;
+    var entry = { seq: seq };
+    var done = function () { if (historyPending[key] === entry) delete historyPending[key]; };
+    entry.promise = api("GET", API + "/history?range=" + name + "&window=" + kind).then(function (data) {
+      var cached = historyCache[key];
+      if (!cached || cached.seq < seq) historyCache[key] = { seq: seq, data: data };
+      done();
+      return historyCache[key].data;
+    }, function (err) {
+      done();
+      throw err;
     });
+    historyPending[key] = entry;
+    return entry.promise;
   }
 
   function showHistory(kind, name, data) {
     history = data;
     historyWindow = kind;
     historyRange = name;
+    historyFailed = "";
     renderChart();
   }
 
-  function loadHistory() {
-    var kind = chartWindow, name = range, key = historyKey(kind, name);
+  // Loads the chosen chart; fresh skips a request already under way, for
+  // data that an action has just changed. Resolves to true when the chart
+  // was drawn from the response.
+  function loadHistory(fresh) {
+    var kind = chartWindow, name = range, key = historyKey(kind, name), ticket = ++historyTicket;
     historyLoading = key;
-    if (historyCache[key]) showHistory(kind, name, historyCache[key]);
+    if (historyCache[key]) showHistory(kind, name, historyCache[key].data);
+    else if (historyFailed) { historyFailed = ""; renderChart(); }
     else $("chart").classList.add("loading");
-    return fetchHistory(kind, name).then(function (data) {
-      if (historyLoading !== key) return;
+    return fetchHistory(kind, name, fresh).then(function (data) {
+      if (ticket !== historyTicket) return false;
       historyLoading = "";
       showHistory(kind, name, data);
+      return true;
     }).catch(function (err) {
-      if (historyLoading !== key) return;
+      if (ticket !== historyTicket) return false;
       historyLoading = "";
       if (err.message !== "unauthorized") toast(translate("history_failed", err.message));
-      $("chart").classList.remove("loading");
+      // Without data of the chosen chart, the old chart gives way to the error.
+      if (err.message !== "unauthorized" && historyKey(historyWindow, historyRange) !== key) {
+        history = null;
+        historyFailed = err.message;
+      }
+      renderChart();
+      return false;
     });
   }
 
@@ -1961,7 +1994,7 @@
       fillSettings();
       restoreChartFilters();
       return loadHistory();
-    }).then(prefetchHistory).catch(function (err) {
+    }).then(function (loaded) { if (loaded) prefetchHistory(); }).catch(function (err) {
       if (err.message !== "unauthorized") toast(translate("load_failed", err.message));
     });
     clearInterval(refreshTimer);

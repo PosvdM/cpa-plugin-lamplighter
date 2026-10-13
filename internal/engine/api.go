@@ -546,10 +546,11 @@ func (e *Engine) HistoryRange(name, kind string) (HistoryResponse, error) {
 	return e.History(RangeSpan(name, e.now(), e.config().Location()), kind)
 }
 
-// historyBucket returns the bucket length in seconds for a span, so that a
-// series has at most about 800 points: spans up to 2 days keep every sample,
-// 4 days use 10 minutes, 8 days 15 minutes, 15 days 30 minutes and longer
-// spans one hour. The chart is about 1000 pixels wide.
+// historyBucket returns the bucket length in seconds for a span. Spans up to
+// 2 days keep every sample; longer spans use 10 minutes, then 15 minutes
+// over 4 days, 30 minutes over 8 days and one hour over 15 days, so that a
+// series of a named range has at most about 800 points. The chart is about
+// 1000 pixels wide.
 func historyBucket(span time.Duration) int64 {
 	const day = 24 * time.Hour
 	switch {
@@ -577,11 +578,10 @@ func (e *Engine) History(span time.Duration, kind string) (HistoryResponse, erro
 	}
 	e.mu.Unlock()
 	now := e.now().UTC()
-	resp := HistoryResponse{From: now.Add(-span), To: now, Series: []Series{}, Events: []Event{}}
+	resp := HistoryResponse{From: now.Add(-span), To: now, Bucket: historyBucket(span), Series: []Series{}, Events: []Event{}}
 	if dataDir == "" {
 		return resp, nil
 	}
-	resp.Bucket = historyBucket(span)
 	history := &store.History{Dir: dataDir + "/history"}
 	records, err := history.Query(resp.From, now)
 	if err != nil {

@@ -556,16 +556,25 @@ func TestHistoryFiltersWindowKindAndBucketsLongSpans(t *testing.T) {
 		e.poll(ctx, e.config(), c.t, "", false)
 	}
 
-	all, err := e.History(24*time.Hour, "")
-	if err != nil {
-		t.Fatal(err)
+	kindsOf := func(kind string) map[string]bool {
+		resp, err := e.History(24*time.Hour, kind)
+		if err != nil {
+			t.Fatal(err)
+		}
+		kinds := map[string]bool{}
+		for _, s := range resp.Series {
+			kinds[s.Kind] = true
+		}
+		return kinds
 	}
-	kinds := map[string]bool{}
-	for _, s := range all.Series {
-		kinds[s.Kind] = true
+	// No filter or an unknown value returns every window.
+	for _, kind := range []string{"", "30d"} {
+		if kinds := kindsOf(kind); !kinds[quota.KindFiveHour] || !kinds[quota.KindSevenDay] {
+			t.Fatalf("window %q: want both kinds, got %v", kind, kinds)
+		}
 	}
-	if !kinds[quota.KindFiveHour] || !kinds[quota.KindSevenDay] {
-		t.Fatalf("want both kinds without a filter, got %v", kinds)
+	if kinds := kindsOf(quota.KindFiveHour); len(kinds) != 1 || !kinds[quota.KindFiveHour] {
+		t.Fatalf("5h history has kinds %v", kinds)
 	}
 
 	week, err := e.History(8*24*time.Hour, quota.KindSevenDay)
