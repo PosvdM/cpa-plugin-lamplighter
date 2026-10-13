@@ -752,3 +752,48 @@ func TestPassiveDataDoesNotAddWindowsTheUsageAPIOmits(t *testing.T) {
 		t.Fatalf("after the active query: %s", got)
 	}
 }
+
+func grokHost(c *clock) *fakeHost {
+	h := standardHost(c)
+	h.auths = append(h.auths, pluginapi.HostAuthFileEntry{ID: "xai-a.json", AuthIndex: "6", Name: "xai-a.json", Provider: "xai", Email: "grok@example.com"})
+	h.files["6"] = `{"type":"xai","access_token":"t6","sub":"u6"}`
+	base := h.http
+	h.http = func(req pluginapi.HTTPRequest) pluginapi.HTTPResponse {
+		if req.URL == providers.XAIBillingURL {
+			start, end := c.t.Add(-2*24*time.Hour).UTC().Format(time.RFC3339), c.t.Add(5*24*time.Hour).UTC().Format(time.RFC3339)
+			return pluginapi.HTTPResponse{StatusCode: 200, Body: []byte(`{"config":{"currentPeriod":{"type":"USAGE_PERIOD_TYPE_WEEKLY","start":"` + start + `","end":"` + end + `"},"creditUsagePercent":23.0}}`)}
+		}
+		return base(req)
+	}
+	return h
+}
+
+func TestGrokIsMonitoredButNeverIgnited(t *testing.T) {
+	c := &clock{t: time.Date(2026, 10, 4, 10, 0, 0, 0, shanghai)}
+	h := grokHost(c)
+	e, _ := newTestEngine(t, h, c)
+	cfg := e.config()
+	grok := cfg.Providers["xai"]
+	grok.Ignite = true
+	cfg.Providers["xai"] = grok
+	e.Configure(cfg, nil)
+	e.poll(context.Background(), e.config(), c.t, "", false)
+
+	status := e.Status()
+	last := status.Accounts[len(status.Accounts)-1]
+	if last.Provider != "xai" || last.Title != "Grok" || len(last.Groups) != 1 {
+		t.Fatalf("grok account %+v", last)
+	}
+	w := last.Groups[0].Windows[0]
+	if w.Kind != "7d" || w.Remaining != 77 {
+		t.Fatalf("grok window %+v", w)
+	}
+	for _, target := range e.collectTargets(e.config()) {
+		if target.group.Provider == "xai" {
+			t.Fatal("Grok has no ignition")
+		}
+	}
+	if h.requestsTo(providers.XAIBillingURL) != 1 {
+		t.Fatal("Grok billing must be queried once")
+	}
+}

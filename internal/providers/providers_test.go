@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -262,4 +263,54 @@ func TestPeriodsAreRecorded(t *testing.T) {
 	if ag[0].Windows[0].Period != quota.FiveHours || ag[0].Windows[1].Period != quota.SevenDays {
 		t.Fatalf("antigravity %+v", ag[0].Windows)
 	}
+}
+
+// xaiBilling is a billing?format=credits response of a SuperGrok account
+// (JWT tier 1), read on 2026-10-13.
+const xaiBilling = `{"config":{"currentPeriod":{"type":"USAGE_PERIOD_TYPE_WEEKLY","start":"2026-10-06T04:01:28.835241+00:00","end":"2026-10-13T04:01:28.835241+00:00"},"creditUsagePercent":23.0,"onDemandCap":{"val":0},"onDemandUsed":{"val":0},"productUsage":[{"product":"GrokBuild","usagePercent":17.0},{"product":"GrokChat","usagePercent":6.0}],"isUnifiedBillingUser":true,"prepaidBalance":{"val":0},"topUpMethod":"TOP_UP_METHOD_SAVED_PAYMENT_METHOD","billingPeriodStart":"2026-10-06T04:01:28.835241+00:00","billingPeriodEnd":"2026-10-13T04:01:28.835241+00:00"}}`
+
+func TestParseXAIBillingReadsTheWeeklyCredits(t *testing.T) {
+	groups, err := ParseXAIBilling(decode(t, xaiBilling))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(groups) != 1 || groups[0].Key != "xai:main" || groups[0].SourceLabel != "Grok" || len(groups[0].Windows) != 1 {
+		t.Fatalf("groups %+v", groups)
+	}
+	w := groups[0].Windows[0]
+	if w.ID != quota.WindowSevenDay || w.Label != quota.LabelSevenDay || w.Remaining != 77 || w.Period != quota.SevenDays {
+		t.Fatalf("window %+v", w)
+	}
+	if want := time.Date(2026, 10, 13, 4, 1, 28, 835241000, time.UTC); !w.Reset.Equal(want) {
+		t.Fatalf("reset %v, want %v", w.Reset, want)
+	}
+	if _, err := ParseXAIBilling(decode(t, `{"config":{"monthlyLimit":{"val":0}}}`)); err == nil {
+		t.Fatal("the monthly spending response has no credit usage")
+	}
+	if xai.Ignition != nil || xai.Headers != nil {
+		t.Fatal("Grok has no ignition and no quota headers")
+	}
+}
+
+func TestFetchXAISendsTheGrokHeaders(t *testing.T) {
+	doer := &recordingDoer{body: xaiBilling}
+	cred := ParseCredential(json.RawMessage(`{"type":"xai","access_token":"tok","sub":"user-1"}`))
+	if _, err := Fetch(context.Background(), xai, doer, cred, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	h := doer.req.Header
+	if doer.req.URL != XAIBillingURL || h.Get("Authorization") != "Bearer tok" || h.Get("x-userid") != "user-1" ||
+		h.Get("x-xai-token-auth") != "xai-grok-cli" || h.Get("x-grok-client-version") != "1.0.46" {
+		t.Fatalf("request %+v", doer.req)
+	}
+}
+
+type recordingDoer struct {
+	body string
+	req  quota.Request
+}
+
+func (d *recordingDoer) Do(_ context.Context, _ string, req quota.Request) (quota.Response, error) {
+	d.req = req
+	return quota.Response{Status: 200, Body: []byte(d.body)}, nil
 }
