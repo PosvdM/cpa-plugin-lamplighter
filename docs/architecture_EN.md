@@ -14,9 +14,10 @@ Lamplighter is a CPA native plugin written in Go and built with `-buildmode=c-sh
 | `internal/engine` | Background loop: active queries, passive data, ignition, notifications, history and status data |
 | `internal/host` | Go wrapper of the host callbacks and timeout handling for `host.http.do` |
 | `internal/config` | Plugin config parsing, defaults and ranges; reads the CPA config to see whether the plugin is enabled |
-| `internal/quota` | Quota requests and parsing for the three services; passive quota header parsing |
+| `internal/providers` | One file per service: quota request and parsing, response header parsing, ignition request, candidate models, defaults; the registry, see "Services" below |
+| `internal/quota` | Types of quota windows and upstream requests, window kinds, time parsing |
 | `internal/egress` | Picks the network exit of quota requests |
-| `internal/models` | Reads the CPA model list and orders ignition candidates |
+| `internal/models` | Reads the CPA model list and provides the helpers that order candidates by recency |
 | `internal/ignite` | Ignition timing, rolling-reset detection, error classification and failure protection |
 | `internal/notify` | Bark and webhook delivery, quota alerts, Did Codex Reset forwarding |
 | `internal/store` | `state.json`, quota history and the instance lock |
@@ -33,7 +34,7 @@ Management routes (require the CPA management key):
 
 | Method and path | Purpose |
 | --- | --- |
-| `GET /v0/management/lamplighter/status` | Status page data; secrets in the config only show whether they are set |
+| `GET /v0/management/lamplighter/status` | Status page data; secrets in the config only show whether they are set. `providers` lists the supported services in display order (`id`, `title`, whether it can be ignited `ignite`, the model hint `model_hint` and the quota groups offered for ignition `groups` with their note `groups_hint`, in Chinese and English), and `group_order` is the display order of quota groups; each window carries `kind` (`5h`, `7d`, empty for other lengths) |
 | `GET /v0/management/lamplighter/history?range=1h\|3h\|6h\|12h\|24h\|26h\|4d\|8d\|15d\|1mo\|36d` | Quota history and ignition events, `24h` by default. In hours for the 5-hour quota and days for the 7-day quota, the ranges are: one unit; half a window plus one (`3h`, `4d`); a window plus one (`6h`, `8d`); half a day or month, which fits two whole windows (`12h`, `15d`); a day or a month (`24h`, `1mo`); five windows plus one (`26h`, `36d`). `1mo` runs from the same date of the previous month in the plugin's time zone, or its last day when that month is shorter, to now |
 | `POST /v0/management/lamplighter/refresh` | Query now; `{"auth_index": "..."}` limits it to one account |
 | `POST /v0/management/lamplighter/ignite` | Ignite now, `{"target": "<group key>"}` |
@@ -56,7 +57,8 @@ The page does all data handling for the quota chart:
 
 - **Missing data**: when two samples are more than 3.5 poll intervals (or history buckets) apart, the gap is drawn with diagonal hatching instead of holding the previous value. With the passive skip enabled, the limit is at least `passive_skip_max_minutes` plus 1.5 poll intervals: windows missing from the response headers, such as an unused Fable quota, wait for the next active query during the skip, and that interval is not a gap.
 - **Pooled accounts**: accounts with the same service and `source_label` share one row showing the mean of their remaining percentages. With equal plans this is the share of the total quota left; the API only reports percentages, so the mean cannot be weighted by quota size. The detail chart also shows the range from the lowest to the highest account.
-- **Order**: rows follow `SERVICE_ORDER` (Claude, ChatGPT, Gemini, Fable, Claude / GPT) by default, with other quotas after them in API order; they can also be sorted by current remaining, lowest first. The status API orders the quota groups of each account the same way (`groupOrder` in `internal/engine/api.go`), so account cards show Gemini before Claude / GPT and Claude before Fable.
+- **Window kinds**: the chart puts history series into the "5-hour" and "7-day" tabs by their `kind` and offers only the kinds the accounts report (both while none are known), opening the first one; windows of other lengths are not charted. A window with its own label under the same quota name as the main window, such as Claude's `7 Day Opus`, gets a row of its own instead of being pooled with it.
+- **Order**: rows follow the status API's `group_order` (Claude, ChatGPT, Gemini, Kimi, Grok, Fable, Claude / GPT, from `groupOrder` in `internal/providers/provider.go`) by default, with other quotas after them in API order; they can also be sorted by current remaining, lowest first. The status API orders accounts by the registration order of their service and the quota groups of each account the same way, so account cards show Gemini before Claude / GPT and Claude before Fable.
 - **Remembered filters**: with `remember_chart_filters` on, the page keeps the selected window, the order and the range of each window in `lamplighter-chart-filters` in `localStorage` and restores them when it opens. The 5-hour and 7-day windows offer different ranges, so each keeps its own. A saved value that is not among the current choices falls back to the default. The page reads the switch from the settings form, so a change takes effect before it is saved; turning it off deletes the record.
 - **Resets**: a rise of 5 points or more between two samples is a reset. The line breaks there: the previous piece holds its last value up to the reset sample, the next piece starts at the value after the reset, and the reset time is labeled; two rises one sample apart count as one reset. One account resetting raises the pooled total by only its share, so the pooled line does not break when the rise is under 5 points.
 - **Smoothing**: within one window a quota only falls, but active queries and response headers can differ by a point and round differently, so samples briefly step back up. Before drawing, each piece is fitted to the closest non-increasing sequence by pooling adjacent violators into their mean; otherwise every step back would leave a small notch in the line. Tooltips still show the raw samples. Lines use monotone cubic interpolation (Fritsch-Carlson), which never passes beyond the fitted values. Quotas report whole percents, so steps of 2 points or less are joined as a steady decline; a plateau followed by a larger drop stays flat and then bends at the drop.
@@ -67,12 +69,30 @@ Host callbacks in use:
 | Callback | Purpose |
 | --- | --- |
 | `host.auth.list` | Credential list with `auth_index`, runtime ID, email, disabled state and the CPA cooldown (`unavailable`, `next_retry_after`) |
-| `host.auth.get` | Credential file JSON: access token, Codex account ID, Antigravity `project_id`, `proxy_url` |
+| `host.auth.get` | Credential file JSON: access token, Codex account ID, Antigravity `project_id`, Kimi `domain` and `base_url`, Grok `sub`, `proxy_url` |
 | `host.model.execute` | Ignition, with `auth_id` and `forced_provider` |
 | `host.http.operation_open` / `host.http.do` / `host.http.cancel` | Quota requests of credentials without their own proxy |
 | `host.log` | Writes to the CPA log |
 
 Host callbacks are bound to the plugin instance, not to one RPC, so the background loop can call them at any time.
+
+## Services
+
+Each service is a `providers.Provider` in `internal/providers`, registered in display order in `registry` in `provider.go`: ChatGPT (`codex`), Claude, Antigravity, Kimi, Grok (`xai`). A service defines:
+
+| Field | Content |
+| --- | --- |
+| `ID`, `Aliases`, `Title` | The provider name used in config keys and quota group keys; other names CPA uses (`kimi-ai`, `kimi.ai`, `kimi.com` for Kimi); the display name |
+| `Monitor`, `Ignite` | Whether the service is monitored and ignited by default |
+| `Fetch` | The active query, returning quota groups |
+| `Headers` | Parses the response headers of a model request; nil when the headers carry no quota, which also turns the passive skip off for the service |
+| `Ignition` | Ignition protocol, body, candidate models, model hint and the quota groups offered as checkboxes; nil when the service is not ignited, and the settings show "No ignition" |
+
+`providers.Lookup` finds a service by name or alias (case-insensitive, `_` counts as `-`). The provider name of a credential is stored as the `ID` in `Cred.Provider` and as reported in `Cred.HostProvider`. A provider key written with an alias in the config is stored under the `ID`.
+
+**Window kinds**: `quota.Window.Period` is the window length, filled by each service from its data: `limit_window_seconds` and `Window-Minutes` for Codex, the field name for Claude, `window` for Antigravity, `duration` and `timeUnit` for Kimi, and the period's start and end for Grok. `quota.Kind` decides by the period (within 5% of 5 hours or 7 days) and, without one, by ID and label. 5-hour and 7-day windows use fixed IDs and labels (`five-hour`, `seven-day`); windows of other lengths keep their own ID, with the length from `quota.PeriodLabel` as label, such as `30d`. Ignition, the cooldown check, the chart and notifications all go by kind, so accounts without a 5-hour window (Grok, ChatGPT Pro) are not ignited and the chart shows no 5-hour tab for them.
+
+**Adding a service**: create a file in `internal/providers`; implement `Fetch` after the request of the CPA Management Center quota page, `Headers` when the provider sends quota headers, and set `Period` on the windows; fill in `Ignition` when the service can be ignited; add the service to `registry`, and its main quota group name to `groupOrder` when it needs a fixed position; add the Management Center's badge colors of the service to `internal/web/page.css` (`--type-<id>-bg` and so on). Update the service table in the README and the active query, passive data, ignition request and model selection sections of this document.
 
 ## Background loop
 
@@ -103,8 +123,10 @@ If the loop panics, `supervise` logs it and restarts the loop after 30 seconds. 
 | Codex | `GET https://chatgpt.com/backend-api/wham/usage` with `Chatgpt-Account-Id` |
 | Claude | `GET https://api.anthropic.com/api/oauth/usage`, `anthropic-beta: oauth-2025-04-20` |
 | Antigravity | `POST .../v1internal:retrieveUserQuotaSummary`, three URLs in order, body `{"project": "<project_id>"}` |
+| Kimi | `GET https://api.kimi.com/coding/v1/usages`; `api.kimi.ai` when the credential's `domain`, `base_url`, `type` or provider name points at kimi.ai |
+| Grok | `GET https://cli-chat-proxy.grok.com/v1/billing?format=credits`, with the Grok CLI headers and the credential's `sub` as `x-userid` |
 
-The headers match the CPA Management Center quota page; the constants are in `internal/quota/active.go`. The Codex user agent equals the one of CPA's Codex executor, and the Claude user agent equals CPA's default Claude Code fingerprint.
+The headers match the CPA Management Center quota page; the constants are in each service's file in `internal/providers`. The Codex user agent equals the one of CPA's Codex executor, and the Claude user agent equals CPA's default Claude Code fingerprint.
 
 The token comes from the credential file. CPA refreshes tokens in the background and writes them back; the plugin never refreshes them. On HTTP 401 the plugin skips the round and waits for CPA's refresh.
 
@@ -126,12 +148,14 @@ CPA passes the upstream response headers in `ResponseHeaders` of the usage recor
 | Service | Headers | Windows |
 | --- | --- | --- |
 | Claude | `Anthropic-Ratelimit-Unified-5h-Utilization` / `-5h-Reset`, same for `-7d-` | 5-hour and 7-day; the value is the used fraction, for example `0.2` |
-| Claude | `Anthropic-Ratelimit-Unified-7d_oi-Utilization` / `-7d_oi-Reset` | Fable's 7-day window, written to the same Fable quota group as the usage API (`quota.FableGroupKey`). CPA also treats `7d_oi` as the Fable-specific window. Regular (non-Fable) requests do not carry these headers; whether Fable requests do has not been verified on an account that can use Fable. The plugin logs the first one it reads after each start |
-| Codex | `X-Codex-Primary-Used-Percent`, `-Reset-At`, `-Reset-After-Seconds`, `-Window-Minutes`, same for `Secondary` | Classified by window length: 300 minutes is 5-hour, 10080 is 7-day |
+| Claude | `Anthropic-Ratelimit-Unified-7d_oi-Utilization` / `-7d_oi-Reset` | Fable's 7-day window, written to the same Fable quota group as the usage API (`providers.FableGroupKey`). CPA also treats `7d_oi` as the Fable-specific window. Regular (non-Fable) requests do not carry these headers; whether Fable requests do has not been verified on an account that can use Fable. The plugin logs the first one it reads after each start |
+| Codex | `X-Codex-Primary-Used-Percent`, `-Reset-At`, `-Reset-After-Seconds`, `-Window-Minutes`, same for `Secondary` | Classified by window length: 300 minutes is 5-hour, 10080 is 7-day, any other length is a window of its own; without a length, Primary is 5-hour and Secondary 7-day |
 
-Passive data only updates the windows present in the headers; an active result replaces the whole group. `-Reset-After-Seconds` counts from `RequestedAt` of the usage record: the record arrives when the request completes, and counting from processing time would push the old cycle's reset time of a long request past the reset.
+Antigravity, Kimi and Grok send no quota in their headers.
 
-Skip rule (`shouldSkipActive`): a scheduled query is skipped when passive data arrived within `passive_skip_seconds` before it and the last active query is less than `passive_skip_max_minutes` old. Because only a short span before the slot counts, the longest gap between two data points is the interval plus `passive_skip_seconds`. Manual refreshes never skip.
+Passive data only updates the windows present in the headers; an active result replaces the whole group. Once an active query has described a group, passive data only updates the windows that query reported and adds none: the usage API of a ChatGPT Pro account reports only a 7-day window, yet the page showed a 5-hour window without a reset time stuck at 100%, which can only have come from the headers. A group no active query has described yet (after a start, or while queries fail) still takes every window from the headers. A window a service adds later appears with the next active query. `-Reset-After-Seconds` counts from `RequestedAt` of the usage record: the record arrives when the request completes, and counting from processing time would push the old cycle's reset time of a long request past the reset.
+
+Skip rule (`shouldSkipActive`): services without quota in their headers are never skipped. For the others, a scheduled query is skipped when passive data arrived within `passive_skip_seconds` before it and the last active query is less than `passive_skip_max_minutes` old. Because only a short span before the slot counts, the longest gap between two data points is the interval plus `passive_skip_seconds`. Manual refreshes never skip.
 
 ## Ignition
 
@@ -151,22 +175,24 @@ While a window of the quota group other than the 5-hour one is used up (0.01% or
 
 ### Request
 
-Ignition uses `host.model.execute` with `auth_id` set to the credential's runtime ID and `forced_provider` set to the service. Bodies are built by `ignite.BuildRequest`:
+Ignition uses `host.model.execute` with `auth_id` set to the credential's runtime ID and `forced_provider` set to the provider name CPA reports (`Cred.HostProvider`, such as `kimi-ai` for Kimi). Each service's `Ignition.Body` gives the body, which `providers.Request` encodes. Grok's weekly period starts when the previous one ends, so Grok has no ignition:
 
 | Service | Entry protocol | Notable fields |
 | --- | --- | --- |
 | Codex | `openai-response` | `reasoning.effort: none`, `tools: []`, `max_output_tokens: 4` |
 | Claude | `claude` | `max_tokens: 4` |
 | Antigravity | `openai` | `max_tokens: 4`, `temperature: 0`, `reasoning_effort: none` |
+| Kimi | `openai` (the native protocol of CPA's Kimi executor) | `max_tokens: 4` |
 
 ### Model selection
 
-CPA has no host callback that lists the models of one credential, so the plugin reads `GET /v1/models` with `models_api_key`. That list is the union of all credentials, deduplicated by model ID, and `owned_by` can name another service when two services serve the same ID. Candidates are therefore picked by name (`models.Candidates`):
+CPA has no host callback that lists the models of one credential, so the plugin reads `GET /v1/models` with `models_api_key`. That list is the union of all credentials, deduplicated by model ID, and `owned_by` can name another service when two services serve the same ID. Candidates are therefore picked by name (each service's `Ignition.Candidates`; `providers.Candidates` removes duplicates and handles configured models):
 
 - Codex: models containing `luna`, newest first, then other `gpt-` models; image models and `gpt-oss` excluded.
 - Claude: non-thinking Haiku models starting with `claude-`, newest first, then Sonnet.
 - Antigravity Gemini group: Flash newest first, then other non-Pro models, Pro last; image models excluded.
 - Antigravity Claude / GPT group: Haiku, Sonnet, Opus (all non-thinking), GPT-OSS, then other non-thinking models.
+- Kimi: models starting with `kimi-` without `thinking` or `highspeed`, newest first.
 
 "Newest first" compares the numeric segments of model names, so new releases need no code change. Every ignition starts with the newest candidate. Older models usually stay in the list long after a new release, so the order does not depend on the last successful model. A configured `model` or `models` entry is the only candidate and must be in the list.
 
@@ -176,7 +202,7 @@ CPA's model list comes from its built-in model table, which it refreshes periodi
 
 When the next candidate works, the refusal concerns the model for that quota group's account: `engine.noteRefused` remembers the group and model in memory and records a `model_refused` event. For the next 24 hours (`refusedFor`), automatic selection for that group skips the model (`engine.skipRefused`), then tries it once more. Repeated requests for a model the account cannot use may add account risk, while new models can reach accounts in stages, so the model is retried daily. The record is not written to `state.json` and is cleared when the plugin restarts. Configured models are not affected.
 
-The model list is read after the plugin starts, after the CPA address or `models_api_key` changes (`engine.maybeReadModels`), and for every ignition. Quota polls do not read it; when one of the first two reads fails, it is retried with each poll until it succeeds. After each read, `engine.noteModels` computes the first automatic candidate of each service, ignoring configured models. The status API carries them in `next_models` (`codex`, `claude`, `antigravity`), and the settings show each one after the hint of the ignition model field. Antigravity uses the Gemini group, matching the "newest Flash" hint. `next_models` is kept in memory only. A failed read keeps the previous result; when the CPA address or `models_api_key` changes, `next_models` and the model list error are cleared and the list is read with the new address and key. `next_models` is computed per service and does not reflect models skipped for one quota group.
+The model list is read after the plugin starts, after the CPA address or `models_api_key` changes (`engine.maybeReadModels`), and for every ignition. Quota polls do not read it; when one of the first two reads fails, it is retried with each poll until it succeeds. After each read, `engine.noteModels` computes the first automatic candidate of each service, ignoring configured models. The status API carries them in `next_models` (one per service that can be ignited), and the settings show each one after the hint of the ignition model field. The quota group is the service's `Ignition.HintGroup`: Antigravity uses the Gemini group, matching the "newest Flash" hint. `next_models` is kept in memory only. A failed read keeps the previous result; when the CPA address or `models_api_key` changes, `next_models` and the model list error are cleared and the list is read with the new address and key. `next_models` is computed per service and does not reflect models skipped for one quota group.
 
 ### Confirmation
 
@@ -184,7 +210,7 @@ After a 2xx response, the plugin confirms that the 5-hour window has a fixed fut
 
 1. Claude responses carry the new reset in their headers, so it is confirmed at once.
 2. Codex quota arrives through the usage record of the same request; passive data keeps being applied while waiting.
-3. Checks run after 5, 10, 15, 30 and 15 seconds, each preceded by one active query of the credential.
+3. Checks run after 5, 10, 15, 30 and 15 seconds, each preceded by one active query of the credential. Antigravity and Kimi send no quota in their headers and are confirmed by this step only.
 
 If no check confirms, the result is `ErrNotConfirmed`.
 
@@ -211,7 +237,7 @@ A pause sends one notification (`circuit_notified_until_epoch` prevents repeats)
 
 - Levels are normal, notice (≤50%), low (≤20%), critical (≤10%) and exhausted (≤0.01%). A worse level is notified; critical and exhausted use `timeSensitive`.
 - A level counts as better only after a real recovery: the reset time moved to a new window, or the quota rose by 5 points or more since the previous reading (`RecoveryJump`). Usage endpoints and response headers can differ by a point, so a small rise within a window leaves the notified level unchanged, and a reading that bounces around a threshold alerts once. A better level only updates the baseline silently, so that the next drop alerts again.
-- Recovery notifications and reset reminders take the mode for the window's kind from `recovery_notify` and `reset_reminder`. `notify.SevenDayClass` knows 5-hour and 7-day windows by their labels; any other window counts as a 7-day window once it was seen more than a day before its reset (`long` in `state.json`), and as a 5-hour window otherwise.
+- Recovery notifications and reset reminders take the mode for the window's kind from `recovery_notify` and `reset_reminder`. `notify.SevenDayClass` knows 5-hour and 7-day windows by their kind (`quota.Kind`); any other window counts as a 7-day window once it was seen more than a day before its reset (`long` in `state.json`), and as a 5-hour window otherwise.
 - Recovery notifications follow cycle changes only (`cycleEnded`). When both reset times are known, the reset time must move to a new cycle, and either the old reset time has passed or the quota rose by `RecoveryJump`. Codex returns a reset time that moves forward with every query while a window is unused, so a changed reset time alone would count every query as a reset. Without a new reset time, a passed old reset time or a rise by `RecoveryJump` counts.
 - Usage records arrive when a request completes, so a long request started before a reset delivers the old cycle's headers after it. A reading whose reset time has passed and belongs to an ended cycle (`ended_reset`) or precedes the current one is ignored; otherwise it would pull the state back into the old cycle and trigger another recovery.
 - A detected change is stored as a pending recovery (`pending_recovery`) with the last reading of the ended cycle and whether that cycle ran out (`exhausted`). The last reading is the last one taken before its reset time (`cycle_reset`, `cycle_remaining`, `cycle_seen`), because some providers keep reporting the passed reset time with the new cycle's value for a while. A reading more than 15 minutes before the reset is not reported; a used-up window stays at 0 until its reset, so its reading never gets old. A cycle still at 100% before its reset is not notified: after the plugin was stopped for longer than a window, the moving reset time of an unused Codex window also looks passed. `after_exhausted` sends only used-up cycles. A failed delivery is retried at the next check and dropped after an hour. Recoveries and drops are sent as separate notifications.
