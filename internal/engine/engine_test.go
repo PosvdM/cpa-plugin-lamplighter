@@ -703,3 +703,52 @@ func TestStatusListsProvidersForTheSettings(t *testing.T) {
 		t.Fatalf("group order %v", status.GroupOrder)
 	}
 }
+
+func TestPassiveDataDoesNotAddWindowsTheUsageAPIOmits(t *testing.T) {
+	c := &clock{t: time.Date(2026, 10, 4, 10, 0, 0, 0, shanghai)}
+	h := standardHost(c)
+	base := h.http
+	// A ChatGPT Pro account: the usage API reports only a weekly window.
+	h.http = func(req pluginapi.HTTPRequest) pluginapi.HTTPResponse {
+		if req.URL == providers.CodexUsageURL && req.Headers.Get("Authorization") == "Bearer t1" {
+			return pluginapi.HTTPResponse{StatusCode: 200, Body: []byte(`{"plan_type":"pro","rate_limit":{"primary_window":{"used_percent":1,"limit_window_seconds":604800,"reset_after_seconds":601888},"secondary_window":null}}`)}
+		}
+		return base(req)
+	}
+	e, _ := newTestEngine(t, h, c)
+	ctx := context.Background()
+	headers := http.Header{
+		"X-Codex-Primary-Used-Percent":     {"0"},
+		"X-Codex-Secondary-Used-Percent":   {"3"},
+		"X-Codex-Secondary-Window-Minutes": {"10080"},
+	}
+	windowsOf := func() []string {
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		var ids []string
+		for _, g := range e.groups {
+			if g.AuthIndex == "1" {
+				for _, w := range g.Windows {
+					ids = append(ids, w.ID+"="+strconv.FormatFloat(w.Remaining, 'f', 0, 64))
+				}
+			}
+		}
+		return ids
+	}
+
+	// Before any active query, response headers fill the group.
+	e.loadCreds(e.config())
+	e.applyUsage(ctx, usageEvent{provider: "codex", authIndex: "1", at: c.t, header: headers})
+	if got := strings.Join(windowsOf(), ","); got != "five-hour=100,seven-day=97" {
+		t.Fatalf("before the active query: %s", got)
+	}
+
+	// The active query replaces the group; later headers only update the
+	// weekly window it reported.
+	e.poll(ctx, e.config(), c.t, "1", true)
+	c.add(time.Minute)
+	e.applyUsage(ctx, usageEvent{provider: "codex", authIndex: "1", at: c.t, header: headers})
+	if got := strings.Join(windowsOf(), ","); got != "seven-day=97" {
+		t.Fatalf("after the active query: %s", got)
+	}
+}

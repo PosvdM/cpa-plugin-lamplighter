@@ -54,6 +54,8 @@ type GroupView struct {
 	SourceLabel string
 	Label       string
 	Windows     []WindowView
+	// active is set once an active query has described the group.
+	active bool
 }
 
 func (g *GroupView) windows() []quota.Window {
@@ -336,7 +338,11 @@ func (e *Engine) refreshCred(ctx context.Context, cfg config.Config, cred *Cred)
 // applyGroups merges new windows into the current view, records history,
 // updates the reset observation of ignition targets and runs the alerts. An
 // active result replaces the group; a passive result only updates the
-// windows it contains.
+// windows it contains. Once an active query has described the group, a
+// passive result does not add windows: response headers can carry a window
+// the usage API does not report, such as a 5-hour window on a ChatGPT Pro
+// account whose usage API reports only the weekly one. A new window then
+// appears with the next active query.
 func (e *Engine) applyGroups(ctx context.Context, cfg config.Config, cred *Cred, raw []quota.RawGroup, source quota.Source, now time.Time) {
 	var changed []*GroupView
 	e.mu.Lock()
@@ -351,6 +357,7 @@ func (e *Engine) applyGroups(ctx context.Context, cfg config.Config, cred *Cred,
 		group.Label = labelFor(group.SourceLabel, cred)
 		if source == quota.SourceActive {
 			group.Windows = group.Windows[:0]
+			group.active = true
 		}
 		for _, w := range rg.Windows {
 			view := WindowView{Window: w, Source: source, ObservedAt: now}
@@ -362,7 +369,7 @@ func (e *Engine) applyGroups(ctx context.Context, cfg config.Config, cred *Cred,
 					break
 				}
 			}
-			if !replaced {
+			if !replaced && (source == quota.SourceActive || !group.active) {
 				group.Windows = append(group.Windows, view)
 			}
 		}
