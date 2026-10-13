@@ -14,9 +14,10 @@ Lamplighter 是用 Go 编写、以 `-buildmode=c-shared` 构建的 CPA 原生插
 | `internal/engine` | 后台循环：主动查询、被动数据、点火、通知、历史和状态页数据 |
 | `internal/host` | 宿主回调的 Go 封装，以及 `host.http.do` 的超时控制 |
 | `internal/config` | 插件配置解析、默认值和取值范围；读取 CPA 配置判断插件是否启用 |
-| `internal/quota` | 三个服务的额度请求和解析，被动额度响应头解析 |
+| `internal/providers` | 每个服务一个文件：额度请求和解析、响应头解析、点火请求、候选模型、默认设置；注册表，见下文“服务” |
+| `internal/quota` | 额度窗口和上游请求的类型，窗口种类判断，时间解析 |
 | `internal/egress` | 选择额度请求的网络出口 |
-| `internal/models` | 读取 CPA 模型列表，排列点火候选模型 |
+| `internal/models` | 读取 CPA 模型列表，提供按新旧排列候选模型的工具 |
 | `internal/ignite` | 点火时间计算、滑动重置判断、失败分类和失败保护 |
 | `internal/notify` | Bark 和 webhook 发送、额度提醒、Did Codex Reset 转发 |
 | `internal/store` | `state.json`、额度历史和实例锁 |
@@ -33,7 +34,7 @@ Lamplighter 是用 Go 编写、以 `-buildmode=c-shared` 构建的 CPA 原生插
 
 | 方法和路径 | 作用 |
 | --- | --- |
-| `GET /v0/management/lamplighter/status` | 状态页数据，配置中的密钥只显示是否已设置 |
+| `GET /v0/management/lamplighter/status` | 状态页数据，配置中的密钥只显示是否已设置。`providers` 按显示顺序列出支持的服务（`id`、`title`、能否点火 `ignite`、中英文的模型提示 `model_hint`、可勾选的点火额度组 `groups` 及说明 `groups_hint`），`group_order` 是额度组的显示顺序；每个窗口带 `kind`（`5h` 或 `7d`，其他长度的窗口没有这个字段） |
 | `GET /v0/management/lamplighter/history?range=1h\|3h\|6h\|12h\|24h\|26h\|4d\|8d\|15d\|1mo\|36d` | 额度历史和点火事件，默认 `24h`。5 小时额度按小时、7 天额度按天，依次是：1 个单位；半个窗口加 1（`3h`、`4d`）；一个窗口加 1（`6h`、`8d`）；半天或半月，能完整显示两个窗口（`12h`、`15d`）；一天或一个月（`24h`、`1mo`）；五个窗口加 1（`26h`、`36d`）。`1mo` 从插件时区上个月的同一日期（该月没有这一天时取最后一天）到现在 |
 | `POST /v0/management/lamplighter/refresh` | 立即主动查询，`{"auth_index": "..."}` 只查一个账号 |
 | `POST /v0/management/lamplighter/ignite` | 立即点火，`{"target": "<额度组 key>"}` |
@@ -56,7 +57,8 @@ Lamplighter 是用 Go 编写、以 `-buildmode=c-shared` 构建的 CPA 原生插
 
 - **缺数据**：相邻样本间隔超过 3.5 个查询间隔（或接口的分段长度）时视为缺数据，画成斜线纹理，不延续前一个值。启用被动跳过时，阈值至少为 `passive_skip_max_minutes` 加 1.5 个查询间隔：响应头里没有的窗口（如没在使用的 Fable）在跳过期间只能等下一次主动查询，这段间隔不算缺数据。
 - **多账号合计**：同一服务、同一 `source_label` 的多个账号合成一行，取各账号剩余百分比的平均值。各账号套餐相同时，这等于总额度的剩余比例；接口只提供百分比，无法按额度大小加权。详情图同时画出各账号的最低到最高范围。
-- **排序**：默认按 `SERVICE_ORDER`（Claude、ChatGPT、Gemini、Fable、Claude / GPT）排列，其他额度按接口顺序排在后面；也可按当前剩余从低到高排列。状态接口中同一账号的额度组也按这个顺序排列（`internal/engine/api.go` 中的 `groupOrder`），所以账号卡片上 Gemini 在 Claude / GPT 之前、Claude 在 Fable 之前。
+- **窗口种类**：图表按历史系列的 `kind` 分到“5 小时”和“7 天”两个标签页，只显示账号实际报告的种类（一个都不知道时两个都显示），默认打开第一个；其他长度的窗口不画进图表。同一额度名下有自己标签的窗口（例如 Claude 的 `7 Day Opus`）单独成行，不与主窗口合并。
+- **排序**：默认按状态接口的 `group_order`（Claude、ChatGPT、Gemini、Kimi、Grok、Fable、Claude / GPT，来自 `internal/providers/provider.go` 的 `groupOrder`）排列，其他额度按接口顺序排在后面；也可按当前剩余从低到高排列。状态接口中账号按服务的注册顺序排列，同一账号的额度组也按这个顺序排列，所以账号卡片上 Gemini 在 Claude / GPT 之前、Claude 在 Fable 之前。
 - **记住筛选**：`remember_chart_filters` 开启时，页面把所选窗口、排序和每个窗口各自的时间范围存在 `localStorage` 的 `lamplighter-chart-filters` 中，打开页面时恢复；5 小时和 7 天的时间范围选项不同，所以分开保存。保存的值不在当前选项中时使用默认值。开关读取设置表单中的勾选状态，所以改动在保存前就生效；关闭时删除这项记录。
 - **重置**：相邻样本的剩余上升 5 个百分点及以上视为重置。曲线在重置处断开，前一段保持最后的值画到重置样本的时间，新的一段从重置后的值开始，图上标出重置时间；相隔一个样本的两次上升算一次重置。单个账号重置只让合计上升一部分，上升不足 5 个百分点时合计曲线不断开。
 - **平滑**：同一窗口内额度只会下降，但主动查询和响应头的数值可能差 1 个百分点，取整方式也不同，样本会短暂回升。画线前把每段样本拟合成最接近的非递增序列（相邻违例合并取平均），否则每次回升都会在曲线上留下一个小缺口；悬停提示仍显示原始样本。曲线使用单调三次插值（Fritsch-Carlson），不会越过拟合后的值。额度按整数百分比上报，所以变化不超过 2 个百分点的台阶按连续下降连线；平台之后是更大的下降时，曲线先保持水平，再在下降处弯折。
@@ -67,12 +69,30 @@ Lamplighter 是用 Go 编写、以 `-buildmode=c-shared` 构建的 CPA 原生插
 | 回调 | 用途 |
 | --- | --- |
 | `host.auth.list` | 凭证列表，含 `auth_index`、运行时 ID、邮箱、停用状态，以及 CPA 冷却状态（`unavailable`、`next_retry_after`） |
-| `host.auth.get` | 凭证文件 JSON，取 access token、Codex 账号 ID、Antigravity `project_id`、`proxy_url` |
+| `host.auth.get` | 凭证文件 JSON，取 access token、Codex 账号 ID、Antigravity `project_id`、Kimi 的 `domain` 和 `base_url`、Grok 的 `sub`、`proxy_url` |
 | `host.model.execute` | 点火，带 `auth_id` 和 `forced_provider` |
 | `host.http.operation_open` / `host.http.do` / `host.http.cancel` | 没有账号代理时的额度请求 |
 | `host.log` | 写入 CPA 日志 |
 
 宿主回调绑定在插件实例上，不依赖某次 RPC，所以后台循环可以随时调用。
+
+## 服务
+
+`internal/providers` 中每个服务是一个 `providers.Provider`，在 `provider.go` 的 `registry` 中按显示顺序注册：ChatGPT（`codex`）、Claude、Antigravity、Kimi、Grok（`xai`）。服务定义包含：
+
+| 字段 | 内容 |
+| --- | --- |
+| `ID`、`Aliases`、`Title` | 配置键和额度组 key 使用的服务名；CPA 中的其他写法（Kimi 的 `kimi-ai`、`kimi.ai`、`kimi.com`，Grok 的 `x-ai`、`x.ai`、`grok`）；显示名 |
+| `Monitor`、`Ignite` | 默认是否监控、点火 |
+| `Fetch` | 主动查询，返回额度组 |
+| `Headers` | 解析模型请求的响应头；为空表示响应头里没有额度，被动跳过对该服务不生效 |
+| `Ignition` | 点火协议、请求体、候选模型、模型提示、可勾选的额度组；为空表示不点火，设置页显示“不支持点火” |
+
+`providers.Lookup` 按服务名或别名查找（忽略大小写，`_` 视同 `-`）。凭证列表中的服务名换成 `ID` 存进 `Cred.Provider`，原始写法存进 `Cred.HostProvider`。配置中用别名写的服务键在解析时换成 `ID`。
+
+**窗口种类**：`quota.Window.Period` 是窗口长度，由各服务从接口数据填入：Codex 的 `limit_window_seconds` 和 `Window-Minutes`，Claude 的字段名，Antigravity 的 `window`，Kimi 的 `duration` 和 `timeUnit`，Grok 的周期起止时间。`quota.Kind` 先看周期（与 5 小时或 7 天相差 5% 以内），没有周期时按 ID 和标签判断。5 小时和 7 天窗口使用固定的 ID 和标签（`five-hour`、`seven-day`），其他长度的窗口带自己的 ID，标签为 `quota.PeriodLabel` 给出的长度，例如 `30d`；Grok 的周期长度会随月份变化，固定使用 `credits`。点火、冷却判断、图表和通知都按种类处理，所以没有 5 小时窗口的账号（例如 ChatGPT Pro）不点火，图表也不显示 5 小时标签页。
+
+**新增服务**：在 `internal/providers` 中新建一个文件，参照 CPA 管理中心额度页的请求实现 `Fetch`，有额度响应头时实现 `Headers`，窗口填上 `Period`；能点火时填写 `Ignition`；把服务加入 `registry`，需要固定位置时把主额度组的名称加入 `groupOrder`；在 `internal/web/page.css` 中加上管理中心同名服务的标签颜色（`--type-<id>-bg` 等）。同步更新 README 的服务表和本文档的主动查询、被动数据、点火请求和模型选择各节。
 
 ## 后台循环
 
@@ -103,8 +123,10 @@ Lamplighter 是用 Go 编写、以 `-buildmode=c-shared` 构建的 CPA 原生插
 | Codex | `GET https://chatgpt.com/backend-api/wham/usage`，带 `Chatgpt-Account-Id` |
 | Claude | `GET https://api.anthropic.com/api/oauth/usage`，`anthropic-beta: oauth-2025-04-20` |
 | Antigravity | `POST .../v1internal:retrieveUserQuotaSummary`，依次尝试三个地址，正文为 `{"project": "<project_id>"}` |
+| Kimi | `GET https://api.kimi.com/coding/v1/usages`；与 CPA 的 Kimi 执行器一样，依次看凭证的 `domain`、`base_url`、`type`、服务名，最后看运行时 ID 或文件名是否含 `kimi-ai`、`kimi.ai`，指向 kimi.ai 时用 `api.kimi.ai` |
+| Grok | `GET https://cli-chat-proxy.grok.com/v1/billing?format=credits`，带 Grok CLI 的请求头和凭证 `sub` 作为 `x-userid`。`currentPeriod` 为每周时是 7 天窗口；没有 `currentPeriod` 时才用按月的 `billingPeriodStart`/`End`。其他长度的周期固定使用 ID `credits`，让历史和提醒在周期之间延续 |
 
-请求头与 CPA 管理中心额度页相同，常量在 `internal/quota/active.go`。Codex 的 User-Agent 与 CPA 的 Codex 执行器一致；Claude 的 User-Agent 与 CPA 默认的 Claude Code 指纹一致。
+请求头与 CPA 管理中心额度页相同，常量在 `internal/providers` 中各服务的文件里。Codex 的 User-Agent 与 CPA 的 Codex 执行器一致；Claude 的 User-Agent 与 CPA 默认的 Claude Code 指纹一致。
 
 token 来自凭证文件。CPA 在后台刷新 token 并写回文件，插件不自行刷新；上游返回 401 时跳过本轮，等 CPA 刷新。
 
@@ -126,12 +148,14 @@ CPA 在用量记录的 `ResponseHeaders` 中提供上游响应头：
 | 服务 | 响应头 | 窗口 |
 | --- | --- | --- |
 | Claude | `Anthropic-Ratelimit-Unified-5h-Utilization` / `-5h-Reset`，`-7d-` 同理 | 5 小时、7 天；值是已用比例，如 `0.2` |
-| Claude | `Anthropic-Ratelimit-Unified-7d_oi-Utilization` / `-7d_oi-Reset` | Fable 的 7 天窗口，写入与主动查询相同的 Fable 额度组（`quota.FableGroupKey`）。CPA 也把 `7d_oi` 当作 Fable 专用窗口。普通（非 Fable）请求的响应头里没有这组；Fable 请求时是否返回，还没有在能用 Fable 的账号上验证过。插件每次启动后第一次读到时记一条日志 |
-| Codex | `X-Codex-Primary-Used-Percent`、`-Reset-At`、`-Reset-After-Seconds`、`-Window-Minutes`，`Secondary` 同理 | 按窗口长度区分，300 分钟为 5 小时，10080 分钟为 7 天 |
+| Claude | `Anthropic-Ratelimit-Unified-7d_oi-Utilization` / `-7d_oi-Reset` | Fable 的 7 天窗口，写入与主动查询相同的 Fable 额度组（`providers.FableGroupKey`）。CPA 也把 `7d_oi` 当作 Fable 专用窗口。普通（非 Fable）请求的响应头里没有这组；Fable 请求时是否返回，还没有在能用 Fable 的账号上验证过。插件每次启动后第一次读到时记一条日志 |
+| Codex | `X-Codex-Primary-Used-Percent`、`-Reset-At`、`-Reset-After-Seconds`、`-Window-Minutes`，`Secondary` 同理 | 按窗口长度区分，300 分钟为 5 小时，10080 分钟为 7 天，其他长度各自成为一个窗口；没有长度时 Primary 为 5 小时、Secondary 为 7 天 |
 
-被动数据只更新响应头里有的窗口，主动查询结果替换整个额度组。`-Reset-After-Seconds` 从用量记录的 `RequestedAt` 起算：用量记录在请求结束时才到达，从处理时刻起算会把长请求带回的上一周期重置时间推到重置之后。
+Antigravity、Kimi 和 Grok 的响应头里没有额度。
 
-跳过规则（`shouldSkipActive`）：查询时刻前 `passive_skip_seconds` 秒内有被动数据，且距上次主动查询不足 `passive_skip_max_minutes` 分钟时跳过。只看查询时刻之前的一小段时间，最坏情况下两次数据间隔为查询间隔加 `passive_skip_seconds`。手动刷新不跳过。
+被动数据只更新响应头里有的窗口，主动查询结果替换整个额度组。额度组有过主动查询结果后，被动数据只更新那次结果中出现过的窗口，不新增窗口：ChatGPT Pro 账号的额度接口只返回 7 天窗口，页面上却出现过一个没有重置时间、一直是 100% 的 5 小时窗口，它只能来自响应头。从来没有主动查询结果的额度组（刚启动或查询一直失败）仍接受响应头中的所有窗口。服务新开的窗口要到下一次主动查询才出现。`-Reset-After-Seconds` 从用量记录的 `RequestedAt` 起算：用量记录在请求结束时才到达，从处理时刻起算会把长请求带回的上一周期重置时间推到重置之后。
+
+跳过规则（`shouldSkipActive`）：响应头里没有额度的服务从不跳过。其他服务在查询时刻前 `passive_skip_seconds` 秒内有被动数据，且距上次主动查询不足 `passive_skip_max_minutes` 分钟时跳过。只看查询时刻之前的一小段时间，最坏情况下两次数据间隔为查询间隔加 `passive_skip_seconds`。手动刷新不跳过。
 
 ## 点火
 
@@ -151,7 +175,7 @@ CPA 在用量记录的 `ResponseHeaders` 中提供上游响应头：
 
 ### 请求
 
-点火通过 `host.model.execute` 发送，`auth_id` 为凭证的运行时 ID，`forced_provider` 为服务名。请求体见 `ignite.BuildRequest`：
+点火通过 `host.model.execute` 发送，`auth_id` 为凭证的运行时 ID，`forced_provider` 为 CPA 报告的服务名（`Cred.HostProvider`）。请求体由各服务的 `Ignition.Body` 给出，经 `providers.Request` 编码。Kimi 和 Grok 没有点火：Kimi 订阅的 5 小时和 7 天窗口从开通时间起按固定时间切换，不论是否使用；Grok 的每周额度在上一周期结束时自动开始。其余服务的请求如下：
 
 | 服务 | 入口协议 | 请求要点 |
 | --- | --- | --- |
@@ -161,7 +185,7 @@ CPA 在用量记录的 `ResponseHeaders` 中提供上游响应头：
 
 ### 模型选择
 
-CPA 没有按凭证列出模型的宿主回调，插件用 `models_api_key` 读取 `GET /v1/models`。这个列表是所有凭证模型的合集，按模型 ID 去重，`owned_by` 在两个服务提供同一 ID 时可能指向另一个服务，所以候选只按名称挑选（`models.Candidates`）：
+CPA 没有按凭证列出模型的宿主回调，插件用 `models_api_key` 读取 `GET /v1/models`。这个列表是所有凭证模型的合集，按模型 ID 去重，`owned_by` 在两个服务提供同一 ID 时可能指向另一个服务，所以候选只按名称挑选（各服务的 `Ignition.Candidates`，由 `providers.Candidates` 去重并处理指定模型）：
 
 - Codex：名称含 `luna` 的模型由新到旧，然后其他 `gpt-` 模型；排除图片模型和 `gpt-oss`。
 - Claude：`claude-` 开头的非 thinking Haiku 由新到旧，然后 Sonnet。
@@ -176,7 +200,7 @@ CPA 的模型列表来自它内置并定期更新的模型表，同一服务的�
 
 换到的候选成功时，被拒的模型确实与这个额度组的账号有关：`engine.noteRefused` 在内存中记下额度组和模型，并记录 `model_refused` 事件；之后 24 小时（`refusedFor`）内，这个额度组的自动选择跳过该模型（`engine.skipRefused`），到期后再试一次。反复请求账号没有权限的模型可能增加账号风险，而新模型可能分批开放，所以按天重试。记录不写入 `state.json`，插件重启后清空。指定模型不受影响。
 
-模型列表在三种情况下读取：插件启动后、CPA 地址或 `models_api_key` 变化后（`engine.maybeReadModels`），以及每次点火时。额度查询不读取模型列表；前两种读取失败时，随之后每轮额度查询重试，直到成功。每次读取后，`engine.noteModels` 不考虑指定模型，按服务算出自动选择的第一个候选，放在状态接口的 `next_models` 中（`codex`、`claude`、`antigravity`），设置页在点火模型输入框的提示文字后显示它。Antigravity 按 Gemini 组计算，与提示文字“最新的 Flash”一致。`next_models` 只保存在内存中。读取失败时保留上次的结果；CPA 地址或 `models_api_key` 变化时清空 `next_models` 和模型列表错误，再按新的地址和 key 读取。`next_models` 按服务计算，不考虑某个额度组跳过的模型。
+模型列表在三种情况下读取：插件启动后、CPA 地址或 `models_api_key` 变化后（`engine.maybeReadModels`），以及每次点火时。额度查询不读取模型列表；前两种读取失败时，随之后每轮额度查询重试，直到成功。每次读取后，`engine.noteModels` 不考虑指定模型，按服务算出自动选择的第一个候选，放在状态接口的 `next_models` 中（每个能点火的服务一项），设置页在点火模型输入框的提示文字后显示它。额度组按服务的 `Ignition.HintGroup` 计算：Antigravity 按 Gemini 组计算，与提示文字“最新的 Flash”一致。`next_models` 只保存在内存中。读取失败时保留上次的结果；CPA 地址或 `models_api_key` 变化时清空 `next_models` 和模型列表错误，再按新的地址和 key 读取。`next_models` 按服务计算，不考虑某个额度组跳过的模型。
 
 ### 确认
 
@@ -184,7 +208,7 @@ CPA 的模型列表来自它内置并定期更新的模型表，同一服务的�
 
 1. Claude 的响应头里直接带新的重置时间，立即确认。
 2. Codex 的额度信息通过同一请求的用量记录到达；等待期间继续处理被动数据。
-3. 按 5、10、15、30、15 秒的间隔检查，每次检查前主动查询该凭证一次。
+3. 按 5、10、15、30、15 秒的间隔检查，每次检查前主动查询该凭证一次。Antigravity 的响应头里没有额度，只靠这一步确认。
 
 全部检查都没有确认时，返回 `ErrNotConfirmed`。
 
@@ -211,7 +235,7 @@ CPA 本地冷却带有 `reset_seconds` 且不超过 10 分钟时（`ignite.Coold
 
 - 等级为 normal、notice（≤50%）、low（≤20%）、critical（≤10%）、exhausted（≤0.01%）。等级变差时推送；critical 和 exhausted 使用 `timeSensitive`。
 - 只有真正恢复才算等级变好：重置时间换到了新窗口，或者比上次读数高出 5 个百分点及以上（`RecoveryJump`）。主动查询和响应头的数值可能差 1 个百分点，同一窗口内的小幅回升不改变已通知等级，所以读数在阈值附近来回跳时只提醒一次。等级变好时只静默更新基线，否则下一轮的下降不会再提醒。
-- 恢复通知和重置前提醒按窗口类别取 `recovery_notify`、`reset_reminder` 中的模式。`notify.SevenDayClass` 按标签识别 5 小时和 7 天窗口；其他窗口在距离重置超过 1 天时被看到过（`state.json` 的 `long`）就算 7 天窗口，否则算 5 小时窗口。
+- 恢复通知和重置前提醒按窗口类别取 `recovery_notify`、`reset_reminder` 中的模式。`notify.SevenDayClass` 按窗口种类（`quota.Kind`）识别 5 小时和 7 天窗口；其他窗口在距离重置超过 1 天时被看到过（`state.json` 的 `long`）就算 7 天窗口，否则算 5 小时窗口。
 - 恢复通知只看周期切换（`cycleEnded`）：两个重置时间都已知时，重置时间必须换到新周期，并且旧重置时间已过或额度回升了 `RecoveryJump`。Codex 未使用的窗口每次查询都返回向后顺延的重置时间，只看重置时间是否变化会把每次查询都当成重置。新读数没有重置时间时，旧重置时间已过或额度回升 `RecoveryJump` 即算切换。
 - 用量记录在请求结束时才到达，重置前开始的长请求会在重置后带回上一周期的响应头。重置时间已过、并且属于已结束周期（`ended_reset`）或早于当前周期的读数直接忽略，否则会把状态拉回上一周期并再次触发恢复。
 - 检测到切换时记下待发送的恢复（`pending_recovery`），连同上一周期最后的读数和该周期是否用完（`exhausted`）。上一周期的读数取重置时间之前的最后一次读数（`cycle_reset`、`cycle_remaining`、`cycle_seen`），因为有的服务在重置后一段时间内仍返回旧的重置时间和新周期的数值。这个读数距离重置超过 15 分钟时不报告，用完的窗口到重置前都是 0，读数不会过期。上一周期重置前仍是 100% 时不推送：插件停止超过一个窗口后，Codex 未使用窗口顺延的重置时间看起来也已过期。`after_exhausted` 模式下只发送用完的周期。推送失败时下一次检查重试，1 小时后放弃。恢复与额度下降分别推送。

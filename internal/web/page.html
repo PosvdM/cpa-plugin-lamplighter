@@ -195,16 +195,7 @@
         <legend data-i18n="services">服务</legend>
         <table class="services">
           <thead><tr><th data-i18n="col_service">服务</th><th data-i18n="col_monitor">监控</th><th data-i18n="ignition">自动点火</th><th data-i18n="col_ignition_model">点火模型</th></tr></thead>
-          <tbody>
-            <tr><td class="strong">ChatGPT</td><td><input name="providers.codex.monitor" type="checkbox" aria-label="监控 ChatGPT" data-i18n-aria-label="monitor_codex"></td><td><input name="providers.codex.ignite" type="checkbox" aria-label="点火 ChatGPT" data-i18n-aria-label="ignite_codex"></td><td><input name="providers.codex.model" type="text" placeholder="自动：最新的 Luna" data-i18n-placeholder="model_auto_codex"></td></tr>
-            <tr><td class="strong">Claude</td><td><input name="providers.claude.monitor" type="checkbox" aria-label="监控 Claude" data-i18n-aria-label="monitor_claude"></td><td><input name="providers.claude.ignite" type="checkbox" aria-label="点火 Claude" data-i18n-aria-label="ignite_claude"></td><td><input name="providers.claude.model" type="text" placeholder="自动：最新的 Haiku" data-i18n-placeholder="model_auto_claude"></td></tr>
-            <tr><td class="strong">Antigravity</td><td><input name="providers.antigravity.monitor" type="checkbox" aria-label="监控 Antigravity" data-i18n-aria-label="monitor_antigravity"></td><td><input name="providers.antigravity.ignite" type="checkbox" aria-label="点火 Antigravity" data-i18n-aria-label="ignite_antigravity"></td><td><input name="providers.antigravity.model" type="text" placeholder="自动：最新的 Flash" data-i18n-placeholder="model_auto_antigravity"></td></tr>
-            <tr class="sub-row"><td></td><td colspan="3">
-              <span class="field-label" data-i18n="ag_groups">Antigravity 点火额度组</span>
-              <div id="ag-groups" class="checks"></div>
-              <span class="hint" data-i18n="ag_groups_hint">Antigravity 按模型分成多个独立的 5 小时额度组。只有勾选的额度组会自动点火；Claude / GPT 额度组较小，默认不点。</span>
-            </td></tr>
-          </tbody>
+          <tbody id="service-rows"></tbody>
         </table>
       </fieldset>
       <fieldset>

@@ -16,6 +16,7 @@ import (
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/config"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/host"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/notify"
+	"github.com/PosvdM/cpa-plugin-lamplighter/internal/providers"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/quota"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginapi"
 )
@@ -122,11 +123,11 @@ func standardHost(c *clock) *fakeHost {
 		http: func(req pluginapi.HTTPRequest) pluginapi.HTTPResponse {
 			reset := c.t.Add(3 * time.Hour)
 			switch {
-			case req.URL == quota.CodexUsageURL:
+			case req.URL == providers.CodexUsageURL:
 				body := `{"rate_limit":{"primary_window":{"used_percent":40,"limit_window_seconds":18000,"reset_at":` +
 					strconv.FormatInt(reset.Unix(), 10) + `},"secondary_window":{"used_percent":10,"limit_window_seconds":604800,"reset_after_seconds":86400}}}`
 				return pluginapi.HTTPResponse{StatusCode: 200, Body: []byte(body)}
-			case req.URL == quota.ClaudeUsageURL:
+			case req.URL == providers.ClaudeUsageURL:
 				body := `{"five_hour":{"utilization":30,"resets_at":"` + reset.UTC().Format(time.RFC3339) + `"},"seven_day":{"utilization":20,"resets_at":"` +
 					reset.Add(48*time.Hour).UTC().Format(time.RFC3339) + `"}}`
 				return pluginapi.HTTPResponse{StatusCode: 200, Body: []byte(body)}
@@ -158,7 +159,7 @@ func TestPollBuildsAccountsWithSuffixes(t *testing.T) {
 		t.Fatalf("titles %v", titles)
 	}
 	for _, req := range h.requests {
-		if req.URL == quota.CodexUsageURL && req.Headers.Get("Authorization") == "Bearer t1" && req.Headers.Get("Chatgpt-Account-Id") != "acc1" {
+		if req.URL == providers.CodexUsageURL && req.Headers.Get("Authorization") == "Bearer t1" && req.Headers.Get("Chatgpt-Account-Id") != "acc1" {
 			t.Fatal("Codex request must carry the account ID")
 		}
 	}
@@ -196,7 +197,7 @@ func TestPassiveDataSkipsActiveQueryNearTheSlot(t *testing.T) {
 	e, _ := newTestEngine(t, h, c)
 	ctx := context.Background()
 	e.poll(ctx, e.config(), c.t, "", false)
-	before := h.requestsTo(quota.ClaudeUsageURL)
+	before := h.requestsTo(providers.ClaudeUsageURL)
 
 	// A Claude request 30 seconds before the next slot.
 	c.add(4*time.Minute + 30*time.Second)
@@ -206,7 +207,7 @@ func TestPassiveDataSkipsActiveQueryNearTheSlot(t *testing.T) {
 	}})
 	c.add(30 * time.Second)
 	e.poll(ctx, e.config(), c.t, "", false)
-	if got := h.requestsTo(quota.ClaudeUsageURL); got != before {
+	if got := h.requestsTo(providers.ClaudeUsageURL); got != before {
 		t.Fatalf("Claude query should be skipped, got %d requests", got-before)
 	}
 	if got := e.Status().Accounts[2].Groups[0].Windows[0]; got.Source != "passive" || got.Remaining != 65 {
@@ -218,7 +219,7 @@ func TestPassiveDataSkipsActiveQueryNearTheSlot(t *testing.T) {
 	e.passiveAt["3"] = c.t
 	c.add(2 * time.Minute)
 	e.poll(ctx, e.config(), c.t, "", false)
-	if got := h.requestsTo(quota.ClaudeUsageURL); got != before+1 {
+	if got := h.requestsTo(providers.ClaudeUsageURL); got != before+1 {
 		t.Fatalf("Claude query should run, got %d", got-before)
 	}
 
@@ -236,7 +237,7 @@ func claudeIgnitionHost(c *clock, failFirst error) *fakeHost {
 	// The current Claude window expired a minute ago.
 	base := h.http
 	h.http = func(req pluginapi.HTTPRequest) pluginapi.HTTPResponse {
-		if req.URL == quota.ClaudeUsageURL {
+		if req.URL == providers.ClaudeUsageURL {
 			return pluginapi.HTTPResponse{StatusCode: 200, Body: []byte(`{"five_hour":{"utilization":0,"resets_at":"` + expired.UTC().Format(time.RFC3339) + `"}}`)}
 		}
 		return base(req)
@@ -595,7 +596,7 @@ func TestQueriesAroundResetRunOncePerReset(t *testing.T) {
 	if due, next := e.probes(c.t); len(due) != 0 || !next.Equal(reset.Add(-probeOffset)) {
 		t.Fatalf("next pre-reset query: %v %v", due, next)
 	}
-	before := h.requestsTo(quota.ClaudeUsageURL)
+	before := h.requestsTo(providers.ClaudeUsageURL)
 	c.t = reset.Add(-20 * time.Second)
 	// Computing the next wake-up does not use up a due query.
 	if due, _ := e.probes(c.t); len(due) == 0 {
@@ -603,7 +604,7 @@ func TestQueriesAroundResetRunOncePerReset(t *testing.T) {
 	}
 	e.runProbes(ctx, cfg, c.t)
 	e.runProbes(ctx, cfg, c.t)
-	if got := h.requestsTo(quota.ClaudeUsageURL) - before; got != 1 {
+	if got := h.requestsTo(providers.ClaudeUsageURL) - before; got != 1 {
 		t.Fatalf("want one pre-reset Claude query, got %d", got)
 	}
 
@@ -619,7 +620,7 @@ func TestQueriesAroundResetRunOncePerReset(t *testing.T) {
 	}
 	e.mu.Unlock()
 	e.runProbes(ctx, cfg, c.t)
-	if got := h.requestsTo(quota.ClaudeUsageURL) - before; got != 1 {
+	if got := h.requestsTo(providers.ClaudeUsageURL) - before; got != 1 {
 		t.Fatalf("a jittered reset time must not repeat the query, got %d", got)
 	}
 
@@ -630,7 +631,7 @@ func TestQueriesAroundResetRunOncePerReset(t *testing.T) {
 	c.t = reset.Add(40 * time.Second)
 	e.runProbes(ctx, cfg, c.t)
 	e.runProbes(ctx, cfg, c.t)
-	if got := h.requestsTo(quota.ClaudeUsageURL) - before; got != 2 {
+	if got := h.requestsTo(providers.ClaudeUsageURL) - before; got != 2 {
 		t.Fatalf("want one Claude query after the reset, got %d", got-1)
 	}
 	if due, next := e.probes(c.t); len(due) != 0 || next.Before(reset.Add(time.Hour)) {
@@ -678,4 +679,153 @@ func TestPassiveRelativeResetCountsFromTheRequest(t *testing.T) {
 		return
 	}
 	t.Fatal("no Codex group")
+}
+
+func TestStatusListsProvidersForTheSettings(t *testing.T) {
+	c := &clock{t: time.Date(2026, 10, 4, 10, 0, 0, 0, shanghai)}
+	e, _ := newTestEngine(t, standardHost(c), c)
+	status := e.Status()
+	var ids []string
+	for _, p := range status.Providers {
+		ids = append(ids, p.ID)
+	}
+	if strings.Join(ids, ",") != strings.Join(providers.IDs(), ",") {
+		t.Fatalf("providers %v", ids)
+	}
+	ag := status.Providers[2]
+	if ag.ID != "antigravity" || !ag.Ignite || strings.Join(ag.Groups, ",") != "Gemini,Claude / GPT" || ag.GroupsHint == nil || ag.ModelHint.Zh != "最新的 Flash" {
+		t.Fatalf("antigravity %+v", ag)
+	}
+	if status.Providers[0].Groups != nil || status.Providers[0].GroupsHint != nil {
+		t.Fatalf("codex offers no groups: %+v", status.Providers[0])
+	}
+	if len(status.GroupOrder) == 0 || status.GroupOrder[0] != "Claude" {
+		t.Fatalf("group order %v", status.GroupOrder)
+	}
+}
+
+func TestPassiveDataDoesNotAddWindowsTheUsageAPIOmits(t *testing.T) {
+	c := &clock{t: time.Date(2026, 10, 4, 10, 0, 0, 0, shanghai)}
+	h := standardHost(c)
+	base := h.http
+	// A ChatGPT Pro account: the usage API reports only a weekly window.
+	h.http = func(req pluginapi.HTTPRequest) pluginapi.HTTPResponse {
+		if req.URL == providers.CodexUsageURL && req.Headers.Get("Authorization") == "Bearer t1" {
+			return pluginapi.HTTPResponse{StatusCode: 200, Body: []byte(`{"plan_type":"pro","rate_limit":{"primary_window":{"used_percent":1,"limit_window_seconds":604800,"reset_after_seconds":601888},"secondary_window":null}}`)}
+		}
+		return base(req)
+	}
+	e, _ := newTestEngine(t, h, c)
+	ctx := context.Background()
+	headers := http.Header{
+		"X-Codex-Primary-Used-Percent":     {"0"},
+		"X-Codex-Secondary-Used-Percent":   {"3"},
+		"X-Codex-Secondary-Window-Minutes": {"10080"},
+	}
+	windowsOf := func() []string {
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		var ids []string
+		for _, g := range e.groups {
+			if g.AuthIndex == "1" {
+				for _, w := range g.Windows {
+					ids = append(ids, w.ID+"="+strconv.FormatFloat(w.Remaining, 'f', 0, 64))
+				}
+			}
+		}
+		return ids
+	}
+
+	// Before any active query, response headers fill the group.
+	e.loadCreds(e.config())
+	e.applyUsage(ctx, usageEvent{provider: "codex", authIndex: "1", at: c.t, header: headers})
+	if got := strings.Join(windowsOf(), ","); got != "five-hour=100,seven-day=97" {
+		t.Fatalf("before the active query: %s", got)
+	}
+
+	// The active query replaces the group; later headers only update the
+	// weekly window it reported.
+	e.poll(ctx, e.config(), c.t, "1", true)
+	c.add(time.Minute)
+	e.applyUsage(ctx, usageEvent{provider: "codex", authIndex: "1", at: c.t, header: headers})
+	if got := strings.Join(windowsOf(), ","); got != "seven-day=97" {
+		t.Fatalf("after the active query: %s", got)
+	}
+}
+
+func grokHost(c *clock) *fakeHost {
+	h := standardHost(c)
+	h.auths = append(h.auths, pluginapi.HostAuthFileEntry{ID: "xai-a.json", AuthIndex: "6", Name: "xai-a.json", Provider: "xai", Email: "grok@example.com"})
+	h.files["6"] = `{"type":"xai","access_token":"t6","sub":"u6"}`
+	base := h.http
+	h.http = func(req pluginapi.HTTPRequest) pluginapi.HTTPResponse {
+		if req.URL == providers.XAIBillingURL {
+			start, end := c.t.Add(-2*24*time.Hour).UTC().Format(time.RFC3339), c.t.Add(5*24*time.Hour).UTC().Format(time.RFC3339)
+			return pluginapi.HTTPResponse{StatusCode: 200, Body: []byte(`{"config":{"currentPeriod":{"type":"USAGE_PERIOD_TYPE_WEEKLY","start":"` + start + `","end":"` + end + `"},"creditUsagePercent":23.0}}`)}
+		}
+		return base(req)
+	}
+	return h
+}
+
+func TestGrokIsMonitoredButNeverIgnited(t *testing.T) {
+	c := &clock{t: time.Date(2026, 10, 4, 10, 0, 0, 0, shanghai)}
+	h := grokHost(c)
+	e, _ := newTestEngine(t, h, c)
+	cfg := e.config()
+	grok := cfg.Providers["xai"]
+	grok.Ignite = true
+	cfg.Providers["xai"] = grok
+	e.Configure(cfg, nil)
+	e.poll(context.Background(), e.config(), c.t, "", false)
+
+	status := e.Status()
+	last := status.Accounts[len(status.Accounts)-1]
+	if last.Provider != "xai" || last.Title != "Grok" || len(last.Groups) != 1 {
+		t.Fatalf("grok account %+v", last)
+	}
+	w := last.Groups[0].Windows[0]
+	if w.Kind != "7d" || w.Remaining != 77 {
+		t.Fatalf("grok window %+v", w)
+	}
+	for _, target := range e.collectTargets(e.config()) {
+		if target.group.Provider == "xai" {
+			t.Fatal("Grok has no ignition")
+		}
+	}
+	if h.requestsTo(providers.XAIBillingURL) != 1 {
+		t.Fatal("Grok billing must be queried once")
+	}
+}
+
+func TestKimiAliasIsMonitoredButNeverIgnited(t *testing.T) {
+	c := &clock{t: time.Date(2026, 10, 4, 10, 0, 0, 0, shanghai)}
+	h := &fakeHost{
+		auths: []pluginapi.HostAuthFileEntry{{ID: "kimi-a.json", AuthIndex: "7", Name: "kimi-a.json", Provider: "kimi-ai", Email: "k@example.com"}},
+		files: map[string]string{"7": `{"access_token":"t7","type":"kimi-ai"}`},
+		http: func(req pluginapi.HTTPRequest) pluginapi.HTTPResponse {
+			if req.URL != providers.KimiAIUsageURL {
+				return pluginapi.HTTPResponse{StatusCode: 404}
+			}
+			return pluginapi.HTTPResponse{StatusCode: 200, Body: []byte(`{"limits":[{"detail":{"limit":"100","remaining":"60","resetTime":"` +
+				c.t.Add(time.Hour).UTC().Format(time.RFC3339) + `"},"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"}}]}`)}
+		},
+	}
+	e, _ := newTestEngine(t, h, c)
+	cfg := e.config()
+	// A config key written with the alias still configures Kimi.
+	cfg.Providers["kimi"] = config.Provider{Monitor: true, Ignite: true}
+	e.Configure(cfg, nil)
+	e.poll(context.Background(), e.config(), c.t, "", false)
+
+	account := e.Status().Accounts[0]
+	if account.Provider != "kimi" || account.Title != "Kimi" || len(account.Groups) != 1 {
+		t.Fatalf("account %+v", account)
+	}
+	if w := account.Groups[0].Windows[0]; w.Kind != "5h" || w.Remaining != 60 {
+		t.Fatalf("window %+v", w)
+	}
+	if targets := e.collectTargets(e.config()); len(targets) != 0 {
+		t.Fatalf("Kimi has no ignition, got %d targets", len(targets))
+	}
 }

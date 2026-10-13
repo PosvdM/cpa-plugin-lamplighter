@@ -1,9 +1,7 @@
 package ignite
 
 import (
-	"encoding/json"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
@@ -20,12 +18,6 @@ func schedule() Schedule {
 
 func local(hour, minute int) time.Time {
 	return time.Date(2026, 10, 4, hour, minute, 0, 0, shanghai)
-}
-
-func TestTriggerPromptIsStrict(t *testing.T) {
-	if !strings.Contains(TriggerPrompt, "Reply with exactly OK and nothing else.") {
-		t.Fatal("prompt must ask for exactly OK")
-	}
 }
 
 func TestWaitsForDailyStart(t *testing.T) {
@@ -168,23 +160,6 @@ func TestModelRejected(t *testing.T) {
 	for _, c := range cases {
 		if got := ModelRejected(c.err); got != c.want {
 			t.Errorf("%v: got %v want %v", c.err, got, c.want)
-		}
-	}
-}
-
-func TestBuildRequestUsesMinimalBodies(t *testing.T) {
-	for provider, entry := range map[string]string{"codex": "openai-response", "claude": "claude", "antigravity": "openai"} {
-		req, err := BuildRequest(provider, "m")
-		if err != nil || req.EntryProtocol != entry {
-			t.Fatalf("%s: %+v %v", provider, req, err)
-		}
-		var body map[string]any
-		json.Unmarshal(req.Body, &body)
-		if body["model"] != "m" || !strings.Contains(string(req.Body), "exactly OK") {
-			t.Fatalf("%s body %s", provider, req.Body)
-		}
-		if strings.Contains(string(req.Body), `"tools":[{`) {
-			t.Fatalf("%s must not declare tools", provider)
 		}
 	}
 }

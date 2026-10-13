@@ -11,6 +11,7 @@ import (
 
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/config"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/notify"
+	"github.com/PosvdM/cpa-plugin-lamplighter/internal/providers"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/quota"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/store"
 )
@@ -266,9 +267,11 @@ func (e *Engine) testNotify(ctx context.Context) ([]ChannelResult, error) {
 
 // WindowStatus is one window on the status page.
 type WindowStatus struct {
-	ID         string    `json:"id"`
-	Label      string    `json:"label"`
-	Short      string    `json:"short"`
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	Short string `json:"short"`
+	// Kind is "5h", "7d" or empty for a window of another length.
+	Kind       string    `json:"kind,omitempty"`
 	Remaining  float64   `json:"remaining"`
 	Reset      time.Time `json:"reset,omitempty"`
 	Source     string    `json:"source"`
@@ -325,6 +328,42 @@ type Status struct {
 	Events    []Event         `json:"events"`
 	// NextModels is the model automatic selection picks next, per provider.
 	NextModels map[string]string `json:"next_models,omitempty"`
+	// Providers lists the supported providers in display order, for the
+	// settings, and GroupOrder the display order of quota groups.
+	Providers  []ProviderInfo `json:"providers"`
+	GroupOrder []string       `json:"group_order"`
+}
+
+// ProviderInfo describes a provider for the settings page.
+type ProviderInfo struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	// Ignite is false for providers that cannot be ignited.
+	Ignite bool `json:"ignite"`
+	// ModelHint describes the automatic ignition model.
+	ModelHint *providers.Text `json:"model_hint,omitempty"`
+	// Groups are the quota groups offered as ignition checkboxes, explained
+	// by GroupsHint.
+	Groups     []string        `json:"groups,omitempty"`
+	GroupsHint *providers.Text `json:"groups_hint,omitempty"`
+}
+
+func providerInfos() []ProviderInfo {
+	var out []ProviderInfo
+	for _, p := range providers.All() {
+		info := ProviderInfo{ID: p.ID, Title: p.Title, Ignite: p.Ignition != nil}
+		if p.Ignition != nil {
+			hint := p.Ignition.Hint
+			info.ModelHint = &hint
+			info.Groups = p.Ignition.Groups
+			if len(p.Ignition.Groups) > 0 {
+				groupsHint := p.Ignition.GroupsHint
+				info.GroupsHint = &groupsHint
+			}
+		}
+		out = append(out, info)
+	}
+	return out
 }
 
 // Status returns a snapshot for the management page. Secrets are removed
@@ -371,6 +410,8 @@ func (e *Engine) Status() Status {
 		NextPoll:    e.nextPoll,
 		Config:      cfg,
 		Targets:     append([]TargetView{}, e.targets...),
+		Providers:   providerInfos(),
+		GroupOrder:  providers.GroupOrder(),
 	}
 	_, status.UTCOffset = e.now().In(e.cfg.Location()).Zone()
 	creds := make([]*Cred, 0, len(e.creds))
@@ -379,7 +420,7 @@ func (e *Engine) Status() Status {
 	}
 	sort.SliceStable(creds, func(i, j int) bool {
 		if creds[i].Provider != creds[j].Provider {
-			return providerRank(creds[i].Provider) < providerRank(creds[j].Provider)
+			return providers.Rank(creds[i].Provider) < providers.Rank(creds[j].Provider)
 		}
 		return creds[i].Suffix < creds[j].Suffix
 	})
@@ -387,7 +428,7 @@ func (e *Engine) Status() Status {
 		account := AccountStatus{
 			AuthIndex:   cred.AuthIndex,
 			Provider:    cred.Provider,
-			Title:       labelFor(quota.ProviderTitle(cred.Provider), cred),
+			Title:       labelFor(providers.Title(cred.Provider), cred),
 			Email:       cred.Email,
 			Name:        cred.Name,
 			Unavailable: cred.Unavailable,
@@ -400,7 +441,7 @@ func (e *Engine) Status() Status {
 			}
 		}
 		sort.SliceStable(groups, func(i, j int) bool {
-			if ri, rj := groupRank(groups[i].SourceLabel), groupRank(groups[j].SourceLabel); ri != rj {
+			if ri, rj := providers.GroupRank(groups[i].SourceLabel), providers.GroupRank(groups[j].SourceLabel); ri != rj {
 				return ri < rj
 			}
 			return groups[i].Key < groups[j].Key
@@ -416,6 +457,7 @@ func (e *Engine) Status() Status {
 					ID:         w.ID,
 					Label:      w.Label,
 					Short:      quota.ShortLabel(w.Label),
+					Kind:       quota.Kind(w.Window),
 					Remaining:  w.Remaining,
 					Reset:      w.Reset,
 					Source:     string(w.Source),
@@ -438,33 +480,13 @@ func (e *Engine) Status() Status {
 	return status
 }
 
-// groupOrder lists quota groups in the order the page shows them, the same
-// as SERVICE_ORDER in internal/web/page.js. Other groups follow by key.
-var groupOrder = []string{"Claude", "ChatGPT", "Gemini", "Fable", "Claude / GPT"}
-
-func groupRank(sourceLabel string) int {
-	for i, label := range groupOrder {
-		if label == sourceLabel {
-			return i
-		}
-	}
-	return len(groupOrder)
-}
-
-func providerRank(provider string) int {
-	for i, name := range config.SupportedProviders {
-		if name == provider {
-			return i
-		}
-	}
-	return len(config.SupportedProviders)
-}
-
 // Series is the history of one window.
 type Series struct {
-	Group       string       `json:"group"`
-	Window      string       `json:"window"`
-	WindowLabel string       `json:"window_label"`
+	Group       string `json:"group"`
+	Window      string `json:"window"`
+	WindowLabel string `json:"window_label"`
+	// Kind is "5h", "7d" or empty for a window of another length.
+	Kind        string       `json:"kind,omitempty"`
 	Label       string       `json:"label"`
 	SourceLabel string       `json:"source_label"` // label without the account suffix
 	Provider    string       `json:"provider"`
@@ -564,7 +586,12 @@ func (e *Engine) History(span time.Duration) (HistoryResponse, error) {
 		key := record.Group + "|" + record.Window
 		s, ok := series[key]
 		if !ok {
-			s = &Series{Group: record.Group, Window: record.Window, WindowLabel: record.Window}
+			// Windows no longer reported are known by their ID.
+			kind := quota.Kind(quota.Window{ID: record.Window})
+			s = &Series{Group: record.Group, Window: record.Window, WindowLabel: record.Window, Kind: kind}
+			if kind != "" {
+				s.WindowLabel = kind
+			}
 			if group, ok := labels[record.Group]; ok {
 				s.Label = group.Label
 				s.SourceLabel = group.SourceLabel
@@ -573,6 +600,7 @@ func (e *Engine) History(span time.Duration) (HistoryResponse, error) {
 				for _, w := range group.Windows {
 					if w.ID == record.Window {
 						s.WindowLabel = quota.ShortLabel(w.Label)
+						s.Kind = quota.Kind(w.Window)
 					}
 				}
 			} else {

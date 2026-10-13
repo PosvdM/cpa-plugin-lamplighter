@@ -4,10 +4,10 @@
   var API = "/v0/management/lamplighter";
   var CONFIG_API = "/v0/management/plugins/lamplighter/config";
   var KEY_STORE = "lamplighter-management-key";
-  var PROVIDERS = ["codex", "claude", "antigravity"];
 
   var key = "";
   var status = null;
+  var settingsFilled = false;
   var rawConfig = {};
   var chartWindow = "5h";
   var range = "6h";
@@ -139,12 +139,8 @@
       start_hour: "每日开始（时）", end_hour: "每日结束（时）", end_grace: "结束后宽限（分钟）",
       grace: "重置后延迟（秒）", failure_retry: "失败重试间隔（秒）", max_transient: "临时错误上限（次）",
       services: "服务", col_service: "服务", col_monitor: "监控", col_ignition_model: "点火模型",
-      monitor_codex: "监控 ChatGPT", ignite_codex: "点火 ChatGPT",
-      monitor_claude: "监控 Claude", ignite_claude: "点火 Claude",
-      monitor_antigravity: "监控 Antigravity", ignite_antigravity: "点火 Antigravity",
-      model_auto_codex: "自动：最新的 Luna", model_auto_claude: "自动：最新的 Haiku", model_auto_antigravity: "自动：最新的 Flash",
-      ag_groups: "Antigravity 点火额度组",
-      ag_groups_hint: "Antigravity 按模型分成多个独立的 5 小时额度组。只有勾选的额度组会自动点火；Claude / GPT 额度组较小，默认不点。",
+      monitor_service: "监控 {0}", ignite_service: "点火 {0}", model_auto: "自动：{0}",
+      ignite_groups: "{0} 点火额度组", no_ignition: "不支持点火", list_or: " 或 ",
       codex_reset_enabled: "转发 Did Codex Reset 发布的 Codex 重置信号",
       codex_reset_pending: "首次开启时推送当前待生效的排期",
       chart_prefs: "额度图表", remember_chart_filters: "记住筛选条件",
@@ -165,7 +161,7 @@
       no_models_key: "未设置模型列表 API key，自动点火无法选择模型。",
       remaining_aria: "{0} {1} 剩余",
       source_passive: "被动", source_active: "主动", updated: "更新于 {0}",
-      no_accounts: "没有可监控的 ChatGPT、Claude 或 Antigravity 凭证。",
+      no_accounts: "没有可监控的 {0} 凭证。",
       first_query: "CPA 启动约 20 秒后开始第一次查询。",
       refresh: "刷新", refreshed: "已刷新 {0}",
       cooldown_stale: "额度已恢复，但 CPA 仍冷却到 {0}，期间的请求和点火都会被拒绝；在 CPA 管理中心清除这个账号的冷却。",
@@ -263,12 +259,8 @@
       start_hour: "Daily start (hour)", end_hour: "Daily end (hour)", end_grace: "Grace after end (min)",
       grace: "Delay after reset (s)", failure_retry: "Retry after failure (s)", max_transient: "Transient error limit",
       services: "Services", col_service: "Service", col_monitor: "Monitor", col_ignition_model: "Ignition model",
-      monitor_codex: "Monitor ChatGPT", ignite_codex: "Ignite ChatGPT",
-      monitor_claude: "Monitor Claude", ignite_claude: "Ignite Claude",
-      monitor_antigravity: "Monitor Antigravity", ignite_antigravity: "Ignite Antigravity",
-      model_auto_codex: "Auto: latest Luna", model_auto_claude: "Auto: latest Haiku", model_auto_antigravity: "Auto: latest Flash",
-      ag_groups: "Antigravity ignition groups",
-      ag_groups_hint: "Antigravity splits quota into separate 5-hour groups by model. Only checked groups are ignited; the Claude / GPT group is small and off by default.",
+      monitor_service: "Monitor {0}", ignite_service: "Ignite {0}", model_auto: "Auto: {0}",
+      ignite_groups: "{0} ignition groups", no_ignition: "No ignition", list_or: " or ",
       codex_reset_enabled: "Forward Codex reset signals published by Did Codex Reset",
       codex_reset_pending: "When first turned on, send the pending schedule",
       chart_prefs: "Quota chart", remember_chart_filters: "Remember the filters",
@@ -289,7 +281,7 @@
       no_models_key: "No model list API key is set, so ignition cannot pick a model.",
       remaining_aria: "{0} {1} remaining",
       source_passive: "passive", source_active: "active", updated: "updated {0}",
-      no_accounts: "No ChatGPT, Claude or Antigravity credentials to monitor.",
+      no_accounts: "No {0} credentials to monitor.",
       first_query: "The first query runs about 20 seconds after CPA starts.",
       refresh: "Refresh", refreshed: "Refreshed {0}",
       cooldown_stale: "Quota is back, but CPA cools this account down until {0} and rejects requests and ignition until then. Clear the cooldown in the CPA Management Center.",
@@ -550,9 +542,21 @@
     return w.label;
   }
 
+  // The providers come from the status API in display order.
+  function providerList() { return (status && status.providers) || []; }
+
   function providerTitle(provider) {
-    return { codex: "ChatGPT", claude: "Claude", antigravity: "Antigravity" }[provider] || provider;
+    var hit = providerList().filter(function (p) { return p.id === provider; })[0];
+    return hit ? hit.title : provider;
   }
+
+  // "A、B 或 C" in Chinese, "A, B or C" in English.
+  function listText(items) {
+    if (items.length < 2) return items.join("");
+    return items.slice(0, -1).join(lang === "zh" ? "、" : ", ") + translate("list_or") + items[items.length - 1];
+  }
+
+  function localized(text) { return text ? (lang === "zh" ? text.zh : text.en) : ""; }
 
   function badge(kind, text) {
     return el("span", { class: "badge badge-" + kind }, [el("span", { class: "badge-dot" }), document.createTextNode(text)]);
@@ -631,7 +635,8 @@
     var box = $("accounts");
     clear(box);
     if (!status.accounts.length) {
-      box.appendChild(el("p", { class: "empty", text: status.running ? translate("no_accounts") : translate("first_query") }));
+      var titles = providerList().map(function (p) { return p.title; });
+      box.appendChild(el("p", { class: "empty", text: status.running ? translate("no_accounts", listText(titles)) : translate("first_query") }));
       return;
     }
     var meterIndex = 0;
@@ -790,24 +795,69 @@
     more.textContent = eventsExpanded ? translate("collapse") : translate("show_more", Math.min(status.events.length, 100));
   }
 
-  // The model inputs show, after the automatic rule, the model the next
-  // ignition starts with.
-  function renderModelHints() {
+  // One settings row per provider, built when the provider list changes.
+  // Providers that cannot be ignited show no ignition switch or model; those
+  // with quota groups to choose get a row of group checkboxes.
+  function renderServiceRows() {
+    var body = $("service-rows");
+    var list = providerList();
+    var ids = list.map(function (p) { return p.id; }).join(",");
+    if (body.getAttribute("data-ids") === ids) return false;
+    clear(body);
+    list.forEach(function (p) {
+      var cells = [
+        el("td", { class: "strong", text: p.title }),
+        el("td", {}, [el("input", { name: "providers." + p.id + ".monitor", type: "checkbox", "data-service": p.id, "data-label": "monitor_service" })])
+      ];
+      if (p.ignite) {
+        cells.push(el("td", {}, [el("input", { name: "providers." + p.id + ".ignite", type: "checkbox", "data-service": p.id, "data-label": "ignite_service" })]));
+        cells.push(el("td", {}, [el("input", { name: "providers." + p.id + ".model", type: "text", "data-service": p.id })]));
+      } else {
+        cells.push(el("td", { class: "muted", text: "—" }));
+        cells.push(el("td", { class: "muted", "data-i18n": "no_ignition", text: translate("no_ignition") }));
+      }
+      body.appendChild(el("tr", {}, cells));
+      if (p.groups && p.groups.length) {
+        body.appendChild(el("tr", { class: "sub-row" }, [el("td"), el("td", { colspan: "3" }, [
+          el("span", { class: "field-label", "data-groups-label": p.id }),
+          el("div", { class: "checks", "data-groups": p.id }),
+          el("span", { class: "hint", "data-groups-hint": p.id })
+        ])]));
+      }
+    });
+    body.setAttribute("data-ids", ids);
+    return true;
+  }
+
+  // Labels of the service rows in the current language. The model inputs
+  // show, after the automatic rule, the model the next ignition starts with.
+  function renderServiceText() {
     var next = status.next_models || {};
     var form = $("settings");
-    ["codex", "claude", "antigravity"].forEach(function (provider) {
-      var input = form.elements["providers." + provider + ".model"];
-      if (!input) return;
-      var text = translate("model_auto_" + provider);
-      if (next[provider]) text += " - " + next[provider];
-      input.setAttribute("placeholder", text);
+    providerList().forEach(function (p) {
+      Array.prototype.forEach.call(form.querySelectorAll("[data-service='" + p.id + "'][data-label]"), function (input) {
+        input.setAttribute("aria-label", translate(input.getAttribute("data-label"), p.title));
+      });
+      var model = form.elements["providers." + p.id + ".model"];
+      if (model) {
+        var text = translate("model_auto", localized(p.model_hint));
+        if (next[p.id]) text += " - " + next[p.id];
+        model.setAttribute("placeholder", text);
+      }
+      var label = form.querySelector("[data-groups-label='" + p.id + "']");
+      if (label) label.textContent = translate("ignite_groups", p.title);
+      var hint = form.querySelector("[data-groups-hint='" + p.id + "']");
+      if (hint) hint.textContent = localized(p.groups_hint);
     });
   }
 
   function renderStatus() {
     renderHeader();
     renderNotices();
-    renderModelHints();
+    // Rows built after the first fill need their values.
+    if (renderServiceRows() && settingsFilled) fillSettings({ providers: true });
+    renderServiceText();
+    if (renderWindowButtons() && history) loadHistory();
     renderAccounts();
     renderTargets();
     renderEvents();
@@ -847,10 +897,9 @@
   };
   // The default ranges are the shortest that cover one whole window.
   var DEFAULT_RANGE = { "5h": "6h", "7d": "8d" };
-  // Default row order by quota name; other quotas follow in API order. The
-  // status API orders the quota groups of an account the same way (groupOrder
-  // in internal/engine/api.go).
-  var SERVICE_ORDER = ["Claude", "ChatGPT", "Gemini", "Fable", "Claude / GPT"];
+  // The default row order is the status API's group_order, by quota name;
+  // other quotas follow in API order. The status API orders the quota groups
+  // of an account the same way.
   var LANE = 22, LANE_GAP = 6, AXIS_H = 22, EVENT_H = 24;
   // A rise of this many points between two samples is a reset.
   var RESET_JUMP = 5;
@@ -875,10 +924,36 @@
 
   function unixDate(t) { return new Date(t * 1000); }
 
-  function windowKind(series) {
-    if (series.window === "five-hour" || series.window_label === "5h") return "5h";
-    if (series.window === "seven-day") return "7d";
-    return series.window_label || series.window;
+  // "5h", "7d" or empty for a window of another length, which the chart
+  // does not show.
+  function windowKind(series) { return series.kind || ""; }
+
+  // The chart offers the window kinds the accounts report, both while none
+  // are known.
+  function windowKinds() {
+    var seen = {};
+    (status.accounts || []).forEach(function (a) {
+      (a.groups || []).forEach(function (g) {
+        (g.windows || []).forEach(function (w) { if (w.kind) seen[w.kind] = true; });
+      });
+    });
+    var kinds = ["5h", "7d"].filter(function (k) { return seen[k]; });
+    return kinds.length ? kinds : ["5h", "7d"];
+  }
+
+  // Shows the window buttons of the reported kinds. When the chosen kind is
+  // not among them, it switches to the first one and returns true.
+  function renderWindowButtons() {
+    var kinds = windowKinds();
+    Array.prototype.forEach.call($("window-buttons").querySelectorAll("button"), function (b) {
+      b.hidden = kinds.indexOf(b.getAttribute("data-value")) < 0;
+    });
+    if (kinds.indexOf(chartWindow) >= 0) return false;
+    chartWindow = kinds[0];
+    range = rangeFor(chartWindow);
+    pressSegment("window-buttons", chartWindow);
+    renderRangeButtons();
+    return true;
   }
 
   function valueAt(points, t) {
@@ -943,15 +1018,20 @@
     history.series.forEach(function (s) {
       if (!s.points || !s.points.length || windowKind(s) !== chartWindow) return;
       var meta = info[s.group + "|" + s.window] || {};
-      var id = s.provider + "|" + (s.source_label || s.label);
+      // A window with its own label, such as "7 Day Opus" next to the
+      // 7-day window of the same group label, gets a row of its own.
+      var extra = s.window_label && s.window_label !== chartWindow ? " · " + s.window_label : "";
+      var source = (s.source_label || s.label) + extra;
+      var id = s.provider + "|" + source;
       if (!byLabel[id]) { byLabel[id] = []; order.push(id); }
-      byLabel[id].push({ id: s.group + "|" + s.window, name: s.label, source: s.source_label || s.label, sub: meta.email || s.auth_index || "", group: s.group,
+      byLabel[id].push({ id: s.group + "|" + s.window, name: s.label + extra, source: source, sub: meta.email || s.auth_index || "", group: s.group,
         points: s.points, reset: meta.reset, last: s.points[s.points.length - 1][1] });
     });
     var rows = order.map(function (id, index) {
       var kids = byLabel[id];
-      var rank = SERVICE_ORDER.indexOf(kids[0].source);
-      if (rank < 0) rank = SERVICE_ORDER.length + index;
+      var serviceOrder = status.group_order || [];
+      var rank = serviceOrder.indexOf(kids[0].source);
+      if (rank < 0) rank = serviceOrder.length + index;
       if (kids.length === 1) { kids[0].order = rank; return kids[0]; }
       var resets = kids.map(function (k) { return k.reset; }).filter(Boolean);
       return { id: "group:" + id, name: kids[0].source, children: kids, points: pooled(kids, limit), order: rank,
@@ -1546,7 +1626,7 @@
   function restoreChartFilters() {
     if (!rememberChart()) return;
     var saved = storedChartFilters();
-    if (saved.window === "5h" || saved.window === "7d") chartWindow = saved.window;
+    if (windowKinds().indexOf(saved.window) >= 0) chartWindow = saved.window;
     if (saved.sort === "default" || saved.sort === "low") chartSort = saved.sort;
     range = rangeFor(chartWindow);
     pressSegment("window-buttons", chartWindow);
@@ -1581,26 +1661,31 @@
     target[parts[parts.length - 1]] = value;
   }
 
-  // Antigravity quota groups offered as checkboxes: the groups seen on the
-  // accounts plus any configured ones, in a stable order.
-  function antigravityGroups(selected) {
-    var names = ["Gemini", "Claude / GPT"];
+  // Quota groups offered as ignition checkboxes: the provider's groups, the
+  // groups seen on its accounts and any configured ones, in a stable order.
+  function groupChoices(p, selected) {
+    var names = p.groups.slice();
     (status.accounts || []).forEach(function (a) {
-      if (a.provider !== "antigravity") return;
+      if (a.provider !== p.id) return;
       (a.groups || []).forEach(function (g) { if (names.indexOf(g.source_label) < 0) names.push(g.source_label); });
     });
     (selected || []).forEach(function (name) { if (names.indexOf(name) < 0) names.push(name); });
     return names;
   }
 
-  function renderGroupChecks(selected) {
-    var box = $("ag-groups");
+  function renderGroupChecks(p, selected) {
+    var box = document.querySelector("[data-groups='" + p.id + "']");
+    if (!box) return;
     clear(box);
-    antigravityGroups(selected).forEach(function (name) {
-      var input = el("input", { type: "checkbox", "data-ag-group": name });
+    groupChoices(p, selected).forEach(function (name) {
+      var input = el("input", { type: "checkbox", "data-group": name });
       input.checked = (selected || []).some(function (s) { return s.toLowerCase() === name.toLowerCase(); });
       box.appendChild(el("label", { class: "inline" }, [input, document.createTextNode(name)]));
     });
+  }
+
+  function providersWithGroups() {
+    return providerList().filter(function (p) { return p.groups && p.groups.length; });
   }
 
   function timezoneText() {
@@ -1680,9 +1765,13 @@
       fillInput(input, effective);
     });
     Array.prototype.forEach.call(document.querySelectorAll(".mode-switch"), function (box) { placeThumb(box, false); });
-    if (!keys || (keys.providers && !$("ag-groups").contains(active))) {
-      renderGroupChecks(getPath(effective, "providers.antigravity.groups"));
-    }
+    providersWithGroups().forEach(function (p) {
+      var box = document.querySelector("[data-groups='" + p.id + "']");
+      if (!keys || (keys.providers && !(box && box.contains(active)))) {
+        renderGroupChecks(p, getPath(effective, "providers." + p.id + ".groups"));
+      }
+    });
+    settingsFilled = true;
     $("timezone-note").textContent = timezoneText();
   }
 
@@ -1736,10 +1825,13 @@
       setPath(patch, input.name, value);
     });
     if (top === "providers") {
-      PROVIDERS.forEach(function (p) { if (!patch.providers[p]) patch.providers[p] = {}; });
-      patch.providers.antigravity.groups = Array.prototype.filter.call(
-        document.querySelectorAll("[data-ag-group]"), function (input) { return input.checked; }
-      ).map(function (input) { return input.getAttribute("data-ag-group"); });
+      if (!patch.providers) patch.providers = {};
+      providerList().forEach(function (p) { if (!patch.providers[p.id]) patch.providers[p.id] = {}; });
+      providersWithGroups().forEach(function (p) {
+        patch.providers[p.id].groups = Array.prototype.filter.call(
+          document.querySelectorAll("[data-groups='" + p.id + "'] [data-group]"), function (input) { return input.checked; }
+        ).map(function (input) { return input.getAttribute("data-group"); });
+      });
     }
     // A fixed offset from older versions is removed so the time zone follows CPA.
     if (rawConfig.timezone_offset_hours !== undefined) patch.timezone_offset_hours = null;
@@ -1760,7 +1852,7 @@
 
   function saveField(event) {
     var input = event.target;
-    var top = input.hasAttribute("data-ag-group") ? "providers" : input.name && topKey(input.name);
+    var top = input.hasAttribute("data-group") ? "providers" : input.name && topKey(input.name);
     if (!top) return;
     if (input.type === "number") {
       if (!input.checkValidity()) { input.reportValidity(); return; }

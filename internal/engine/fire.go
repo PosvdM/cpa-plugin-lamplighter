@@ -11,8 +11,8 @@ import (
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/config"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/host"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/ignite"
-	"github.com/PosvdM/cpa-plugin-lamplighter/internal/models"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/notify"
+	"github.com/PosvdM/cpa-plugin-lamplighter/internal/providers"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/quota"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginapi"
 )
@@ -51,6 +51,9 @@ type target struct {
 
 // groupIgnitable reports whether ignition is enabled for the group.
 func groupIgnitable(cfg config.Config, provider, sourceLabel string) bool {
+	if spec := providers.Lookup(provider); spec == nil || spec.Ignition == nil {
+		return false
+	}
 	p := cfg.Provider(provider)
 	if !p.Ignite {
 		return false
@@ -290,6 +293,7 @@ func (e *Engine) group(key string) (GroupView, bool) {
 // credential, and once per ignition when the provider refuses a model.
 func (e *Engine) execute(ctx context.Context, cfg config.Config, t target) (string, pluginapi.HostModelExecutionResponse, error) {
 	var empty pluginapi.HostModelExecutionResponse
+	spec := providers.Lookup(t.group.Provider)
 	override := configuredModel(cfg, t.group.Provider, t.group.SourceLabel)
 	ts := e.state.Target(t.group.Key)
 
@@ -305,7 +309,7 @@ func (e *Engine) execute(ctx context.Context, cfg config.Config, t target) (stri
 	case err != nil:
 		return "", empty, err
 	default:
-		candidates, err = models.Candidates(t.group.Provider, t.group.SourceLabel, override, available)
+		candidates, err = providers.Candidates(spec, t.group.SourceLabel, override, available)
 		if err != nil {
 			return "", empty, fmt.Errorf("%w: %v", ignite.ErrNoModel, err)
 		}
@@ -320,16 +324,20 @@ func (e *Engine) execute(ctx context.Context, cfg config.Config, t target) (stri
 	var lastErr, refusedErr error
 	refused := ""
 	for i, model := range candidates {
-		req, err := ignite.BuildRequest(t.group.Provider, model)
+		protocol, body, err := providers.Request(spec, model)
 		if err != nil {
 			return "", empty, err
 		}
+		forced := t.cred.HostProvider
+		if forced == "" {
+			forced = t.group.Provider
+		}
 		resp, err := e.host.ModelExecute(pluginapi.HostModelExecutionRequest{
-			EntryProtocol:  req.EntryProtocol,
-			ExitProtocol:   req.EntryProtocol,
+			EntryProtocol:  protocol,
+			ExitProtocol:   protocol,
 			Model:          model,
-			Body:           req.Body,
-			ForcedProvider: t.group.Provider,
+			Body:           body,
+			ForcedProvider: forced,
 			AuthID:         t.cred.ID,
 		})
 		if err == nil && (resp.StatusCode < 200 || resp.StatusCode >= 300) {
@@ -415,11 +423,6 @@ func (e *Engine) skipRefused(key string, candidates []string) []string {
 	return out
 }
 
-// nextModelGroups is the quota group whose automatic model the settings show
-// for each provider. Antigravity shows the Gemini group, which matches the
-// "newest Flash" description.
-var nextModelGroups = map[string]string{"codex": "", "claude": "", "antigravity": "Gemini"}
-
 // maybeReadModels reads the CPA model list after a start and after a change
 // of the CPA address or models key, so that the settings show the next
 // automatic model without waiting for an ignition. Otherwise the list is only
@@ -457,10 +460,13 @@ func (e *Engine) noteModels(available []string, err error) {
 		return
 	}
 	e.modelsErr = ""
-	next := make(map[string]string, len(nextModelGroups))
-	for provider, group := range nextModelGroups {
-		if candidates, err := models.Candidates(provider, group, "", available); err == nil {
-			next[provider] = candidates[0]
+	next := map[string]string{}
+	for _, p := range providers.All() {
+		if p.Ignition == nil {
+			continue
+		}
+		if candidates, err := providers.Candidates(p, p.Ignition.HintGroup, "", available); err == nil {
+			next[p.ID] = candidates[0]
 		}
 	}
 	e.nextModels = next
@@ -490,10 +496,14 @@ func (e *Engine) confirmed(key string, start, now time.Time) bool {
 
 // confirm checks that the ignition started a window. Claude responses carry
 // the new reset in their headers; Codex reports it through the usage record
-// of the same request. When neither arrives, and for Antigravity, the
-// credential is queried actively.
+// of the same request. When neither arrives, and for providers without quota
+// in their headers, the credential is queried actively.
 func (e *Engine) confirm(ctx context.Context, cfg config.Config, t target, start time.Time, resp pluginapi.HostModelExecutionResponse) error {
-	if groups := quota.ParsePassive(t.group.Provider, resp.Headers, e.now()); len(groups) > 0 {
+	var groups []quota.RawGroup
+	if spec := providers.Lookup(t.group.Provider); spec != nil && spec.Headers != nil {
+		groups = spec.Headers(resp.Headers, e.now())
+	}
+	if len(groups) > 0 {
 		now := e.now()
 		e.passiveAt[t.cred.AuthIndex] = now
 		e.notePassiveFable(t.cred, groups)
