@@ -45,6 +45,11 @@ body:
       label: 额度接口返回 / Quota API response
       description: 在额度页打开浏览器开发者工具的网络面板，复制 api-call 请求的响应 / On the quota page, open the browser's developer tools, Network tab, and copy the response of the api-call request
       render: json
+  - type: textarea
+    id: notes
+    attributes:
+      label: 补充说明 / Additional notes
+      description: 其他有助于支持这个服务的信息，例如套餐类型、官方文档链接、特殊的重置规则 / Anything else that helps, such as plan type, links to official docs or unusual reset rules
   - type: checkboxes
     id: test
     attributes:
