@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/PosvdM/cpa-plugin-lamplighter/internal/providers"
 	"gopkg.in/yaml.v3"
 )
 
@@ -144,28 +145,24 @@ type Config struct {
 	RememberChartFilters bool `yaml:"remember_chart_filters" json:"remember_chart_filters"`
 }
 
-// SupportedProviders lists the providers Lamplighter monitors, in display order.
-var SupportedProviders = []string{"codex", "claude", "antigravity"}
-
 // DefaultProvider returns the built-in settings for provider.
 func DefaultProvider(provider string) Provider {
-	switch provider {
-	case "codex", "claude":
-		return Provider{Monitor: true, Ignite: true}
-	case "antigravity":
-		// The Claude / GPT bucket is much smaller than the Gemini one, so only
-		// Gemini is eligible for ignition unless groups says otherwise.
-		return Provider{Monitor: true, Ignite: false, Groups: []string{"Gemini"}}
-	default:
+	p := providers.Lookup(provider)
+	if p == nil {
 		return Provider{}
 	}
+	out := Provider{Monitor: p.Monitor, Ignite: p.Ignite && p.Ignition != nil}
+	if p.Ignition != nil {
+		out.Groups = append([]string(nil), p.Ignition.DefaultGroups...)
+	}
+	return out
 }
 
 // Default returns the configuration used when a key is absent.
 func Default() Config {
-	providers := make(map[string]Provider, len(SupportedProviders))
-	for _, name := range SupportedProviders {
-		providers[name] = DefaultProvider(name)
+	defaults := make(map[string]Provider)
+	for _, id := range providers.IDs() {
+		defaults[id] = DefaultProvider(id)
 	}
 	return Config{
 		BarkGroup:             "CPA",
@@ -191,7 +188,7 @@ func Default() Config {
 			FailureBackoffMultiplier: 3,
 			PostSuccessHoldSeconds:   60,
 		},
-		Providers: providers,
+		Providers: defaults,
 		CodexResetUpdates: CodexResetUpdates{
 			Enabled:              false,
 			PollSeconds:          300,
@@ -231,12 +228,15 @@ func Parse(raw []byte) (Config, error) {
 		}
 		// Each provider block starts from its own defaults so that a partial
 		// block such as {ignite: true} keeps the other keys.
-		cfg.Providers = make(map[string]Provider, len(SupportedProviders))
-		for _, name := range SupportedProviders {
-			cfg.Providers[name] = DefaultProvider(name)
+		cfg.Providers = make(map[string]Provider)
+		for _, id := range providers.IDs() {
+			cfg.Providers[id] = DefaultProvider(id)
 		}
 		for name, node := range overlay.Providers {
 			key := strings.ToLower(strings.TrimSpace(name))
+			if p := providers.Lookup(key); p != nil {
+				key = p.ID
+			}
 			provider := DefaultProvider(key)
 			if err := node.Decode(&provider); err != nil {
 				return Default(), fmt.Errorf("parse providers.%s: %w", name, err)

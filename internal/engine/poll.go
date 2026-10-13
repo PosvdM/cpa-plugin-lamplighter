@@ -14,6 +14,7 @@ import (
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/config"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/ignite"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/notify"
+	"github.com/PosvdM/cpa-plugin-lamplighter/internal/providers"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/quota"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/store"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginapi"
@@ -21,13 +22,16 @@ import (
 
 // Cred is one monitored credential.
 type Cred struct {
-	ID          string `json:"id"`
-	AuthIndex   string `json:"auth_index"`
-	Name        string `json:"name"`
-	Provider    string `json:"provider"`
-	Email       string `json:"email,omitempty"`
-	Disabled    bool   `json:"disabled"`
-	Unavailable bool   `json:"unavailable"`
+	ID        string `json:"id"`
+	AuthIndex string `json:"auth_index"`
+	Name      string `json:"name"`
+	Provider  string `json:"provider"`
+	// HostProvider is the provider name CPA reports, which can be an alias
+	// of Provider, such as "kimi-ai" for "kimi".
+	HostProvider string `json:"host_provider,omitempty"`
+	Email        string `json:"email,omitempty"`
+	Disabled     bool   `json:"disabled"`
+	Unavailable  bool   `json:"unavailable"`
 	// CooldownUntil is when CPA lets the credential serve requests again,
 	// or zero when it is not cooling down.
 	CooldownUntil time.Time `json:"cooldown_until,omitempty"`
@@ -85,8 +89,8 @@ type sampleMark struct {
 // ObserveUsage receives a usage record from usage.handle. It only parses the
 // record and queues it, so the host call returns immediately.
 func (e *Engine) ObserveUsage(record pluginapi.UsageRecord) {
-	provider := strings.ToLower(strings.TrimSpace(record.Provider))
-	if provider != "claude" && provider != "codex" {
+	p := providers.Lookup(record.Provider)
+	if p == nil || p.Headers == nil {
 		return
 	}
 	authIndex := strings.TrimSpace(record.AuthIndex)
@@ -98,7 +102,7 @@ func (e *Engine) ObserveUsage(record pluginapi.UsageRecord) {
 		at = e.now()
 	}
 	select {
-	case e.usageCh <- usageEvent{provider: provider, authIndex: authIndex, header: record.ResponseHeaders, at: at}:
+	case e.usageCh <- usageEvent{provider: p.ID, authIndex: authIndex, header: record.ResponseHeaders, at: at}:
 	default:
 		// The loop is busy; dropping one passive sample is harmless.
 	}
@@ -119,7 +123,7 @@ func (e *Engine) applyUsage(ctx context.Context, ev usageEvent) {
 	now := e.now()
 	// Relative reset times count from the request, not from when the usage
 	// record is processed; a long request delivers its record late.
-	groups := quota.ParsePassive(ev.provider, ev.header, ev.at)
+	groups := providers.Lookup(ev.provider).Headers(ev.header, ev.at)
 	if len(groups) == 0 {
 		return
 	}
@@ -143,7 +147,7 @@ func (e *Engine) applyUsage(ctx context.Context, ev usageEvent) {
 // the log line shows whether a Fable request does.
 func (e *Engine) notePassiveFable(cred *Cred, groups []quota.RawGroup) {
 	for _, g := range groups {
-		if g.Key != quota.FableGroupKey || e.fableSeen[cred.AuthIndex] {
+		if g.Key != providers.FableGroupKey || e.fableSeen[cred.AuthIndex] {
 			continue
 		}
 		if e.fableSeen == nil {
@@ -152,7 +156,7 @@ func (e *Engine) notePassiveFable(cred *Cred, groups []quota.RawGroup) {
 		e.fableSeen[cred.AuthIndex] = true
 		w := g.Windows[0]
 		e.logf("info", "首次从响应头读到 Fable 额度：%s，剩余 %.1f%%，重置 %s",
-			labelFor(quota.ProviderTitle(cred.Provider), cred), w.Remaining, w.Reset.Format(time.RFC3339))
+			labelFor(providers.Title(cred.Provider), cred), w.Remaining, w.Reset.Format(time.RFC3339))
 	}
 }
 
@@ -182,15 +186,6 @@ func maskedSuffix(email string, ordinal int) string {
 	return "#" + strconv.Itoa(ordinal)
 }
 
-func supported(provider string) bool {
-	for _, name := range config.SupportedProviders {
-		if name == provider {
-			return true
-		}
-	}
-	return false
-}
-
 // loadCreds reads the credential list and assigns account suffixes. A
 // provider with one monitored credential needs no suffix.
 func (e *Engine) loadCreds(cfg config.Config) ([]*Cred, error) {
@@ -201,23 +196,26 @@ func (e *Engine) loadCreds(cfg config.Config) ([]*Cred, error) {
 	var creds []*Cred
 	counts := map[string]int{}
 	for _, entry := range entries {
-		provider := strings.ToLower(strings.TrimSpace(entry.Provider))
-		if provider == "" {
-			provider = strings.ToLower(strings.TrimSpace(entry.Type))
+		hostProvider := strings.ToLower(strings.TrimSpace(entry.Provider))
+		if hostProvider == "" {
+			hostProvider = strings.ToLower(strings.TrimSpace(entry.Type))
 		}
-		if !supported(provider) || entry.Disabled || strings.TrimSpace(entry.AuthIndex) == "" {
+		p := providers.Lookup(hostProvider)
+		if p == nil || entry.Disabled || strings.TrimSpace(entry.AuthIndex) == "" {
 			continue
 		}
+		provider := p.ID
 		if !cfg.Provider(provider).Monitor {
 			continue
 		}
 		creds = append(creds, &Cred{
-			ID:          entry.ID,
-			AuthIndex:   entry.AuthIndex,
-			Name:        entry.Name,
-			Provider:    provider,
-			Email:       credentialEmail(entry),
-			Unavailable: entry.Unavailable,
+			ID:           entry.ID,
+			AuthIndex:    entry.AuthIndex,
+			Name:         entry.Name,
+			Provider:     provider,
+			HostProvider: hostProvider,
+			Email:        credentialEmail(entry),
+			Unavailable:  entry.Unavailable,
 		})
 		if entry.Unavailable {
 			creds[len(creds)-1].CooldownUntil = entry.NextRetryAfter
@@ -252,9 +250,10 @@ func (e *Engine) loadCreds(cfg config.Config) ([]*Cred, error) {
 // shouldSkipActive reports whether the active query of cred can be skipped at
 // slot because a passive update arrived shortly before it. Skipping stops
 // after PassiveSkipMaxMinutes so that windows without passive data, such as
-// Claude's Fable window, still refresh.
+// Claude's Fable window, still refresh. Providers without quota in their
+// response headers are never skipped.
 func (e *Engine) shouldSkipActive(cfg config.Config, cred *Cred, slot, now time.Time) bool {
-	if cred.Provider == "antigravity" || cfg.PassiveSkipSeconds <= 0 {
+	if p := providers.Lookup(cred.Provider); p == nil || p.Headers == nil || cfg.PassiveSkipSeconds <= 0 {
 		return false
 	}
 	passive, ok := e.passiveAt[cred.AuthIndex]
@@ -294,7 +293,7 @@ func (e *Engine) poll(ctx context.Context, cfg config.Config, slot time.Time, on
 		}
 		if err := e.refreshCred(ctx, cfg, cred); err != nil {
 			errs[cred.AuthIndex] = err.Error()
-			e.logf("warn", "额度刷新失败：%s：%v", labelFor(quota.ProviderTitle(cred.Provider), cred), err)
+			e.logf("warn", "额度刷新失败：%s：%v", labelFor(providers.Title(cred.Provider), cred), err)
 		}
 	}
 	e.mu.Lock()
@@ -318,8 +317,13 @@ func (e *Engine) refreshCred(ctx context.Context, cfg config.Config, cred *Cred)
 	if err != nil {
 		return fmt.Errorf("读取凭证文件失败：%w", err)
 	}
-	secret := quota.ParseSecret(raw)
-	groups, err := quota.FetchActive(ctx, e.egress, cred.Provider, secret, e.now())
+	p := providers.Lookup(cred.Provider)
+	if p == nil {
+		return fmt.Errorf("不支持的额度 provider: %s", cred.Provider)
+	}
+	credential := providers.ParseCredential(raw)
+	credential.Provider = cred.HostProvider
+	groups, err := providers.Fetch(ctx, p, e.egress, credential, e.now())
 	if err != nil {
 		return err
 	}
@@ -343,7 +347,7 @@ func (e *Engine) applyGroups(ctx context.Context, cfg config.Config, cred *Cred,
 			group = &GroupView{Key: key, Provider: cred.Provider, AuthIndex: cred.AuthIndex}
 			e.groups[key] = group
 		}
-		group.SourceLabel = providerLabel(cred.Provider, rg.SourceLabel)
+		group.SourceLabel = rg.SourceLabel
 		group.Label = labelFor(group.SourceLabel, cred)
 		if source == quota.SourceActive {
 			group.Windows = group.Windows[:0]

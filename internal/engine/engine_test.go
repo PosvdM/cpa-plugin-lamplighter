@@ -16,6 +16,7 @@ import (
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/config"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/host"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/notify"
+	"github.com/PosvdM/cpa-plugin-lamplighter/internal/providers"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/quota"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginapi"
 )
@@ -122,11 +123,11 @@ func standardHost(c *clock) *fakeHost {
 		http: func(req pluginapi.HTTPRequest) pluginapi.HTTPResponse {
 			reset := c.t.Add(3 * time.Hour)
 			switch {
-			case req.URL == quota.CodexUsageURL:
+			case req.URL == providers.CodexUsageURL:
 				body := `{"rate_limit":{"primary_window":{"used_percent":40,"limit_window_seconds":18000,"reset_at":` +
 					strconv.FormatInt(reset.Unix(), 10) + `},"secondary_window":{"used_percent":10,"limit_window_seconds":604800,"reset_after_seconds":86400}}}`
 				return pluginapi.HTTPResponse{StatusCode: 200, Body: []byte(body)}
-			case req.URL == quota.ClaudeUsageURL:
+			case req.URL == providers.ClaudeUsageURL:
 				body := `{"five_hour":{"utilization":30,"resets_at":"` + reset.UTC().Format(time.RFC3339) + `"},"seven_day":{"utilization":20,"resets_at":"` +
 					reset.Add(48*time.Hour).UTC().Format(time.RFC3339) + `"}}`
 				return pluginapi.HTTPResponse{StatusCode: 200, Body: []byte(body)}
@@ -158,7 +159,7 @@ func TestPollBuildsAccountsWithSuffixes(t *testing.T) {
 		t.Fatalf("titles %v", titles)
 	}
 	for _, req := range h.requests {
-		if req.URL == quota.CodexUsageURL && req.Headers.Get("Authorization") == "Bearer t1" && req.Headers.Get("Chatgpt-Account-Id") != "acc1" {
+		if req.URL == providers.CodexUsageURL && req.Headers.Get("Authorization") == "Bearer t1" && req.Headers.Get("Chatgpt-Account-Id") != "acc1" {
 			t.Fatal("Codex request must carry the account ID")
 		}
 	}
@@ -196,7 +197,7 @@ func TestPassiveDataSkipsActiveQueryNearTheSlot(t *testing.T) {
 	e, _ := newTestEngine(t, h, c)
 	ctx := context.Background()
 	e.poll(ctx, e.config(), c.t, "", false)
-	before := h.requestsTo(quota.ClaudeUsageURL)
+	before := h.requestsTo(providers.ClaudeUsageURL)
 
 	// A Claude request 30 seconds before the next slot.
 	c.add(4*time.Minute + 30*time.Second)
@@ -206,7 +207,7 @@ func TestPassiveDataSkipsActiveQueryNearTheSlot(t *testing.T) {
 	}})
 	c.add(30 * time.Second)
 	e.poll(ctx, e.config(), c.t, "", false)
-	if got := h.requestsTo(quota.ClaudeUsageURL); got != before {
+	if got := h.requestsTo(providers.ClaudeUsageURL); got != before {
 		t.Fatalf("Claude query should be skipped, got %d requests", got-before)
 	}
 	if got := e.Status().Accounts[2].Groups[0].Windows[0]; got.Source != "passive" || got.Remaining != 65 {
@@ -218,7 +219,7 @@ func TestPassiveDataSkipsActiveQueryNearTheSlot(t *testing.T) {
 	e.passiveAt["3"] = c.t
 	c.add(2 * time.Minute)
 	e.poll(ctx, e.config(), c.t, "", false)
-	if got := h.requestsTo(quota.ClaudeUsageURL); got != before+1 {
+	if got := h.requestsTo(providers.ClaudeUsageURL); got != before+1 {
 		t.Fatalf("Claude query should run, got %d", got-before)
 	}
 
@@ -236,7 +237,7 @@ func claudeIgnitionHost(c *clock, failFirst error) *fakeHost {
 	// The current Claude window expired a minute ago.
 	base := h.http
 	h.http = func(req pluginapi.HTTPRequest) pluginapi.HTTPResponse {
-		if req.URL == quota.ClaudeUsageURL {
+		if req.URL == providers.ClaudeUsageURL {
 			return pluginapi.HTTPResponse{StatusCode: 200, Body: []byte(`{"five_hour":{"utilization":0,"resets_at":"` + expired.UTC().Format(time.RFC3339) + `"}}`)}
 		}
 		return base(req)
@@ -595,7 +596,7 @@ func TestQueriesAroundResetRunOncePerReset(t *testing.T) {
 	if due, next := e.probes(c.t); len(due) != 0 || !next.Equal(reset.Add(-probeOffset)) {
 		t.Fatalf("next pre-reset query: %v %v", due, next)
 	}
-	before := h.requestsTo(quota.ClaudeUsageURL)
+	before := h.requestsTo(providers.ClaudeUsageURL)
 	c.t = reset.Add(-20 * time.Second)
 	// Computing the next wake-up does not use up a due query.
 	if due, _ := e.probes(c.t); len(due) == 0 {
@@ -603,7 +604,7 @@ func TestQueriesAroundResetRunOncePerReset(t *testing.T) {
 	}
 	e.runProbes(ctx, cfg, c.t)
 	e.runProbes(ctx, cfg, c.t)
-	if got := h.requestsTo(quota.ClaudeUsageURL) - before; got != 1 {
+	if got := h.requestsTo(providers.ClaudeUsageURL) - before; got != 1 {
 		t.Fatalf("want one pre-reset Claude query, got %d", got)
 	}
 
@@ -619,7 +620,7 @@ func TestQueriesAroundResetRunOncePerReset(t *testing.T) {
 	}
 	e.mu.Unlock()
 	e.runProbes(ctx, cfg, c.t)
-	if got := h.requestsTo(quota.ClaudeUsageURL) - before; got != 1 {
+	if got := h.requestsTo(providers.ClaudeUsageURL) - before; got != 1 {
 		t.Fatalf("a jittered reset time must not repeat the query, got %d", got)
 	}
 
@@ -630,7 +631,7 @@ func TestQueriesAroundResetRunOncePerReset(t *testing.T) {
 	c.t = reset.Add(40 * time.Second)
 	e.runProbes(ctx, cfg, c.t)
 	e.runProbes(ctx, cfg, c.t)
-	if got := h.requestsTo(quota.ClaudeUsageURL) - before; got != 2 {
+	if got := h.requestsTo(providers.ClaudeUsageURL) - before; got != 2 {
 		t.Fatalf("want one Claude query after the reset, got %d", got-1)
 	}
 	if due, next := e.probes(c.t); len(due) != 0 || next.Before(reset.Add(time.Hour)) {

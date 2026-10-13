@@ -1,11 +1,13 @@
-// Package models reads the CPA model list and orders ignition candidates.
+// Package models reads the CPA model list and provides the helpers that
+// order ignition candidates.
 //
 // CPA has no host callback that lists the models of one credential, so the
 // plugin reads /v1/models with a dedicated API key. That list is the union of
 // all credentials, deduplicated by model ID, and its owned_by field can point
 // at another provider when two providers serve the same ID. Candidates are
-// therefore picked by name. When CPA rejects a candidate because the pinned
-// credential does not serve it, the caller tries the next one.
+// therefore picked by name (see internal/providers). When CPA rejects a
+// candidate because the pinned credential does not serve it, the caller
+// tries the next one.
 package models
 
 import (
@@ -119,10 +121,11 @@ func newerFirst(a, b string) bool {
 	return strings.ToLower(a) > strings.ToLower(b)
 }
 
-// newest returns the models matching predicate, newest first. Model families
+// Newest returns the models matching predicate, newest first. Model families
 // encode generation, version and date in numeric segments, so comparing the
-// segments picks up new releases without listing them.
-func newest(models []string, predicate func(string) bool) []string {
+// segments picks up new releases without listing them. predicate receives
+// the model name in lower case.
+func Newest(models []string, predicate func(string) bool) []string {
 	var out []string
 	for _, model := range models {
 		if predicate(strings.ToLower(model)) {
@@ -133,7 +136,9 @@ func newest(models []string, predicate func(string) bool) []string {
 	return out
 }
 
-func inOrder(models []string, predicates ...func(string) bool) []string {
+// InOrder returns the models matching each predicate in turn, keeping the
+// order of models within each predicate.
+func InOrder(models []string, predicates ...func(string) bool) []string {
 	var out []string
 	for _, predicate := range predicates {
 		for _, model := range models {
@@ -145,7 +150,8 @@ func inOrder(models []string, predicates ...func(string) bool) []string {
 	return out
 }
 
-func unique(models []string) []string {
+// Unique drops repeated models, keeping the first of each.
+func Unique(models []string) []string {
 	seen := make(map[string]bool, len(models))
 	out := make([]string, 0, len(models))
 	for _, model := range models {
@@ -155,68 +161,4 @@ func unique(models []string) []string {
 		}
 	}
 	return out
-}
-
-// Candidates returns the models to try, in order, for one ignition target.
-// groupLabel is the quota group, such as "Gemini" or "Claude / GPT" for
-// Antigravity. A configured override is the only candidate and must exist in
-// available.
-func Candidates(provider, groupLabel, override string, available []string) ([]string, error) {
-	if override != "" {
-		for _, model := range available {
-			if model == override {
-				return []string{override}, nil
-			}
-		}
-		return nil, fmt.Errorf("指定点火模型 %s 不在 CPA 模型列表中", override)
-	}
-	noThinking := func(m string) bool { return !strings.Contains(m, "thinking") }
-	noImage := func(m string) bool { return !strings.Contains(m, "image") }
-
-	var out []string
-	switch provider {
-	case "codex":
-		out = append(out, newest(available, func(m string) bool { return strings.Contains(m, "luna") && noImage(m) })...)
-		out = append(out, newest(available, func(m string) bool {
-			return strings.HasPrefix(m, "gpt-") && !strings.Contains(m, "oss") && noImage(m)
-		})...)
-	case "claude":
-		out = append(out, newest(available, func(m string) bool {
-			return strings.HasPrefix(m, "claude-") && strings.Contains(m, "haiku") && noThinking(m)
-		})...)
-		out = append(out, newest(available, func(m string) bool {
-			return strings.HasPrefix(m, "claude-") && strings.Contains(m, "sonnet") && noThinking(m)
-		})...)
-	case "antigravity":
-		group := strings.ToLower(groupLabel)
-		var candidates []string
-		for _, model := range available {
-			if noImage(strings.ToLower(model)) {
-				candidates = append(candidates, model)
-			}
-		}
-		if strings.Contains(group, "gemini") {
-			gemini := newest(candidates, func(m string) bool { return strings.Contains(m, "gemini") })
-			out = append(out, newest(gemini, func(m string) bool { return strings.Contains(m, "flash") })...)
-			out = append(out, newest(gemini, func(m string) bool { return !strings.Contains(m, "pro") })...)
-			out = append(out, newest(gemini, func(m string) bool { return strings.Contains(m, "pro") })...)
-		}
-		if strings.Contains(group, "claude") || strings.Contains(group, "gpt") {
-			scoped := newest(candidates, func(m string) bool {
-				return strings.Contains(m, "claude") || strings.Contains(m, "gpt")
-			})
-			out = append(out, inOrder(scoped,
-				func(m string) bool { return strings.Contains(m, "haiku") && noThinking(m) },
-				func(m string) bool { return strings.Contains(m, "sonnet") && noThinking(m) },
-				func(m string) bool { return strings.Contains(m, "opus") && noThinking(m) },
-				func(m string) bool { return strings.Contains(m, "gpt-oss") },
-				noThinking,
-			)...)
-		}
-	}
-	out = unique(out)
-	if len(out) == 0 {
-		return nil, errors.New("CPA 模型列表中没有适合该凭证的点火模型")
-	}
-	return out, nil
 }

@@ -7,7 +7,6 @@
 package ignite
 
 import (
-	"encoding/json"
 	"errors"
 	"math"
 	"regexp"
@@ -19,11 +18,6 @@ import (
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/host"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/store"
 )
-
-// TriggerPrompt is the only content of an ignition request.
-const TriggerPrompt = "This is an automated quota-window trigger. " +
-	"Do not think, reason, deliberate, use tools, or perform any other task. " +
-	"Reply with exactly OK and nothing else."
 
 // Some providers report an unstarted 5-hour window as a rolling placeholder:
 // the reset time stays about 5 hours ahead and moves forward with every
@@ -362,56 +356,4 @@ func ModelRejected(err error) bool {
 		}
 	}
 	return false
-}
-
-// Request is the minimal model request for one provider.
-type Request struct {
-	EntryProtocol string
-	Body          []byte
-}
-
-// BuildRequest returns the ignition request for provider and model.
-func BuildRequest(provider, model string) (Request, error) {
-	var body any
-	entry := ""
-	switch provider {
-	case "codex":
-		entry = "openai-response"
-		body = map[string]any{
-			"model": model,
-			"input": []any{map[string]any{
-				"role":    "user",
-				"content": []any{map[string]any{"type": "input_text", "text": TriggerPrompt}},
-			}},
-			"reasoning":         map[string]any{"effort": "none"},
-			"tools":             []any{},
-			"stream":            false,
-			"store":             false,
-			"max_output_tokens": 4,
-		}
-	case "claude":
-		entry = "claude"
-		body = map[string]any{
-			"model":      model,
-			"max_tokens": 4,
-			"messages":   []any{map[string]any{"role": "user", "content": TriggerPrompt}},
-		}
-	case "antigravity":
-		entry = "openai"
-		body = map[string]any{
-			"model":            model,
-			"messages":         []any{map[string]any{"role": "user", "content": TriggerPrompt}},
-			"max_tokens":       4,
-			"temperature":      0,
-			"reasoning_effort": "none",
-			"stream":           false,
-		}
-	default:
-		return Request{}, errors.New("不支持的点火 provider: " + provider)
-	}
-	raw, err := json.Marshal(body)
-	if err != nil {
-		return Request{}, err
-	}
-	return Request{EntryProtocol: entry, Body: raw}, nil
 }

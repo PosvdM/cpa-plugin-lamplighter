@@ -11,6 +11,7 @@ import (
 
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/config"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/notify"
+	"github.com/PosvdM/cpa-plugin-lamplighter/internal/providers"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/quota"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/store"
 )
@@ -379,7 +380,7 @@ func (e *Engine) Status() Status {
 	}
 	sort.SliceStable(creds, func(i, j int) bool {
 		if creds[i].Provider != creds[j].Provider {
-			return providerRank(creds[i].Provider) < providerRank(creds[j].Provider)
+			return providers.Rank(creds[i].Provider) < providers.Rank(creds[j].Provider)
 		}
 		return creds[i].Suffix < creds[j].Suffix
 	})
@@ -387,7 +388,7 @@ func (e *Engine) Status() Status {
 		account := AccountStatus{
 			AuthIndex:   cred.AuthIndex,
 			Provider:    cred.Provider,
-			Title:       labelFor(quota.ProviderTitle(cred.Provider), cred),
+			Title:       labelFor(providers.Title(cred.Provider), cred),
 			Email:       cred.Email,
 			Name:        cred.Name,
 			Unavailable: cred.Unavailable,
@@ -400,7 +401,7 @@ func (e *Engine) Status() Status {
 			}
 		}
 		sort.SliceStable(groups, func(i, j int) bool {
-			if ri, rj := groupRank(groups[i].SourceLabel), groupRank(groups[j].SourceLabel); ri != rj {
+			if ri, rj := providers.GroupRank(groups[i].SourceLabel), providers.GroupRank(groups[j].SourceLabel); ri != rj {
 				return ri < rj
 			}
 			return groups[i].Key < groups[j].Key
@@ -436,28 +437,6 @@ func (e *Engine) Status() Status {
 		status.Events = []Event{}
 	}
 	return status
-}
-
-// groupOrder lists quota groups in the order the page shows them, the same
-// as SERVICE_ORDER in internal/web/page.js. Other groups follow by key.
-var groupOrder = []string{"Claude", "ChatGPT", "Gemini", "Fable", "Claude / GPT"}
-
-func groupRank(sourceLabel string) int {
-	for i, label := range groupOrder {
-		if label == sourceLabel {
-			return i
-		}
-	}
-	return len(groupOrder)
-}
-
-func providerRank(provider string) int {
-	for i, name := range config.SupportedProviders {
-		if name == provider {
-			return i
-		}
-	}
-	return len(config.SupportedProviders)
 }
 
 // Series is the history of one window.
