@@ -23,7 +23,6 @@ import (
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/ignite"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/models"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/notify"
-	"github.com/PosvdM/cpa-plugin-lamplighter/internal/quota"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/store"
 )
 
@@ -581,12 +580,4 @@ func labelFor(sourceLabel string, cred *Cred) string {
 		return sourceLabel
 	}
 	return sourceLabel + cred.Suffix
-}
-
-// providerLabel returns the source label used for a provider's group.
-func providerLabel(provider, groupLabel string) string {
-	if provider == "codex" {
-		return quota.ProviderTitle(provider)
-	}
-	return groupLabel
 }

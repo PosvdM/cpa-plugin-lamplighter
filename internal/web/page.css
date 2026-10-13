@@ -47,6 +47,11 @@
   --type-claude-text: #c05621;
   --type-antigravity-bg: #e0f7fa;
   --type-antigravity-text: #006064;
+  --type-kimi-bg: #dce8ff;
+  --type-kimi-text: #0560cf;
+  --type-xai-bg: #f3f4f6;
+  --type-xai-text: #111827;
+  --type-xai-border: #d1d5db;
 
   /* Chart chrome: empty lane, no-data hatching, selected row. */
   --chart-lane: rgba(0, 0, 0, 0.035);
@@ -100,6 +105,11 @@
   --type-claude-text: #e8a882;
   --type-antigravity-bg: #004d40;
   --type-antigravity-text: #80deea;
+  --type-kimi-bg: #003880;
+  --type-kimi-text: #70b5ff;
+  --type-xai-bg: #111827;
+  --type-xai-text: #f9fafb;
+  --type-xai-border: #374151;
   --chart-lane: rgba(255, 255, 255, 0.035);
   --chart-hatch: rgba(255, 255, 255, 0.09);
   --chart-select: rgba(255, 255, 255, 0.045);
@@ -252,6 +262,8 @@ input[type="checkbox"] { width: 16px; height: 16px; padding: 0; accent-color: va
 .type-codex { background: var(--type-codex-bg); color: var(--type-codex-text); }
 .type-claude { background: var(--type-claude-bg); color: var(--type-claude-text); }
 .type-antigravity { background: var(--type-antigravity-bg); color: var(--type-antigravity-text); }
+.type-kimi { background: var(--type-kimi-bg); color: var(--type-kimi-text); }
+.type-xai { background: var(--type-xai-bg); color: var(--type-xai-text); box-shadow: inset 0 0 0 1px var(--type-xai-border); }
 .quota-group { display: flex; flex-direction: column; gap: 9px; }
 .quota-group + .quota-group { padding-top: 11px; border-top: 1px solid var(--border-color); }
 .group-title { font-size: 12px; font-weight: 600; color: var(--text-tertiary); letter-spacing: 0.02em; }

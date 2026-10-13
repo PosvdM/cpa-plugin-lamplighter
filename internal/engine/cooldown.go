@@ -8,6 +8,7 @@ import (
 
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/config"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/notify"
+	"github.com/PosvdM/cpa-plugin-lamplighter/internal/providers"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/quota"
 )
 
@@ -86,7 +87,7 @@ func (e *Engine) checkCooldowns(ctx context.Context, cfg config.Config) {
 			}
 		}
 		if staleCooldown(cred, groups, now) {
-			found = append(found, stale{cred: cred, label: labelFor(quota.ProviderTitle(cred.Provider), cred)})
+			found = append(found, stale{cred: cred, label: labelFor(providers.Title(cred.Provider), cred)})
 		}
 	}
 	e.mu.Unlock()

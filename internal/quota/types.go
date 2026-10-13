@@ -1,13 +1,10 @@
-// Package quota reads Codex, Claude and Antigravity quota windows.
-//
-// Active reads call the provider usage endpoints with the same URLs and
-// headers as the CPA Management Center. Passive reads parse the rate-limit
-// headers that CPA records from real model responses.
+// Package quota holds the quota windows that every service reports and the
+// upstream request types used to read them. The services themselves are in
+// internal/providers.
 package quota
 
 import (
 	"encoding/json"
-	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -32,13 +29,27 @@ const (
 )
 
 // Window is one quota window. Remaining is a percentage from 0 to 100.
-// Reset is zero when the provider did not return a reset time.
+// Reset is zero when the provider did not return a reset time. Period is the
+// length of the window, zero when the provider does not state it.
 type Window struct {
 	ID        string
 	Label     string
 	Remaining float64
 	Reset     time.Time
+	Period    time.Duration
 }
+
+// Window kinds.
+const (
+	KindFiveHour = "5h"
+	KindSevenDay = "7d"
+)
+
+// Window periods.
+const (
+	FiveHours = 5 * time.Hour
+	SevenDays = 7 * 24 * time.Hour
+)
 
 // RawGroup is a set of windows as returned by one provider, before it is
 // attached to a credential.
@@ -59,14 +70,63 @@ func ShortLabel(label string) string {
 	return label
 }
 
-// IsFiveHour reports whether w is a 5-hour window.
-func IsFiveHour(w Window) bool {
-	return w.ID == WindowFiveHour || ShortLabel(w.Label) == "5h"
+// Kind returns KindFiveHour, KindSevenDay or "" for a window of another
+// length. The period decides when the provider states one; other windows
+// are known by their ID and label.
+func Kind(w Window) string {
+	if w.Period > 0 {
+		switch {
+		case near(w.Period, FiveHours):
+			return KindFiveHour
+		case near(w.Period, SevenDays):
+			return KindSevenDay
+		}
+		return ""
+	}
+	switch {
+	case w.ID == WindowFiveHour || ShortLabel(w.Label) == "5h":
+		return KindFiveHour
+	case w.ID == WindowSevenDay || ShortLabel(w.Label) == "7d" || strings.HasPrefix(w.Label, "7 Day"):
+		return KindSevenDay
+	}
+	return ""
 }
 
+// near reports whether d is within 5% of target.
+func near(d, target time.Duration) bool {
+	return d >= target-target/20 && d <= target+target/20
+}
+
+// IsFiveHour reports whether w is a 5-hour window.
+func IsFiveHour(w Window) bool { return Kind(w) == KindFiveHour }
+
 // IsSevenDay reports whether w is a 7-day window.
-func IsSevenDay(w Window) bool {
-	return ShortLabel(w.Label) == "7d" || strings.HasPrefix(w.Label, "7 Day")
+func IsSevenDay(w Window) bool { return Kind(w) == KindSevenDay }
+
+// Standard returns the ID and label of a 5-hour or 7-day window of the given
+// period, and false for a period of another length.
+func Standard(period time.Duration) (id, label string, ok bool) {
+	switch {
+	case period <= 0:
+		return "", "", false
+	case near(period, FiveHours):
+		return WindowFiveHour, LabelFiveHour, true
+	case near(period, SevenDays):
+		return WindowSevenDay, LabelSevenDay, true
+	}
+	return "", "", false
+}
+
+// PeriodLabel returns a compact label for a window of the given period, such
+// as "30d" or "12h", for windows that are neither 5-hour nor 7-day ones.
+func PeriodLabel(period time.Duration) string {
+	switch {
+	case period >= 24*time.Hour && period%(24*time.Hour) == 0:
+		return strconv.Itoa(int(period/(24*time.Hour))) + "d"
+	case period >= time.Hour && period%time.Hour == 0:
+		return strconv.Itoa(int(period/time.Hour)) + "h"
+	}
+	return strconv.Itoa(int(period.Round(time.Minute)/time.Minute)) + "m"
 }
 
 // FiveHourWindow returns the first 5-hour window of g.
@@ -77,106 +137,6 @@ func FiveHourWindow(windows []Window) (Window, bool) {
 		}
 	}
 	return Window{}, false
-}
-
-// ProviderTitle returns the display name of provider.
-func ProviderTitle(provider string) string {
-	switch provider {
-	case "codex":
-		return "ChatGPT"
-	case "claude":
-		return "Claude"
-	case "antigravity":
-		return "Antigravity"
-	}
-	if provider == "" {
-		return ""
-	}
-	return strings.ToUpper(provider[:1]) + provider[1:]
-}
-
-// Secret holds the fields Lamplighter reads from a credential file.
-type Secret struct {
-	AccessToken string
-	AccountID   string
-	ProjectID   string
-	ProxyURL    string
-}
-
-// ParseSecret extracts the access token, account ID, project ID and proxy URL
-// from a CPA credential file.
-func ParseSecret(raw json.RawMessage) Secret {
-	var data map[string]any
-	if err := json.Unmarshal(raw, &data); err != nil {
-		return Secret{}
-	}
-	metadata, _ := data["metadata"].(map[string]any)
-	return Secret{
-		AccessToken: firstString(data, metadata, "access_token", "accessToken"),
-		AccountID:   firstString(data, metadata, "account_id", "chatgpt_account_id", "chatgptAccountId"),
-		ProjectID:   projectID(data),
-		ProxyURL:    firstString(data, nil, "proxy_url", "proxyUrl"),
-	}
-}
-
-func firstString(primary, secondary map[string]any, keys ...string) string {
-	for _, source := range []map[string]any{primary, secondary} {
-		if source == nil {
-			continue
-		}
-		for _, key := range keys {
-			if value := scalarString(source[key]); value != "" {
-				return value
-			}
-		}
-	}
-	return ""
-}
-
-func projectID(data map[string]any) string {
-	for _, key := range []string{"project_id", "projectId"} {
-		if value := scalarString(data[key]); value != "" {
-			return value
-		}
-	}
-	for _, childKey := range []string{"metadata", "attributes", "installed", "web"} {
-		child, ok := data[childKey].(map[string]any)
-		if !ok {
-			continue
-		}
-		for _, key := range []string{"project_id", "projectId", "gemini_virtual_project"} {
-			if value := scalarString(child[key]); value != "" {
-				return value
-			}
-		}
-	}
-	return ""
-}
-
-func scalarString(value any) string {
-	switch v := value.(type) {
-	case string:
-		return strings.TrimSpace(v)
-	case float64:
-		return strconv.FormatFloat(v, 'f', -1, 64)
-	case json.Number:
-		return v.String()
-	}
-	return ""
-}
-
-// clampPercent limits value to 0–100 and drops float noise such as
-// 19.999999999999996 from 100 - 0.8*100. It keeps six decimals, because
-// Antigravity reports fractions like 0.9999985 that must stay below 100.
-func clampPercent(value float64) float64 {
-	value = math.Round(value*1e6) / 1e6
-	if value < 0 {
-		return 0
-	}
-	if value > 100 {
-		return 100
-	}
-	return value
 }
 
 // ParseTime parses an ISO 8601 timestamp, a Unix timestamp in seconds or
@@ -223,34 +183,4 @@ func unixTime(seconds float64) time.Time {
 	whole := int64(seconds)
 	nanos := int64((seconds - float64(whole)) * 1e9)
 	return time.Unix(whole, nanos).UTC()
-}
-
-func floatValue(value any) (float64, bool) {
-	switch v := value.(type) {
-	case float64:
-		return v, true
-	case json.Number:
-		f, err := v.Float64()
-		return f, err == nil
-	case string:
-		f, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
-		return f, err == nil
-	case int:
-		return float64(v), true
-	case int64:
-		return float64(v), true
-	}
-	return 0, false
-}
-
-func field(obj map[string]any, names ...string) any {
-	if obj == nil {
-		return nil
-	}
-	for _, name := range names {
-		if value, ok := obj[name]; ok && value != nil {
-			return value
-		}
-	}
-	return nil
 }
