@@ -857,6 +857,7 @@
     // Rows built after the first fill need their values.
     if (renderServiceRows() && settingsFilled) fillSettings({ providers: true });
     renderServiceText();
+    if (renderWindowButtons() && history) loadHistory();
     renderAccounts();
     renderTargets();
     renderEvents();
@@ -923,10 +924,36 @@
 
   function unixDate(t) { return new Date(t * 1000); }
 
-  function windowKind(series) {
-    if (series.window === "five-hour" || series.window_label === "5h") return "5h";
-    if (series.window === "seven-day") return "7d";
-    return series.window_label || series.window;
+  // "5h", "7d" or empty for a window of another length, which the chart
+  // does not show.
+  function windowKind(series) { return series.kind || ""; }
+
+  // The chart offers the window kinds the accounts report, both while none
+  // are known.
+  function windowKinds() {
+    var seen = {};
+    (status.accounts || []).forEach(function (a) {
+      (a.groups || []).forEach(function (g) {
+        (g.windows || []).forEach(function (w) { if (w.kind) seen[w.kind] = true; });
+      });
+    });
+    var kinds = ["5h", "7d"].filter(function (k) { return seen[k]; });
+    return kinds.length ? kinds : ["5h", "7d"];
+  }
+
+  // Shows the window buttons of the reported kinds. When the chosen kind is
+  // not among them, it switches to the first one and returns true.
+  function renderWindowButtons() {
+    var kinds = windowKinds();
+    Array.prototype.forEach.call($("window-buttons").querySelectorAll("button"), function (b) {
+      b.hidden = kinds.indexOf(b.getAttribute("data-value")) < 0;
+    });
+    if (kinds.indexOf(chartWindow) >= 0) return false;
+    chartWindow = kinds[0];
+    range = rangeFor(chartWindow);
+    pressSegment("window-buttons", chartWindow);
+    renderRangeButtons();
+    return true;
   }
 
   function valueAt(points, t) {
@@ -991,9 +1018,13 @@
     history.series.forEach(function (s) {
       if (!s.points || !s.points.length || windowKind(s) !== chartWindow) return;
       var meta = info[s.group + "|" + s.window] || {};
-      var id = s.provider + "|" + (s.source_label || s.label);
+      // A window with its own label, such as "7 Day Opus" next to the
+      // 7-day window of the same group label, gets a row of its own.
+      var extra = s.window_label && s.window_label !== chartWindow ? " · " + s.window_label : "";
+      var source = (s.source_label || s.label) + extra;
+      var id = s.provider + "|" + source;
       if (!byLabel[id]) { byLabel[id] = []; order.push(id); }
-      byLabel[id].push({ id: s.group + "|" + s.window, name: s.label, source: s.source_label || s.label, sub: meta.email || s.auth_index || "", group: s.group,
+      byLabel[id].push({ id: s.group + "|" + s.window, name: s.label + extra, source: source, sub: meta.email || s.auth_index || "", group: s.group,
         points: s.points, reset: meta.reset, last: s.points[s.points.length - 1][1] });
     });
     var rows = order.map(function (id, index) {
@@ -1595,7 +1626,7 @@
   function restoreChartFilters() {
     if (!rememberChart()) return;
     var saved = storedChartFilters();
-    if (saved.window === "5h" || saved.window === "7d") chartWindow = saved.window;
+    if (windowKinds().indexOf(saved.window) >= 0) chartWindow = saved.window;
     if (saved.sort === "default" || saved.sort === "low") chartSort = saved.sort;
     range = rangeFor(chartWindow);
     pressSegment("window-buttons", chartWindow);

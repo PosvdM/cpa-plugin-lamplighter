@@ -267,9 +267,11 @@ func (e *Engine) testNotify(ctx context.Context) ([]ChannelResult, error) {
 
 // WindowStatus is one window on the status page.
 type WindowStatus struct {
-	ID         string    `json:"id"`
-	Label      string    `json:"label"`
-	Short      string    `json:"short"`
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	Short string `json:"short"`
+	// Kind is "5h", "7d" or empty for a window of another length.
+	Kind       string    `json:"kind,omitempty"`
 	Remaining  float64   `json:"remaining"`
 	Reset      time.Time `json:"reset,omitempty"`
 	Source     string    `json:"source"`
@@ -455,6 +457,7 @@ func (e *Engine) Status() Status {
 					ID:         w.ID,
 					Label:      w.Label,
 					Short:      quota.ShortLabel(w.Label),
+					Kind:       quota.Kind(w.Window),
 					Remaining:  w.Remaining,
 					Reset:      w.Reset,
 					Source:     string(w.Source),
@@ -479,9 +482,11 @@ func (e *Engine) Status() Status {
 
 // Series is the history of one window.
 type Series struct {
-	Group       string       `json:"group"`
-	Window      string       `json:"window"`
-	WindowLabel string       `json:"window_label"`
+	Group       string `json:"group"`
+	Window      string `json:"window"`
+	WindowLabel string `json:"window_label"`
+	// Kind is "5h", "7d" or empty for a window of another length.
+	Kind        string       `json:"kind,omitempty"`
 	Label       string       `json:"label"`
 	SourceLabel string       `json:"source_label"` // label without the account suffix
 	Provider    string       `json:"provider"`
@@ -581,7 +586,8 @@ func (e *Engine) History(span time.Duration) (HistoryResponse, error) {
 		key := record.Group + "|" + record.Window
 		s, ok := series[key]
 		if !ok {
-			s = &Series{Group: record.Group, Window: record.Window, WindowLabel: record.Window}
+			// Windows no longer reported are known by their ID.
+			s = &Series{Group: record.Group, Window: record.Window, WindowLabel: record.Window, Kind: quota.Kind(quota.Window{ID: record.Window})}
 			if group, ok := labels[record.Group]; ok {
 				s.Label = group.Label
 				s.SourceLabel = group.SourceLabel
@@ -590,6 +596,7 @@ func (e *Engine) History(span time.Duration) (HistoryResponse, error) {
 				for _, w := range group.Windows {
 					if w.ID == record.Window {
 						s.WindowLabel = quota.ShortLabel(w.Label)
+						s.Kind = quota.Kind(w.Window)
 					}
 				}
 			} else {

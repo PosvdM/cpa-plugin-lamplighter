@@ -220,18 +220,19 @@ func ParseAntigravityQuota(payload map[string]any) ([]quota.RawGroup, error) {
 				}
 				id = fmt.Sprintf("%s-%d", prefix, bi+1)
 			}
-			order := 9
+			order, period := 9, time.Duration(0)
 			switch windowRaw {
 			case "5h", "five-hour", "five_hour":
-				order = 0
+				order, period = 0, quota.FiveHours
 			case "weekly", "week":
-				order = 1
+				order, period = 1, quota.SevenDays
 			}
 			windows = append(windows, ordered{order: order, w: quota.Window{
 				ID:        id,
 				Label:     antigravityBucketLabel(bucket),
 				Remaining: clampPercent(fraction * 100),
 				Reset:     quota.ParseTime(field(bucket, "resetTime", "reset_time")),
+				Period:    period,
 			}})
 		}
 		if len(windows) == 0 {

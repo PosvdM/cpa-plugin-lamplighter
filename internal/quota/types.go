@@ -29,13 +29,27 @@ const (
 )
 
 // Window is one quota window. Remaining is a percentage from 0 to 100.
-// Reset is zero when the provider did not return a reset time.
+// Reset is zero when the provider did not return a reset time. Period is the
+// length of the window, zero when the provider does not state it.
 type Window struct {
 	ID        string
 	Label     string
 	Remaining float64
 	Reset     time.Time
+	Period    time.Duration
 }
+
+// Window kinds.
+const (
+	KindFiveHour = "5h"
+	KindSevenDay = "7d"
+)
+
+// Window periods.
+const (
+	FiveHours = 5 * time.Hour
+	SevenDays = 7 * 24 * time.Hour
+)
 
 // RawGroup is a set of windows as returned by one provider, before it is
 // attached to a credential.
@@ -56,14 +70,63 @@ func ShortLabel(label string) string {
 	return label
 }
 
-// IsFiveHour reports whether w is a 5-hour window.
-func IsFiveHour(w Window) bool {
-	return w.ID == WindowFiveHour || ShortLabel(w.Label) == "5h"
+// Kind returns KindFiveHour, KindSevenDay or "" for a window of another
+// length. The period decides when the provider states one; other windows
+// are known by their ID and label.
+func Kind(w Window) string {
+	if w.Period > 0 {
+		switch {
+		case near(w.Period, FiveHours):
+			return KindFiveHour
+		case near(w.Period, SevenDays):
+			return KindSevenDay
+		}
+		return ""
+	}
+	switch {
+	case w.ID == WindowFiveHour || ShortLabel(w.Label) == "5h":
+		return KindFiveHour
+	case w.ID == WindowSevenDay || ShortLabel(w.Label) == "7d" || strings.HasPrefix(w.Label, "7 Day"):
+		return KindSevenDay
+	}
+	return ""
 }
 
+// near reports whether d is within 5% of target.
+func near(d, target time.Duration) bool {
+	return d >= target-target/20 && d <= target+target/20
+}
+
+// IsFiveHour reports whether w is a 5-hour window.
+func IsFiveHour(w Window) bool { return Kind(w) == KindFiveHour }
+
 // IsSevenDay reports whether w is a 7-day window.
-func IsSevenDay(w Window) bool {
-	return ShortLabel(w.Label) == "7d" || strings.HasPrefix(w.Label, "7 Day")
+func IsSevenDay(w Window) bool { return Kind(w) == KindSevenDay }
+
+// Standard returns the ID and label of a 5-hour or 7-day window of the given
+// period, and false for a period of another length.
+func Standard(period time.Duration) (id, label string, ok bool) {
+	switch {
+	case period <= 0:
+		return "", "", false
+	case near(period, FiveHours):
+		return WindowFiveHour, LabelFiveHour, true
+	case near(period, SevenDays):
+		return WindowSevenDay, LabelSevenDay, true
+	}
+	return "", "", false
+}
+
+// PeriodLabel returns a compact label for a window of the given period, such
+// as "30d" or "12h", for windows that are neither 5-hour nor 7-day ones.
+func PeriodLabel(period time.Duration) string {
+	switch {
+	case period >= 24*time.Hour && period%(24*time.Hour) == 0:
+		return strconv.Itoa(int(period/(24*time.Hour))) + "d"
+	case period >= time.Hour && period%time.Hour == 0:
+		return strconv.Itoa(int(period/time.Hour)) + "h"
+	}
+	return strconv.Itoa(int(period.Round(time.Minute)/time.Minute)) + "m"
 }
 
 // FiveHourWindow returns the first 5-hour window of g.

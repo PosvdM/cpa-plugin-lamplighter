@@ -86,12 +86,14 @@ func ParseCodexUsage(payload map[string]any, now time.Time) ([]quota.RawGroup, e
 	secondary, _ := field(rateLimit, "secondary_window", "secondaryWindow").(map[string]any)
 
 	candidates := []map[string]any{primary, secondary}
+	var periods [2]time.Duration
 	fiveIndex, weekIndex := -1, -1
 	for i, window := range candidates {
 		if window == nil {
 			continue
 		}
 		seconds, _ := floatValue(field(window, "limit_window_seconds", "limitWindowSeconds"))
+		periods[i] = time.Duration(seconds) * time.Second
 		switch {
 		case int(seconds) == 18000 && fiveIndex < 0:
 			fiveIndex = i
@@ -101,21 +103,31 @@ func ParseCodexUsage(payload map[string]any, now time.Time) ([]quota.RawGroup, e
 	}
 	// Without a window length, the primary window is the 5-hour one and the
 	// secondary window is the weekly one.
-	if fiveIndex < 0 && primary != nil && weekIndex != 0 {
+	if fiveIndex < 0 && primary != nil && periods[0] == 0 && weekIndex != 0 {
 		fiveIndex = 0
 	}
-	if weekIndex < 0 && secondary != nil && fiveIndex != 1 {
+	if weekIndex < 0 && secondary != nil && periods[1] == 0 && fiveIndex != 1 {
 		weekIndex = 1
 	}
 
 	var windows []quota.Window
 	if fiveIndex >= 0 {
-		if w, ok := codexWindow(candidates[fiveIndex], quota.WindowFiveHour, quota.LabelFiveHour, now); ok {
+		if w, ok := codexWindow(candidates[fiveIndex], quota.WindowFiveHour, quota.LabelFiveHour, periods[fiveIndex], now); ok {
 			windows = append(windows, w)
 		}
 	}
 	if weekIndex >= 0 {
-		if w, ok := codexWindow(candidates[weekIndex], quota.WindowSevenDay, quota.LabelSevenDay, now); ok {
+		if w, ok := codexWindow(candidates[weekIndex], quota.WindowSevenDay, quota.LabelSevenDay, periods[weekIndex], now); ok {
+			windows = append(windows, w)
+		}
+	}
+	// A window of another length, such as a monthly one, keeps its own ID.
+	for i, window := range candidates {
+		if window == nil || i == fiveIndex || i == weekIndex || periods[i] == 0 {
+			continue
+		}
+		label := quota.PeriodLabel(periods[i])
+		if w, ok := codexWindow(window, "window-"+label, label, periods[i], now); ok {
 			windows = append(windows, w)
 		}
 	}
@@ -125,7 +137,7 @@ func ParseCodexUsage(payload map[string]any, now time.Time) ([]quota.RawGroup, e
 	return []quota.RawGroup{{Key: "codex:main", SourceLabel: codexTitle, Windows: windows}}, nil
 }
 
-func codexWindow(window map[string]any, id, label string, now time.Time) (quota.Window, bool) {
+func codexWindow(window map[string]any, id, label string, period time.Duration, now time.Time) (quota.Window, bool) {
 	if window == nil {
 		return quota.Window{}, false
 	}
@@ -142,7 +154,7 @@ func codexWindow(window map[string]any, id, label string, now time.Time) (quota.
 			reset = now.Add(time.Duration(after * float64(time.Second))).UTC()
 		}
 	}
-	return quota.Window{ID: id, Label: label, Remaining: clampPercent(100 - used), Reset: reset}, true
+	return quota.Window{ID: id, Label: label, Remaining: clampPercent(100 - used), Reset: reset, Period: period}, true
 }
 
 func parseCodexHeaders(header http.Header, now time.Time) (quota.RawGroup, bool) {
@@ -163,7 +175,11 @@ func parseCodexHeaders(header http.Header, now time.Time) (quota.RawGroup, bool)
 			}
 		}
 		minutes, _ := floatValue(headerValue(header, prefix+"Window-Minutes"))
-		found = append(found, parsed{minutes: minutes, window: quota.Window{Remaining: clampPercent(100 - used), Reset: reset}})
+		found = append(found, parsed{minutes: minutes, window: quota.Window{
+			Remaining: clampPercent(100 - used),
+			Reset:     reset,
+			Period:    time.Duration(minutes) * time.Minute,
+		}})
 	}
 	if len(found) == 0 {
 		return quota.RawGroup{}, false
@@ -184,6 +200,9 @@ func parseCodexHeaders(header http.Header, now time.Time) (quota.RawGroup, bool)
 		case int(item.minutes) == 10080 && !haveWeek:
 			assign(item, quota.WindowSevenDay, quota.LabelSevenDay)
 			haveWeek = true
+		case item.minutes > 0:
+			label := quota.PeriodLabel(item.window.Period)
+			assign(item, "window-"+label, label)
 		default:
 			unassigned = append(unassigned, item)
 		}

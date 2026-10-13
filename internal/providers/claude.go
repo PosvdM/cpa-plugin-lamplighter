@@ -55,15 +55,18 @@ func claudeCandidates(_ string, available []string) []string {
 	})...)
 }
 
-// claudeWindows maps oauth/usage keys to window IDs and labels.
-var claudeWindows = []struct{ key, id, label string }{
-	{"five_hour", quota.WindowFiveHour, quota.LabelFiveHour},
-	{"seven_day", quota.WindowSevenDay, quota.LabelSevenDay},
-	{"seven_day_oauth_apps", "seven-day-oauth-apps", "7 Day OAuth Apps"},
-	{"seven_day_opus", "seven-day-opus", "7 Day Opus"},
-	{"seven_day_sonnet", "seven-day-sonnet", "7 Day Sonnet"},
-	{"seven_day_cowork", "seven-day-cowork", "7 Day Cowork"},
-	{"iguana_necktie", quota.WindowFable, quota.LabelFable},
+// claudeWindows maps oauth/usage keys to window IDs, labels and periods.
+var claudeWindows = []struct {
+	key, id, label string
+	period         time.Duration
+}{
+	{"five_hour", quota.WindowFiveHour, quota.LabelFiveHour, quota.FiveHours},
+	{"seven_day", quota.WindowSevenDay, quota.LabelSevenDay, quota.SevenDays},
+	{"seven_day_oauth_apps", "seven-day-oauth-apps", "7 Day OAuth Apps", quota.SevenDays},
+	{"seven_day_opus", "seven-day-opus", "7 Day Opus", quota.SevenDays},
+	{"seven_day_sonnet", "seven-day-sonnet", "7 Day Sonnet", quota.SevenDays},
+	{"seven_day_cowork", "seven-day-cowork", "7 Day Cowork", quota.SevenDays},
+	{"iguana_necktie", quota.WindowFable, quota.LabelFable, quota.SevenDays},
 }
 
 func fetchClaude(ctx context.Context, doer quota.Doer, cred Credential, _ time.Time) ([]quota.RawGroup, error) {
@@ -100,6 +103,7 @@ func ParseClaudeUsage(payload map[string]any) ([]quota.RawGroup, error) {
 			Label:     spec.label,
 			Remaining: clampPercent(100 - used),
 			Reset:     quota.ParseTime(item["resets_at"]),
+			Period:    spec.period,
 		})
 	}
 	if fable != nil {
@@ -109,6 +113,7 @@ func ParseClaudeUsage(payload map[string]any) ([]quota.RawGroup, error) {
 				Label:     quota.LabelFable,
 				Remaining: clampPercent(100 - used),
 				Reset:     quota.ParseTime(fable["resets_at"]),
+				Period:    quota.SevenDays,
 			})
 		}
 	}
@@ -183,6 +188,7 @@ func parseClaudeHeaders(header http.Header) []quota.RawGroup {
 			Label:     quota.LabelFable,
 			Remaining: clampPercent(100 - utilization*100),
 			Reset:     quota.ParseTime(headerValue(header, "Anthropic-Ratelimit-Unified-7d_oi-Reset")),
+			Period:    quota.SevenDays,
 		}}})
 	}
 	return groups
@@ -190,9 +196,12 @@ func parseClaudeHeaders(header http.Header) []quota.RawGroup {
 
 func parseClaudeMainHeaders(header http.Header) (quota.RawGroup, bool) {
 	group := quota.RawGroup{Key: "claude:main", SourceLabel: "Claude"}
-	for _, spec := range []struct{ prefix, id, label string }{
-		{"Anthropic-Ratelimit-Unified-5h-", quota.WindowFiveHour, quota.LabelFiveHour},
-		{"Anthropic-Ratelimit-Unified-7d-", quota.WindowSevenDay, quota.LabelSevenDay},
+	for _, spec := range []struct {
+		prefix, id, label string
+		period            time.Duration
+	}{
+		{"Anthropic-Ratelimit-Unified-5h-", quota.WindowFiveHour, quota.LabelFiveHour, quota.FiveHours},
+		{"Anthropic-Ratelimit-Unified-7d-", quota.WindowSevenDay, quota.LabelSevenDay, quota.SevenDays},
 	} {
 		utilization, ok := floatValue(headerValue(header, spec.prefix+"Utilization"))
 		if !ok {
@@ -204,6 +213,7 @@ func parseClaudeMainHeaders(header http.Header) (quota.RawGroup, bool) {
 			Label:     spec.label,
 			Remaining: clampPercent(100 - utilization*100),
 			Reset:     quota.ParseTime(headerValue(header, spec.prefix+"Reset")),
+			Period:    spec.period,
 		})
 	}
 	return group, len(group.Windows) > 0

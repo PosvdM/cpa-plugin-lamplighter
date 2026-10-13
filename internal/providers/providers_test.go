@@ -211,3 +211,55 @@ func TestRequestUsesMinimalBodies(t *testing.T) {
 		}
 	}
 }
+
+func TestParseCodexUsageKeepsAWeeklyOnlyPlanWithoutFiveHours(t *testing.T) {
+	// A ChatGPT Pro response from the Management Center tests: one weekly
+	// window as the primary window.
+	payload := decode(t, `{"plan_type":"pro","rate_limit":{"allowed":true,"limit_reached":false,
+		"primary_window":{"used_percent":1,"limit_window_seconds":604800,"reset_after_seconds":601888,"reset_at":1785902974},
+		"secondary_window":null}}`)
+	groups, err := ParseCodexUsage(payload, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := groups[0].Windows
+	if len(w) != 1 || w[0].ID != quota.WindowSevenDay || w[0].Remaining != 99 || quota.Kind(w[0]) != quota.KindSevenDay {
+		t.Fatalf("windows %+v", w)
+	}
+}
+
+func TestParseCodexUsageKeepsOtherLengthsApart(t *testing.T) {
+	payload := decode(t, `{"rate_limit":{
+		"primary_window":{"used_percent":10,"limit_window_seconds":18000,"reset_at":1791139696},
+		"secondary_window":{"used_percent":40,"limit_window_seconds":2592000,"reset_at":1793139696}}}`)
+	groups, err := ParseCodexUsage(payload, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := groups[0].Windows
+	if len(w) != 2 || w[0].ID != quota.WindowFiveHour || w[1].ID != "window-30d" || w[1].Label != "30d" || quota.Kind(w[1]) != "" {
+		t.Fatalf("windows %+v", w)
+	}
+	header := http.Header{
+		"X-Codex-Primary-Used-Percent":     {"10"},
+		"X-Codex-Primary-Window-Minutes":   {"43200"},
+		"X-Codex-Secondary-Used-Percent":   {"5"},
+		"X-Codex-Secondary-Window-Minutes": {"300"},
+	}
+	passive := codex.Headers(header, time.Now())
+	if len(passive) != 1 || len(passive[0].Windows) != 2 || passive[0].Windows[0].ID != "window-30d" || passive[0].Windows[1].ID != quota.WindowFiveHour {
+		t.Fatalf("passive %+v", passive)
+	}
+}
+
+func TestPeriodsAreRecorded(t *testing.T) {
+	groups, _ := ParseClaudeUsage(map[string]any{"five_hour": map[string]any{"utilization": 1.0}, "seven_day": map[string]any{"utilization": 2.0}})
+	if groups[0].Windows[0].Period != quota.FiveHours || groups[0].Windows[1].Period != quota.SevenDays {
+		t.Fatalf("claude %+v", groups[0].Windows)
+	}
+	ag, _ := ParseAntigravityQuota(map[string]any{"groups": []any{map[string]any{"displayName": "Gemini Models", "buckets": []any{
+		map[string]any{"window": "5h", "remainingFraction": 1.0}, map[string]any{"window": "weekly", "remainingFraction": 1.0}}}}})
+	if ag[0].Windows[0].Period != quota.FiveHours || ag[0].Windows[1].Period != quota.SevenDays {
+		t.Fatalf("antigravity %+v", ag[0].Windows)
+	}
+}
