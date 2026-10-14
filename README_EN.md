@@ -128,7 +128,7 @@ All settings live under `plugins.configs.lamplighter` in `config.yaml`, and can 
 | `request_timeout_seconds` | `20` | Timeout of one upstream request |
 | `passive_skip_seconds` | `60` | Skip the query when passive data arrived this many seconds before it; `0` never skips |
 | `passive_skip_max_minutes` | `30` | Longest run of skipped queries for one account |
-| `models_api_key` | empty | CPA API key for reading the model list; without it ignition cannot pick a model |
+| `models_api_key` | empty | CPA API key for reading the model list; without it ignition cannot pick a model. The management key does not work here, and the page does not save a value equal to it |
 | `cpa_base_url` | `http://127.0.0.1:8317` | Address the plugin uses to reach CPA; change it when CPA uses another port or TLS |
 | `history_retention_days` | `40` | Days of quota history to keep |
 | `remember_chart_filters` | `false` | The management page remembers, in the current browser, the quota window, time range and order last chosen in the quota chart; when off, the page opens with the defaults |
