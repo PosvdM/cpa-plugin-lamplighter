@@ -251,6 +251,7 @@ input[type="checkbox"] { width: 16px; height: 16px; padding: 0; accent-color: va
 }
 .account-head { display: flex; align-items: center; gap: 9px; min-width: 0; }
 .account-head .btn { margin-left: auto; }
+.account-head .btn + .btn { margin-left: 0; }
 .account-email {
   min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: var(--text-secondary); font-size: 13px;

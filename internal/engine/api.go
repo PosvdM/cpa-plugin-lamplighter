@@ -288,11 +288,13 @@ type GroupStatus struct {
 
 // AccountStatus is one credential on the status page.
 type AccountStatus struct {
-	AuthIndex   string `json:"auth_index"`
-	Provider    string `json:"provider"`
-	Title       string `json:"title"`
-	Email       string `json:"email,omitempty"`
-	Name        string `json:"name"`
+	AuthIndex string `json:"auth_index"`
+	Provider  string `json:"provider"`
+	Title     string `json:"title"`
+	Email     string `json:"email,omitempty"`
+	Name      string `json:"name"`
+	// Note is the CPA credential note, whose first line names the account.
+	Note        string `json:"note,omitempty"`
 	Unavailable bool   `json:"unavailable"`
 	// CooldownUntil is when CPA ends its cooldown of the account.
 	CooldownUntil time.Time `json:"cooldown_until,omitempty"`
@@ -431,6 +433,7 @@ func (e *Engine) Status() Status {
 			Title:       labelFor(providers.Title(cred.Provider), cred),
 			Email:       cred.Email,
 			Name:        cred.Name,
+			Note:        cred.Note,
 			Unavailable: cred.Unavailable,
 			Error:       e.pollErrs[cred.AuthIndex],
 		}

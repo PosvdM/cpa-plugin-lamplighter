@@ -167,6 +167,8 @@
       no_accounts: "没有可监控的 {0} 凭证。",
       first_query: "CPA 启动约 20 秒后开始第一次查询。",
       refresh: "刷新", refreshed: "已刷新 {0}",
+      rename: "命名", rename_prompt: "{0} 的名称，写入 CPA 凭证备注的第一行。留空则按邮箱区分账号。", renamed: "已保存 {0} 的名称",
+      rename_clear_note: "这个账号的备注还有其他内容。清空名称会删除整条备注，继续吗？",
       cooldown_stale: "额度已恢复，但 CPA 仍冷却到 {0}，期间的请求和点火都会被拒绝；在 CPA 管理中心清除这个账号的冷却。",
       cooldown: "CPA 冷却到 {0}（{1}）",
       blocked_5h: "5 小时额度已用完", blocked_7d: "7 天额度已用完", blocked_other: "{0}额度已用完",
@@ -288,6 +290,8 @@
       no_accounts: "No {0} credentials to monitor.",
       first_query: "The first query runs about 20 seconds after CPA starts.",
       refresh: "Refresh", refreshed: "Refreshed {0}",
+      rename: "Name", rename_prompt: "Name of {0}, saved as the first line of the CPA credential note. Leave it empty to tell accounts apart by email.", renamed: "Saved the name of {0}",
+      rename_clear_note: "The note of this account has more lines. Clearing the name deletes the whole note. Continue?",
       cooldown_stale: "Quota is back, but CPA cools this account down until {0} and rejects requests and ignition until then. Clear the cooldown in the CPA Management Center.",
       cooldown: "CPA cooldown until {0} ({1})",
       blocked_5h: "5-hour quota used up", blocked_7d: "7-day quota used up", blocked_other: "{0} quota used up",
@@ -650,10 +654,13 @@
       var refresh = el("button", { type: "button", class: "btn btn-ghost btn-sm", text: translate("refresh"), onclick: function () {
         runAction(refresh, API + "/refresh", { auth_index: account.auth_index }, translate("refreshed", account.title));
       } });
+      var rename = el("button", { type: "button", class: "btn btn-ghost btn-sm", text: translate("rename"), onclick: function () {
+        renameAccount(rename, account);
+      } });
       card.appendChild(el("div", { class: "account-head" }, [
         el("span", { class: "type-badge type-" + account.provider, text: account.title }),
         el("span", { class: "account-email", title: account.email || account.name, text: account.email || account.name }),
-        refresh
+        rename, refresh
       ]));
       (account.groups || []).forEach(function (group) {
         var block = el("div", { class: "quota-group" });
@@ -884,6 +891,35 @@
       if (data.status) { status = data.status; renderStatus(); }
       toast(data.ok ? success : translate("failed", data.error));
       loadHistory(true);
+    }).catch(function (err) {
+      if (err.message !== "unauthorized") toast(translate("failed", err.message));
+    }).then(function () { button.disabled = false; });
+  }
+
+  // The account name is the first line of the CPA credential note. Renaming
+  // replaces that line and keeps the rest of the note. CPA trims the note, so
+  // a note whose first line is empty takes its name from the next line;
+  // clearing the name of a note with more lines therefore deletes the note,
+  // after a confirmation. The account is then refreshed so that the plugin
+  // reads the new note at once. The quota query of the refresh can fail for
+  // reasons unrelated to the name, which the plugin applies anyway, so its
+  // result only updates the page.
+  function renameAccount(button, account) {
+    var lines = (account.note || "").split(/\r?\n/);
+    var name = prompt(translate("rename_prompt", account.title), lines[0].trim());
+    if (name === null) return;
+    name = name.replace(/\s+/g, " ").trim();
+    var rest = lines.slice(1).join("\n").trim();
+    if (!name && rest && !confirm(translate("rename_clear_note"))) return;
+    var note = name ? (name + "\n" + rest).trim() : "";
+    button.disabled = true;
+    api("PATCH", "/v0/management/auth-files/fields", { name: account.name, note: note }).then(function () {
+      return api("POST", API + "/refresh", { auth_index: account.auth_index }).then(function (data) {
+        if (data.status) { status = data.status; renderStatus(); }
+      }, function () { /* the name shows after the next poll */ }).then(function () {
+        toast(translate("renamed", account.email || account.name));
+        loadHistory(true);
+      });
     }).catch(function (err) {
       if (err.message !== "unauthorized") toast(translate("failed", err.message));
     }).then(function () { button.disabled = false; });
