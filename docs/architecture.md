@@ -43,6 +43,8 @@ Lamplighter 是用 Go 编写、以 `-buildmode=c-shared` 构建的 CPA 原生插
 
 页面注册为资源 `GET /v0/resource/plugins/lamplighter/page`，菜单名为 `Lamplighter`。资源本身不需要认证，页面中的数据请求都带管理密钥。页面从管理中心保存在 `localStorage` 的 `cli-proxy-auth` 中读取密钥（管理中心用主机名和 User-Agent 做了可逆混淆），读不到时让用户输入并只保存在 `sessionStorage`。设置通过 CPA 的 `PATCH /v0/management/plugins/lamplighter/config` 自动保存：表单的 `change` 事件触发保存，每次只提交改动字段所在的顶层键。该接口只合并顶层键，所以 `ignition`、`providers`、`recovery_notify` 等对象以已保存的对象为基础整体提交。保存依次进行，后一次以前一次写入的配置为基础；数字不满足输入框的范围或步长时不保存。浏览器会把为本站保存的密码（通常是管理密钥）填进密码输入框，所以密码输入框中由浏览器自动填入（匹配 `:autofill` 或 `:-webkit-autofill`）或与当前管理密钥相同的值不保存，输入框恢复为已保存的值；`models_api_key` 输入框还带有让 1Password、Bitwarden 和 LastPass 跳过它的属性。`models_api_key` 输入框设为 `autocomplete="one-time-code"`：Chrome 的密码管理不把这类字段当作密码，表单中没有其他密码框时只把它作为备用字段，不在页面加载时自动填入，也不在修改后弹出保存或更新密码的提示。`autocomplete="off"` 对密码框不起作用，`new-password` 会让 Chrome 提示生成强密码，所以都不使用。`webhook.headers` 和 `webhook.success_json` 在页面上以文本编辑（每行一个 `名称: 值`、JSON 对象），无法解析时不保存。状态接口只返回 webhook 的地址、请求头和请求体是否已设置，页面从 CPA 的插件配置接口读取原值填入表单。最后一次保存 3 秒后，页面重新读取状态，把保存过的字段填成插件应用后的值，正在编辑的字段不回填；保存失败时恢复为已保存的值。测试推送等待未完成的保存后再发送。
 
+账号卡片上的“命名”用 CPA 的 `PATCH /v0/management/auth-files/fields` 写入凭证的 `note`：替换备注的第一行，保留其余各行，再调用 `refresh` 查询这个账号，使插件立即读到新名称。CPA 管理中心调用的是 `/credentials/fields`，所以第一个路径返回不带 `error` 的 404（路由不存在）时改用这个路径。
+
 页面标题旁的图标从 GitHub 加载仓库中的 `assets/logo.png`，更换图标不需要发布新版本；加载失败时不显示。
 
 页面文字都在 `page.js` 的 `I18N` 词典中，中文和英文各一份；`page.html` 中的静态文字用 `data-i18n`（以及 `data-i18n-placeholder`、`data-i18n-title`、`data-i18n-aria-label`）标出词条，其中的中文原文只在脚本应用语言前显示。语言跟随管理中心：先读父页面根元素的 `lang`（管理中心每次切换语言都会更新它）并监听变化，单独打开时读 `localStorage` 的 `cli-proxy-language`，再退回到浏览器语言；`zh` 开头的显示中文，其余显示英文。状态接口的 `language` 与页面语言不同时，页面调用 `POST .../language` 上报，失败时在下一次刷新状态时重试。
@@ -69,13 +71,15 @@ Lamplighter 是用 Go 编写、以 `-buildmode=c-shared` 构建的 CPA 原生插
 
 | 回调 | 用途 |
 | --- | --- |
-| `host.auth.list` | 凭证列表，含 `auth_index`、运行时 ID、邮箱、停用状态，以及 CPA 冷却状态（`unavailable`、`next_retry_after`） |
+| `host.auth.list` | 凭证列表，含 `auth_index`、运行时 ID、邮箱、备注（`note`）、停用状态，以及 CPA 冷却状态（`unavailable`、`next_retry_after`） |
 | `host.auth.get` | 凭证文件 JSON，取 access token、Codex 账号 ID、Antigravity `project_id`、Kimi 的 `domain` 和 `base_url`、Grok 的 `sub`、`proxy_url` |
 | `host.model.execute` | 点火，带 `auth_id` 和 `forced_provider` |
 | `host.http.operation_open` / `host.http.do` / `host.http.cancel` | 没有账号代理时的额度请求 |
 | `host.log` | 写入 CPA 日志 |
 
 宿主回调绑定在插件实例上，不依赖某次 RPC，所以后台循环可以随时调用。
+
+每轮主动查询开始时，`engine.loadCreds` 读取凭证列表，重新计算每个账号的后缀（`Cred.Suffix`）：备注第一行（`accountName`，最长 `maxNameRunes` 个字符）不为空时为 `#` 加名称，同一服务的名称重复时再加邮箱后缀；没有名称时，同一服务有多个账号才加邮箱后缀（`maskedSuffix`）。额度组的 `Label` 随之更新。告警状态按额度组 key 记录，改名不会重新发送通知。
 
 ## 服务
 

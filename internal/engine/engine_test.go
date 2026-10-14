@@ -168,6 +168,35 @@ func TestPollBuildsAccountsWithSuffixes(t *testing.T) {
 	}
 }
 
+func TestNotesNameAccounts(t *testing.T) {
+	c := &clock{t: time.Date(2026, 10, 4, 10, 0, 0, 0, shanghai)}
+	h := standardHost(c)
+	e, _ := newTestEngine(t, h, c)
+	h.auths = []pluginapi.HostAuthFileEntry{
+		{ID: "codex-a.json", AuthIndex: "1", Name: "codex-a.json", Provider: "codex", Email: "alice.work@example.com", Note: " 主力号 "},
+		{ID: "codex-b.json", AuthIndex: "2", Name: "codex-b.json", Provider: "codex", Email: "bob.team@example.net"},
+		{ID: "claude.json", AuthIndex: "3", Name: "claude.json", Provider: "claude", Email: "me@example.com", Note: "工作\n2026-09 购入"},
+		{ID: "ag.json", AuthIndex: "4", Name: "ag.json", Provider: "antigravity", Note: "a very long account name for testing"},
+	}
+	creds, err := e.loadCreds(e.config())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var suffixes []string
+	for _, cred := range creds {
+		suffixes = append(suffixes, cred.Suffix)
+	}
+	if got := strings.Join(suffixes, ","); got != "#主力号,#am,#工作,#a very long account …" {
+		t.Fatalf("suffixes %s", got)
+	}
+
+	h.auths[1].Note = "主力号"
+	creds, _ = e.loadCreds(e.config())
+	if creds[0].Suffix != "#主力号#rk" || creds[1].Suffix != "#主力号#am" {
+		t.Fatalf("same names %q %q", creds[0].Suffix, creds[1].Suffix)
+	}
+}
+
 func TestStatusOrdersGroupsLikeThePage(t *testing.T) {
 	c := &clock{t: time.Date(2026, 10, 4, 10, 0, 0, 0, shanghai)}
 	h := standardHost(c)

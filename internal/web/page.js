@@ -167,6 +167,7 @@
       no_accounts: "没有可监控的 {0} 凭证。",
       first_query: "CPA 启动约 20 秒后开始第一次查询。",
       refresh: "刷新", refreshed: "已刷新 {0}",
+      rename: "命名", rename_prompt: "{0} 的名称，写入 CPA 凭证备注的第一行。留空则按邮箱区分账号。", renamed: "已保存 {0} 的名称",
       cooldown_stale: "额度已恢复，但 CPA 仍冷却到 {0}，期间的请求和点火都会被拒绝；在 CPA 管理中心清除这个账号的冷却。",
       cooldown: "CPA 冷却到 {0}（{1}）",
       blocked_5h: "5 小时额度已用完", blocked_7d: "7 天额度已用完", blocked_other: "{0}额度已用完",
@@ -288,6 +289,7 @@
       no_accounts: "No {0} credentials to monitor.",
       first_query: "The first query runs about 20 seconds after CPA starts.",
       refresh: "Refresh", refreshed: "Refreshed {0}",
+      rename: "Name", rename_prompt: "Name of {0}, saved as the first line of the CPA credential note. Leave it empty to tell accounts apart by email.", renamed: "Saved the name of {0}",
       cooldown_stale: "Quota is back, but CPA cools this account down until {0} and rejects requests and ignition until then. Clear the cooldown in the CPA Management Center.",
       cooldown: "CPA cooldown until {0} ({1})",
       blocked_5h: "5-hour quota used up", blocked_7d: "7-day quota used up", blocked_other: "{0} quota used up",
@@ -650,10 +652,13 @@
       var refresh = el("button", { type: "button", class: "btn btn-ghost btn-sm", text: translate("refresh"), onclick: function () {
         runAction(refresh, API + "/refresh", { auth_index: account.auth_index }, translate("refreshed", account.title));
       } });
+      var rename = el("button", { type: "button", class: "btn btn-ghost btn-sm", text: translate("rename"), onclick: function () {
+        renameAccount(rename, account);
+      } });
       card.appendChild(el("div", { class: "account-head" }, [
         el("span", { class: "type-badge type-" + account.provider, text: account.title }),
         el("span", { class: "account-email", title: account.email || account.name, text: account.email || account.name }),
-        refresh
+        rename, refresh
       ]));
       (account.groups || []).forEach(function (group) {
         var block = el("div", { class: "quota-group" });
@@ -887,6 +892,29 @@
     }).catch(function (err) {
       if (err.message !== "unauthorized") toast(translate("failed", err.message));
     }).then(function () { button.disabled = false; });
+  }
+
+  // The account name is the first line of the CPA credential note. Renaming
+  // replaces that line, keeps the rest of the note, and refreshes the account
+  // so that the plugin reads the new note. CPA serves the fields endpoint at
+  // /auth-files/fields and the Management Center calls /credentials/fields,
+  // so a 404 from the first path tries the second.
+  function renameAccount(button, account) {
+    var lines = (account.note || "").split(/\r?\n/);
+    var name = prompt(translate("rename_prompt", account.title), lines[0].trim());
+    if (name === null) return;
+    lines[0] = name.replace(/\s+/g, " ").trim();
+    var body = { name: account.name, note: lines.join("\n").trim() };
+    button.disabled = true;
+    api("PATCH", "/v0/management/auth-files/fields", body).catch(function (err) {
+      if (err.message !== "HTTP 404") throw err;
+      return api("PATCH", "/v0/management/credentials/fields", body);
+    }).then(function () {
+      return runAction(button, API + "/refresh", { auth_index: account.auth_index }, translate("renamed", account.email || account.name));
+    }).catch(function (err) {
+      if (err.message !== "unauthorized") toast(translate("failed", err.message));
+      button.disabled = false;
+    });
   }
 
   // ---- Chart ----

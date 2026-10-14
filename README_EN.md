@@ -29,7 +29,7 @@ Lamplighter is a native plugin for [CLIProxyAPI](https://github.com/router-for-m
 
 Kimi quota queries follow the CPA Management Center; parsing is tested with a real response a user provided, but the requests have not run against a real account yet. Grok accounts billed by API usage have no quota to read and show an error. Accounts without a 5-hour window, such as ChatGPT Pro, are monitored for their other windows and not ignited.
 
-When a service has several accounts, notifications and the page tell them apart by the last two characters of the email user name, for example `ChatGPT#rk`.
+When a service has several accounts, notifications and the page tell them apart by the last two characters of the email user name, for example `ChatGPT#rk`. A named account shows its name instead, for example `ChatGPT#main`. To name an account, click "Name" on its card in the Lamplighter page, or edit the credential's "Note" in the CPA Management Center. The name is the first line of the note, cut at 20 characters. A service with one account also shows its name. When two accounts of a service have the same name, the email suffix follows the name. A note changed in the CPA Management Center takes effect after the next poll or a manual refresh. Recorded events keep their original label.
 
 ## Requirements
 
@@ -220,7 +220,7 @@ The URL, headers and body can use placeholders:
 | `{{url}}` | Link; only Did Codex Reset notifications have one, empty otherwise |
 | `{{priority}}` | `high` when quota drops to the third threshold or runs out, ignition pauses or a CPA cooldown is not cleared; `normal` otherwise |
 | `{{kind}}` | Notification type: `quota` quota drop, `recovery` quota recovered, `reminder` reset reminder, `cooldown` CPA cooldown not cleared, `circuit` ignition paused, `codex_reset` Did Codex Reset, `test` test notification |
-| `{{label}}` | Quota group, such as `ChatGPT#rk`; empty for notifications not about a quota group |
+| `{{label}}` | Quota group, such as `ChatGPT#rk` or `ChatGPT#main`; empty for notifications not about a quota group |
 | `{{time}}` | Time sent, in RFC 3339 format and the plugin time zone |
 
 Placeholders are escaped for where they appear: URL-encoded in the URL; JSON-string-escaped in a JSON body, so put them inside quotes; form-encoded in a form body; with line breaks replaced by spaces in headers. Without a `Content-Type` header, a body that is JSON (with placeholders inside quotes) is sent as JSON and anything else as plain text.
@@ -265,7 +265,7 @@ plugins:
 
 The page shows:
 
-- the quota windows of each account with reset times and data sources, with a refresh button per account;
+- the quota windows of each account with reset times and data sources, with buttons to refresh or name each account;
 - the next ignition, last result and failure protection state of each quota group, with an "ignite now" button; hidden while ignition is off;
 - a quota chart for either the 5-hour quota, over the last 1, 3, 6, 12, 24 or 26 hours (6 by default), or the 7-day quota, over the last 1, 4, 8 or 15 days, one month (from this date last month), or 36 days (8 days by default). The top part has one colored band per service, colored like the quota bars, in the order Claude, ChatGPT, Gemini, Kimi, Grok, Fable, Claude / GPT by default or by lowest remaining; a service with several accounts shows their total and expands into one row per account. The bottom part plots the selected row with its resets and ignition results. Only the window kinds the accounts have are offered; windows of other lengths only show on the account cards. With `remember_chart_filters` on, the page keeps the last choices;
 - recent events in columns for time, type, quota group and detail;
