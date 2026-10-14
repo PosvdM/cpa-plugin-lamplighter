@@ -130,7 +130,7 @@ Claude 和 Codex 的额度无论主动还是被动获取，都精确到 1%；Ant
 | `request_timeout_seconds` | `20` | 单次上游请求超时 |
 | `passive_skip_seconds` | `60` | 整点前多少秒内有被动数据时跳过主动查询；`0` 表示不跳过 |
 | `passive_skip_max_minutes` | `30` | 同一账号最多连续跳过多少分钟 |
-| `models_api_key` | 空 | 读取模型列表用的 CPA API key；未设置时自动点火无法选择模型。不能使用管理密钥，页面不保存与管理密钥相同的值 |
+| `models_api_key` | 空 | 读取模型列表用的 CPA API key；未设置时自动点火无法选择模型。不能使用管理密钥；在页面上修改时，管理密钥和 CPA 不接受的 key 不会保存，页面会提示原因 |
 | `cpa_base_url` | `http://127.0.0.1:8317` | 插件访问 CPA 自身的地址；CPA 改了端口或开启 TLS 时需要同步修改 |
 | `history_retention_days` | `40` | 额度历史保留天数 |
 | `remember_chart_filters` | `false` | 管理页面在当前浏览器中记住“额度变化”上次选择的额度窗口、时间范围和排序；关闭时每次打开页面都使用默认选择 |

@@ -207,6 +207,7 @@
       tz_note: "通知和页面中的时间使用 {0}，{1}。",
       saved: "已保存，插件会在几秒内应用新设置", save_failed: "保存失败：{0}",
       management_key_refused: "这是 CPA 管理密钥，未保存。请填写 access.api-keys 中的 key",
+      api_key_refused: "CPA 不接受这个 key，未保存。请填写 access.api-keys 中的 key",
       load_failed: "加载失败：{0}",
       refreshed_all: "已刷新全部额度", test_sent: "测试通知已发送"
     },
@@ -330,6 +331,7 @@
       tz_note: "Notifications and this page show times in {0}, {1}.",
       saved: "Saved; the plugin applies the new settings within a few seconds", save_failed: "Could not save: {0}",
       management_key_refused: "This is the CPA management key, so it was not saved. Enter a key from access.api-keys",
+      api_key_refused: "CPA does not accept this key, so it was not saved. Enter a key from access.api-keys",
       load_failed: "Could not load: {0}",
       refreshed_all: "Refreshed all quota", test_sent: "Test notification sent"
     }
@@ -1968,12 +1970,24 @@
     var top = input.hasAttribute("data-group") ? "providers" : input.name && topKey(input.name);
     if (!top) return;
     // Browsers fill the password saved for this site, usually the management
-    // key, into password fields. A filled-in value or the management key is
-    // not saved, and the field shows the saved value again.
-    if (input.type === "password" && (autofilled(input) || key && input.value.trim() === key)) {
-      if (!autofilled(input)) toast(translate("management_key_refused"));
-      fillInput(input, effectiveConfig());
-      return;
+    // key, into password fields. A value the browser fills in while the field
+    // is not focused comes from autofill on page load; it is not saved, and
+    // the field shows the saved value again. The management key is refused
+    // with a message, and any other new key is saved only when CPA accepts it
+    // for /v1/models.
+    var checked = Promise.resolve(true);
+    if (input.type === "password") {
+      var value = input.value.trim();
+      if (autofilled(input) && document.activeElement !== input) {
+        fillInput(input, effectiveConfig());
+        return;
+      }
+      if (key && value === key) {
+        toast(translate("management_key_refused"));
+        fillInput(input, effectiveConfig());
+        return;
+      }
+      if (value) checked = acceptedKey(value);
     }
     if (input.type === "number") {
       if (!input.checkValidity()) { input.reportValidity(); return; }
@@ -1990,7 +2004,14 @@
         return;
       }
     }
-    saveQueue = saveQueue.then(function () {
+    saveQueue = saveQueue.then(function () { return checked; }).then(function (accepted) {
+      // A key edited again during the check is checked by its own change event.
+      if (input.type === "password" && input.value.trim() !== value) return;
+      if (!accepted) {
+        toast(translate("api_key_refused"));
+        fillInput(input, effectiveConfig());
+        return;
+      }
       return api("PATCH", CONFIG_API, buildPatch(top)).then(function () {
         toast(translate("saved"));
         refillKeys[top] = true;
@@ -2004,6 +2025,16 @@
         fillSettings(keys);
       });
     });
+  }
+
+  // acceptedKey reports whether CPA accepts value as an API key for
+  // /v1/models, the request the plugin makes with models_api_key. Only HTTP
+  // 401 and 403 count as refused, so a check that cannot reach CPA does not
+  // block the save.
+  function acceptedKey(value) {
+    return fetch("/v1/models", { headers: { "Authorization": "Bearer " + value, "Accept": "application/json" } }).then(function (res) {
+      return res.status !== 401 && res.status !== 403;
+    }, function () { return true; });
   }
 
   // autofilled reports whether the browser filled in the value. Firefox and
