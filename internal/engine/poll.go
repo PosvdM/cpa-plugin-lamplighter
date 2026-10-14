@@ -35,7 +35,11 @@ type Cred struct {
 	// CooldownUntil is when CPA lets the credential serve requests again,
 	// or zero when it is not cooling down.
 	CooldownUntil time.Time `json:"cooldown_until,omitempty"`
-	// Suffix tells accounts of the same provider apart, for example "#rk".
+	// Note is the credential note set in CPA. Its first line names the
+	// account.
+	Note string `json:"note,omitempty"`
+	// Suffix tells accounts apart: "#" and the account name, such as
+	// "#主力号", or the masked email of an unnamed account, such as "#rk".
 	Suffix string `json:"suffix,omitempty"`
 }
 
@@ -188,8 +192,26 @@ func maskedSuffix(email string, ordinal int) string {
 	return "#" + strconv.Itoa(ordinal)
 }
 
-// loadCreds reads the credential list and assigns account suffixes. A
-// provider with one monitored credential needs no suffix.
+// maxNameRunes is the longest account name; a longer one is cut and ends
+// with "…".
+const maxNameRunes = 20
+
+// accountName returns the account name in a CPA credential note: its first
+// line, cut to maxNameRunes characters.
+func accountName(note string) string {
+	line, _, _ := strings.Cut(strings.TrimSpace(note), "\n")
+	runes := []rune(strings.TrimSpace(line))
+	if len(runes) > maxNameRunes {
+		return string(runes[:maxNameRunes]) + "…"
+	}
+	return string(runes)
+}
+
+// loadCreds reads the credential list and assigns account suffixes. A named
+// account gets "#" and its name. An unnamed account gets the masked email,
+// unless it is the only monitored credential of its provider. A named account
+// whose suffix equals that of another account of its provider, such as two
+// accounts with the same name, also gets the masked email.
 func (e *Engine) loadCreds(cfg config.Config) ([]*Cred, error) {
 	entries, err := e.host.AuthList()
 	if err != nil {
@@ -217,6 +239,7 @@ func (e *Engine) loadCreds(cfg config.Config) ([]*Cred, error) {
 			Provider:     provider,
 			HostProvider: hostProvider,
 			Email:        credentialEmail(entry),
+			Note:         entry.Note,
 			Unavailable:  entry.Unavailable,
 		})
 		if entry.Unavailable {
@@ -225,10 +248,22 @@ func (e *Engine) loadCreds(cfg config.Config) ([]*Cred, error) {
 		counts[provider]++
 	}
 	ordinals := map[string]int{}
-	for _, cred := range creds {
+	masked := make([]string, len(creds))
+	taken := map[[2]string]int{}
+	for i, cred := range creds {
 		ordinals[cred.Provider]++
 		if counts[cred.Provider] > 1 {
-			cred.Suffix = maskedSuffix(cred.Email, ordinals[cred.Provider])
+			masked[i] = maskedSuffix(cred.Email, ordinals[cred.Provider])
+		}
+		cred.Suffix = masked[i]
+		if name := accountName(cred.Note); name != "" {
+			cred.Suffix = "#" + name
+		}
+		taken[[2]string{cred.Provider, cred.Suffix}]++
+	}
+	for i, cred := range creds {
+		if accountName(cred.Note) != "" && taken[[2]string{cred.Provider, cred.Suffix}] > 1 {
+			cred.Suffix += masked[i]
 		}
 	}
 	byIndex := make(map[string]*Cred, len(creds))
