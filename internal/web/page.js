@@ -204,6 +204,7 @@
       tz_config: "配置中指定", tz_cpa: "跟随 CPA 服务器",
       tz_note: "通知和页面中的时间使用 {0}，{1}。",
       saved: "已保存，插件会在几秒内应用新设置", save_failed: "保存失败：{0}",
+      management_key_refused: "这是 CPA 管理密钥，未保存。请填写 access.api-keys 中的 key",
       load_failed: "加载失败：{0}",
       refreshed_all: "已刷新全部额度", test_sent: "测试通知已发送"
     },
@@ -324,6 +325,7 @@
       tz_config: "set in the config", tz_cpa: "following the CPA server",
       tz_note: "Notifications and this page show times in {0}, {1}.",
       saved: "Saved; the plugin applies the new settings within a few seconds", save_failed: "Could not save: {0}",
+      management_key_refused: "This is the CPA management key, so it was not saved. Enter a key from access.api-keys",
       load_failed: "Could not load: {0}",
       refreshed_all: "Refreshed all quota", test_sent: "Test notification sent"
     }
@@ -1929,6 +1931,14 @@
     var input = event.target;
     var top = input.hasAttribute("data-group") ? "providers" : input.name && topKey(input.name);
     if (!top) return;
+    // Browsers fill the password saved for this site, usually the management
+    // key, into password fields. A filled-in value or the management key is
+    // not saved, and the field shows the saved value again.
+    if (input.type === "password" && (autofilled(input) || key && input.value.trim() === key)) {
+      if (!autofilled(input)) toast(translate("management_key_refused"));
+      fillInput(input, effectiveConfig());
+      return;
+    }
     if (input.type === "number") {
       if (!input.checkValidity()) { input.reportValidity(); return; }
       if (input.value === "") { fillInput(input, effectiveConfig()); return; }
@@ -1958,6 +1968,14 @@
         fillSettings(keys);
       });
     });
+  }
+
+  // autofilled reports whether the browser filled in the value. Firefox and
+  // recent Chrome know :autofill; Safari and older Chrome only the prefixed
+  // name.
+  function autofilled(input) {
+    try { if (input.matches(":autofill")) return true; } catch (err) {}
+    try { return input.matches(":-webkit-autofill"); } catch (err) { return false; }
   }
 
   function refillSaved() {
