@@ -209,8 +209,9 @@ func accountName(note string) string {
 
 // loadCreds reads the credential list and assigns account suffixes. A named
 // account gets "#" and its name. An unnamed account gets the masked email,
-// unless it is the only monitored credential of its provider. Two accounts
-// of one provider with the same name also get the masked email.
+// unless it is the only monitored credential of its provider. A named account
+// whose suffix equals that of another account of its provider, such as two
+// accounts with the same name, also gets the masked email.
 func (e *Engine) loadCreds(cfg config.Config) ([]*Cred, error) {
 	entries, err := e.host.AuthList()
 	if err != nil {
@@ -246,26 +247,23 @@ func (e *Engine) loadCreds(cfg config.Config) ([]*Cred, error) {
 		}
 		counts[provider]++
 	}
-	names := map[[2]string]int{}
-	for _, cred := range creds {
-		if name := accountName(cred.Note); name != "" {
-			names[[2]string{cred.Provider, name}]++
-		}
-	}
 	ordinals := map[string]int{}
-	for _, cred := range creds {
+	masked := make([]string, len(creds))
+	taken := map[[2]string]int{}
+	for i, cred := range creds {
 		ordinals[cred.Provider]++
-		masked := ""
 		if counts[cred.Provider] > 1 {
-			masked = maskedSuffix(cred.Email, ordinals[cred.Provider])
+			masked[i] = maskedSuffix(cred.Email, ordinals[cred.Provider])
 		}
-		switch name := accountName(cred.Note); {
-		case name == "":
-			cred.Suffix = masked
-		case names[[2]string{cred.Provider, name}] > 1:
-			cred.Suffix = "#" + name + masked
-		default:
+		cred.Suffix = masked[i]
+		if name := accountName(cred.Note); name != "" {
 			cred.Suffix = "#" + name
+		}
+		taken[[2]string{cred.Provider, cred.Suffix}]++
+	}
+	for i, cred := range creds {
+		if accountName(cred.Note) != "" && taken[[2]string{cred.Provider, cred.Suffix}] > 1 {
+			cred.Suffix += masked[i]
 		}
 	}
 	byIndex := make(map[string]*Cred, len(creds))

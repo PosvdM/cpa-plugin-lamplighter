@@ -195,6 +195,14 @@ func TestNotesNameAccounts(t *testing.T) {
 	if creds[0].Suffix != "#主力号#rk" || creds[1].Suffix != "#主力号#am" {
 		t.Fatalf("same names %q %q", creds[0].Suffix, creds[1].Suffix)
 	}
+
+	// A name equal to another account's email suffix also gets its own.
+	h.auths[0].Note = "am"
+	h.auths[1].Note = ""
+	creds, _ = e.loadCreds(e.config())
+	if creds[0].Suffix != "#am#rk" || creds[1].Suffix != "#am" {
+		t.Fatalf("name like an email suffix %q %q", creds[0].Suffix, creds[1].Suffix)
+	}
 }
 
 func TestStatusOrdersGroupsLikeThePage(t *testing.T) {
