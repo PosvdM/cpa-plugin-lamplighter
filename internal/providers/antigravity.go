@@ -9,15 +9,112 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/models"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/quota"
+	"gopkg.in/yaml.v3"
 )
 
-// AntigravityAgent is the User-Agent of Antigravity quota requests, the same
-// as the CPA Management Center quota page.
-const AntigravityAgent = "antigravity/cli/1.0.13 (aidev_client; os_type=darwin; arch=arm64)"
+// The User-Agent of Antigravity quota requests follows the CPA Antigravity
+// executor: the credential's user_agent when set, otherwise the Antigravity
+// Hub UA with the latest Hub version from the Hub update manifest. Cloud Code
+// leaves newer model groups, such as Gemini, out of the quota of older client
+// UAs.
+const (
+	AntigravityHubManifestURL = "https://antigravity-hub-auto-updater-974169037036.us-central1.run.app/manifest/latest-arm64-mac.yml"
+	// antigravityFallbackVersion is used until the manifest has been read,
+	// the same as the CPA Management Center.
+	antigravityFallbackVersion = "2.23.0"
+	antigravityHubPlatform     = "darwin/arm64"
+	// The manifest is read again after antigravityVersionTTL, and after
+	// antigravityVersionRetry when a read fails.
+	antigravityVersionTTL   = 3 * time.Hour
+	antigravityVersionRetry = 30 * time.Minute
+)
+
+var antigravityHub hubVersion
+
+// hubVersion caches the latest Antigravity Hub version.
+type hubVersion struct {
+	mu      sync.Mutex
+	version string
+	next    time.Time
+}
+
+// get returns the cached version, reading the manifest first when it is
+// due. A failed read keeps the cached version.
+func (h *hubVersion) get(ctx context.Context, doer quota.Doer, now time.Time) string {
+	h.mu.Lock()
+	due := !now.Before(h.next)
+	if due {
+		// Other requests keep the cached version while this one reads.
+		h.next = now.Add(antigravityVersionRetry)
+	}
+	h.mu.Unlock()
+	if due {
+		if version, err := fetchHubVersion(ctx, doer); err == nil {
+			h.mu.Lock()
+			h.version, h.next = version, now.Add(antigravityVersionTTL)
+			h.mu.Unlock()
+		}
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.version == "" {
+		return antigravityFallbackVersion
+	}
+	return h.version
+}
+
+var hubSemver = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
+
+// fetchHubVersion reads the version from the Hub update manifest with the
+// same headers as CPA, through the CPA egress.
+func fetchHubVersion(ctx context.Context, doer quota.Doer) (string, error) {
+	header := http.Header{}
+	header.Set("User-Agent", "electron-builder")
+	header.Set("Cache-Control", "no-cache")
+	resp, err := doer.Do(ctx, "", quota.Request{Method: http.MethodGet, URL: AntigravityHubManifestURL, Header: header})
+	if err != nil {
+		return "", err
+	}
+	if resp.Status != http.StatusOK {
+		return "", fmt.Errorf("Antigravity Hub 更新清单返回 HTTP %d", resp.Status)
+	}
+	var manifest struct {
+		Version string `yaml:"version"`
+	}
+	if err := yaml.Unmarshal(resp.Body, &manifest); err != nil {
+		return "", err
+	}
+	version := strings.TrimSpace(manifest.Version)
+	if !hubSemver.MatchString(version) {
+		return "", fmt.Errorf("Antigravity Hub 更新清单的版本无效: %q", version)
+	}
+	return version, nil
+}
+
+// antigravityUserAgent returns the User-Agent CPA uses for the credential.
+func antigravityUserAgent(ctx context.Context, doer quota.Doer, cred Credential, now time.Time) string {
+	attributes, _ := cred.Data["attributes"].(map[string]any)
+	metadata, _ := cred.Data["metadata"].(map[string]any)
+	ua := firstString(attributes, cred.Data, "user_agent")
+	if ua == "" {
+		ua = firstString(metadata, nil, "user_agent")
+	}
+	if ua == "" {
+		return "antigravity/hub/" + antigravityHub.get(ctx, doer, now) + " " + antigravityHubPlatform
+	}
+	// Like CPA, a long Antigravity UA is cut to its short form.
+	if strings.HasPrefix(strings.ToLower(ua), "antigravity/") {
+		if i := strings.Index(strings.ToLower(ua), " google-api-nodejs-client/"); i > 0 {
+			ua = strings.TrimSpace(ua[:i])
+		}
+	}
+	return ua
+}
 
 // AntigravityQuotaURLs are tried in order until one returns quota groups.
 var AntigravityQuotaURLs = []string{
@@ -84,15 +181,16 @@ func antigravityCandidates(groupLabel string, available []string) []string {
 	return out
 }
 
-func fetchAntigravity(ctx context.Context, doer quota.Doer, cred Credential, _ time.Time) ([]quota.RawGroup, error) {
+func fetchAntigravity(ctx context.Context, doer quota.Doer, cred Credential, now time.Time) ([]quota.RawGroup, error) {
 	if cred.ProjectID == "" {
 		return nil, errors.New("Antigravity 凭证缺少 project_id")
 	}
 	body, _ := json.Marshal(map[string]string{"project": cred.ProjectID})
+	agent := antigravityUserAgent(ctx, doer, cred, now)
 	var lastErr error
 	for _, url := range AntigravityQuotaURLs {
 		header := bearer(cred)
-		header.Set("User-Agent", AntigravityAgent)
+		header.Set("User-Agent", agent)
 		payload, err := send(ctx, doer, cred, quota.Request{Method: http.MethodPost, URL: url, Header: header, Body: body})
 		if err != nil {
 			if errors.Is(err, quota.ErrUnauthorized) {

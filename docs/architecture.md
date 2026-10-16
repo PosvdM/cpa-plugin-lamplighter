@@ -72,9 +72,9 @@ Lamplighter 是用 Go 编写、以 `-buildmode=c-shared` 构建的 CPA 原生插
 | 回调 | 用途 |
 | --- | --- |
 | `host.auth.list` | 凭证列表，含 `auth_index`、运行时 ID、邮箱、备注（`note`）、停用状态，以及 CPA 冷却状态（`unavailable`、`next_retry_after`） |
-| `host.auth.get` | 凭证文件 JSON，取 access token、Codex 账号 ID、Antigravity `project_id`、Kimi 的 `domain` 和 `base_url`、Grok 的 `sub`、`proxy_url` |
+| `host.auth.get` | 凭证文件 JSON，取 access token、Codex 账号 ID、Antigravity 的 `project_id` 和 `user_agent`、Kimi 的 `domain` 和 `base_url`、Grok 的 `sub`、`proxy_url` |
 | `host.model.execute` | 点火，带 `auth_id` 和 `forced_provider` |
-| `host.http.operation_open` / `host.http.do` / `host.http.cancel` | 没有账号代理时的额度请求 |
+| `host.http.operation_open` / `host.http.do` / `host.http.cancel` | 没有账号代理时的额度请求，以及读取 Antigravity Hub 更新清单 |
 | `host.log` | 写入 CPA 日志 |
 
 宿主回调绑定在插件实例上，不依赖某次 RPC，所以后台循环可以随时调用。
@@ -132,6 +132,11 @@ Lamplighter 是用 Go 编写、以 `-buildmode=c-shared` 构建的 CPA 原生插
 | Grok | `GET https://cli-chat-proxy.grok.com/v1/billing?format=credits`，带 Grok CLI 的请求头和凭证 `sub` 作为 `x-userid`。`currentPeriod` 为每周时是 7 天窗口；没有 `currentPeriod` 时才用按月的 `billingPeriodStart`/`End`。其他长度的周期固定使用 ID `credits`，让历史和提醒在周期之间延续 |
 
 请求头与 CPA 管理中心额度页相同，常量在 `internal/providers` 中各服务的文件里。Codex 的 User-Agent 与 CPA 的 Codex 执行器一致；Claude 的 User-Agent 与 CPA 默认的 Claude Code 指纹一致。
+
+Antigravity 的 User-Agent 按 CPA 的 Antigravity 执行器的规则确定。Cloud Code 按 User-Agent 判断客户端，对旧格式的客户端（如 `antigravity/cli/1.0.13 (aidev_client; ...)`）不返回 Gemini 额度组。
+
+- 凭证设置了 `user_agent`（文件顶层、`attributes` 或 `metadata` 中）时使用它；以 `antigravity/` 开头的值去掉 ` google-api-nodejs-client/...` 后缀。
+- 否则使用 `antigravity/hub/<版本> darwin/arm64`。版本读自 Antigravity Hub 更新清单（`AntigravityHubManifestURL`，与 CPA 使用的地址和请求头相同），成功后缓存 3 小时；读取失败时保留已缓存的版本，30 分钟后重试。还没有读到时使用 `2.23.0`，与 CPA 管理中心一致。清单在查询额度时按需读取，不经过凭证代理。
 
 token 来自凭证文件。CPA 在后台刷新 token 并写回文件，插件不自行刷新；上游返回 401 时跳过本轮，等 CPA 刷新。
 

@@ -60,6 +60,7 @@ CPA 插件商店从最新的 Release 安装插件：它按上面的名称查找 
 ## 修改约定
 
 - 修改宿主回调、RPC 字段或注册内容前，对照 CPA 源码中的 `sdk/pluginabi`、`sdk/pluginapi` 和 `internal/pluginhost`。`go.mod` 中的 CPA 版本与线上最低支持版本保持一致。
+- 升级 `go.mod` 中的 CPA 版本时，对照 CPA 的 `internal/runtime/executor` 更新 `internal/providers` 中 Codex 和 Claude 的 User-Agent 常量。插件无法在运行时读取 CPA 编译进去的常量。
 - 修改额度请求的地址或请求头时，对照 CPA 管理中心的 `src/utils/quota/constants.ts`，并更新 [架构文档](./architecture.md) 中的表格。
 - 修改轮询、跳过规则、点火时间或失败保护时，同步更新测试、README 和架构文档。
 - 后台循环中新增的 goroutine 必须有 `recover`，网络请求必须有超时。
