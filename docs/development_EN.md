@@ -60,6 +60,7 @@ Pushes to `main` only build and upload workflow artifacts (the unpackaged librar
 ## Conventions
 
 - Before changing host callbacks, RPC fields or the registration, check `sdk/pluginabi`, `sdk/pluginapi` and `internal/pluginhost` in the CPA source. The CPA version in `go.mod` matches the oldest supported CPA release.
+- When raising the CPA version in `go.mod`, update the Codex and Claude user agent constants in `internal/providers` from CPA's `internal/runtime/executor`. The plugin cannot read the constants built into CPA at run time.
 - When changing quota URLs or headers, compare with `src/utils/quota/constants.ts` of the CPA Management Center and update the table in [Architecture](./architecture_EN.md).
 - When changing polling, the skip rule, ignition timing or failure protection, update the tests, the READMEs and the architecture docs.
 - Every new goroutine in the background loop recovers from panics, and every network request has a timeout.

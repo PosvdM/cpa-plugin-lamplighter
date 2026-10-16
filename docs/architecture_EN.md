@@ -72,9 +72,9 @@ Host callbacks in use:
 | Callback | Purpose |
 | --- | --- |
 | `host.auth.list` | Credential list with `auth_index`, runtime ID, email, note (`note`), disabled state and the CPA cooldown (`unavailable`, `next_retry_after`) |
-| `host.auth.get` | Credential file JSON: access token, Codex account ID, Antigravity `project_id`, Kimi `domain` and `base_url`, Grok `sub`, `proxy_url` |
+| `host.auth.get` | Credential file JSON: access token, Codex account ID, Antigravity `project_id` and `user_agent`, Kimi `domain` and `base_url`, Grok `sub`, `proxy_url` |
 | `host.model.execute` | Ignition, with `auth_id` and `forced_provider` |
-| `host.http.operation_open` / `host.http.do` / `host.http.cancel` | Quota requests of credentials without their own proxy |
+| `host.http.operation_open` / `host.http.do` / `host.http.cancel` | Quota requests of credentials without their own proxy, and reading the Antigravity Hub update manifest |
 | `host.log` | Writes to the CPA log |
 
 Host callbacks are bound to the plugin instance, not to one RPC, so the background loop can call them at any time.
@@ -132,6 +132,11 @@ If the loop panics, `supervise` logs it and restarts the loop after 30 seconds. 
 | Grok | `GET https://cli-chat-proxy.grok.com/v1/billing?format=credits`, with the Grok CLI headers and the credential's `sub` as `x-userid`. A weekly `currentPeriod` is a 7-day window; the monthly `billingPeriodStart`/`End` is only used without a `currentPeriod`. A period of another length always uses the ID `credits`, so that history and alerts continue across periods |
 
 The headers match the CPA Management Center quota page; the constants are in each service's file in `internal/providers`. The Codex user agent equals the one of CPA's Codex executor, and the Claude user agent equals CPA's default Claude Code fingerprint.
+
+The Antigravity user agent follows the rules of CPA's Antigravity executor. Cloud Code tells clients apart by user agent and leaves the Gemini quota group out for old-style clients such as `antigravity/cli/1.0.13 (aidev_client; ...)`.
+
+- When the credential sets `user_agent` (at the top level of the file, in `attributes` or in `metadata`), it is used; a value starting with `antigravity/` loses its ` google-api-nodejs-client/...` suffix.
+- Otherwise the user agent is `antigravity/hub/<version> darwin/arm64`. The version comes from the Antigravity Hub update manifest (`AntigravityHubManifestURL`, with the same URL and headers as CPA) and is cached for 3 hours; a failed read keeps the cached version and is retried 30 minutes later. Until the first successful read, `2.23.0` is used, the same as the CPA Management Center. The manifest is read when quota is queried, without the credential proxy.
 
 The token comes from the credential file. CPA refreshes tokens in the background and writes them back; the plugin never refreshes them. On HTTP 401 the plugin skips the round and waits for CPA's refresh.
 

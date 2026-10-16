@@ -315,6 +315,82 @@ func (d *recordingDoer) Do(_ context.Context, _ string, req quota.Request) (quot
 	return quota.Response{Status: 200, Body: []byte(d.body)}, nil
 }
 
+type antigravityDoer struct {
+	manifest quota.Response
+	agents   []string
+	reads    int
+}
+
+func (d *antigravityDoer) Do(_ context.Context, _ string, req quota.Request) (quota.Response, error) {
+	if req.URL == AntigravityHubManifestURL {
+		d.reads++
+		return d.manifest, nil
+	}
+	d.agents = append(d.agents, req.Header.Get("User-Agent"))
+	return quota.Response{Status: 200, Body: []byte(`{"groups":[{"displayName":"Gemini Models","buckets":[{"window":"5h","remainingFraction":1}]}]}`)}, nil
+}
+
+func TestAntigravityUserAgentFollowsCPA(t *testing.T) {
+	antigravityHub = hubVersion{}
+	t.Cleanup(func() { antigravityHub = hubVersion{} })
+	now := time.Date(2026, 10, 16, 4, 0, 0, 0, time.UTC)
+	doer := &antigravityDoer{manifest: quota.Response{Status: 200, Body: []byte("version: 2.23.1\nfiles:\n  - url: https://example.com/Antigravity.zip\n")}}
+	fetch := func(file string, at time.Time) string {
+		t.Helper()
+		doer.agents = nil
+		if _, err := fetchAntigravity(context.Background(), doer, ParseCredential(json.RawMessage(file)), at); err != nil {
+			t.Fatal(err)
+		}
+		return doer.agents[0]
+	}
+	plain := `{"access_token":"t","project_id":"p"}`
+
+	if got := fetch(plain, now); got != "antigravity/hub/2.23.1 darwin/arm64" || doer.reads != 1 {
+		t.Fatalf("manifest version: %q after %d reads", got, doer.reads)
+	}
+	// The version is cached for three hours.
+	fetch(plain, now.Add(2*time.Hour))
+	if doer.reads != 1 {
+		t.Fatalf("read the manifest %d times within the TTL", doer.reads)
+	}
+	// A failed read keeps the cached version and is retried 30 minutes later.
+	doer.manifest = quota.Response{Status: 503}
+	if got := fetch(plain, now.Add(3*time.Hour)); got != "antigravity/hub/2.23.1 darwin/arm64" || doer.reads != 2 {
+		t.Fatalf("after a failed read: %q after %d reads", got, doer.reads)
+	}
+	fetch(plain, now.Add(3*time.Hour+29*time.Minute))
+	doer.manifest = quota.Response{Status: 200, Body: []byte("version: 2.24.0\n")}
+	if got := fetch(plain, now.Add(3*time.Hour+30*time.Minute)); got != "antigravity/hub/2.24.0 darwin/arm64" || doer.reads != 3 {
+		t.Fatalf("retry: %q after %d reads", got, doer.reads)
+	}
+
+	// The credential's user_agent wins, and a long Antigravity UA is cut to
+	// its short form.
+	cases := map[string]string{
+		`{"access_token":"t","project_id":"p","user_agent":"custom/1.0"}`:                                                          "custom/1.0",
+		`{"access_token":"t","project_id":"p","metadata":{"user_agent":"antigravity/hub/2.30.0 darwin/arm64"}}`:                    "antigravity/hub/2.30.0 darwin/arm64",
+		`{"access_token":"t","project_id":"p","user_agent":"antigravity/hub/2.30.0 darwin/arm64 google-api-nodejs-client/10.3.0"}`: "antigravity/hub/2.30.0 darwin/arm64",
+		`{"access_token":"t","project_id":"p","user_agent":"other google-api-nodejs-client/10.3.0"}`:                               "other google-api-nodejs-client/10.3.0",
+	}
+	for file, want := range cases {
+		if got := fetch(file, now); got != want {
+			t.Errorf("%s: %q, want %q", file, got, want)
+		}
+	}
+}
+
+func TestAntigravityUserAgentFallsBackWithoutTheManifest(t *testing.T) {
+	antigravityHub = hubVersion{}
+	t.Cleanup(func() { antigravityHub = hubVersion{} })
+	doer := &antigravityDoer{manifest: quota.Response{Status: 200, Body: []byte("version: latest\n")}}
+	if _, err := fetchAntigravity(context.Background(), doer, ParseCredential(json.RawMessage(`{"access_token":"t","project_id":"p"}`)), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if doer.agents[0] != "antigravity/hub/2.23.0 darwin/arm64" {
+		t.Fatalf("fallback %q", doer.agents[0])
+	}
+}
+
 func TestParseKimiUsageMatchesTheManagementCenter(t *testing.T) {
 	now := time.Date(2099, 7, 31, 4, 0, 0, 0, time.UTC)
 	// The payload of the Management Center's Kimi ordering test.
