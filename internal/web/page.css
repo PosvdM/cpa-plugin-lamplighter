@@ -340,6 +340,7 @@ td.actions { text-align: right; }
   background: repeating-linear-gradient(135deg, var(--chart-hatch) 0 2px, transparent 2px 5px);
   border: 1px solid var(--border-color);
 }
+.legend .swatch.pace { width: 14px; height: 0; border-radius: 0; border-top: 1.5px dashed var(--text-tertiary); vertical-align: 3px; }
 .legend .muted { color: var(--text-tertiary); }
 .tooltip {
   position: absolute; pointer-events: none; background: var(--floating-surface); border: 1px solid var(--border-color);
@@ -350,6 +351,8 @@ td.actions { text-align: right; }
 .tooltip .row.strong { font-weight: 650; }
 .tooltip .row.muted { display: block; color: var(--text-tertiary); }
 .tooltip .key { width: 8px; height: 8px; border-radius: 2px; }
+.tooltip .row.pace { color: var(--text-tertiary); }
+.tooltip .row.pace .key { height: 0; border-radius: 0; border-top: 1.5px dashed var(--text-tertiary); }
 .tooltip .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tooltip .value { font-family: var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; }
 .tooltip .note { color: var(--text-secondary); border-top: 1px solid var(--border-color); margin-top: 5px; padding-top: 5px; }

@@ -105,6 +105,7 @@
       legend_ignited: "● 点火成功，×n 为同一时刻的多个目标",
       legend_failed: "✕ 含点火失败",
       legend_reset: "↻ 重置",
+      pace_reference: "匀速参考",
       legend_pooled: "多账号的服务显示合计额度，点击行查看详情，再点一次展开各账号",
       data_table: "数据表",
       col_quota: "额度", col_account: "账号", col_latest: "最新", col_min: "最低", col_max: "最高", col_samples: "样本", col_to_reset: "距重置",
@@ -229,6 +230,7 @@
       legend_ignited: "● ignition succeeded; ×n marks several targets at the same time",
       legend_failed: "✕ an ignition failed",
       legend_reset: "↻ reset",
+      pace_reference: "Even pace",
       legend_pooled: "Services with several accounts show their total; click a row for details, click again to list the accounts",
       data_table: "Data table",
       col_quota: "Quota", col_account: "Account", col_latest: "Latest", col_min: "Lowest", col_max: "Highest", col_samples: "Samples", col_to_reset: "Until reset",
@@ -1398,8 +1400,34 @@
     return { parts: parts, resets: resets };
   }
 
+  var WINDOW_SECONDS = { "5h": 5 * 3600, "7d": 7 * 86400 };
+
+  // Cycles of one account's window, each as [start, end]. A cycle ends at a
+  // reset seen in the samples or at the current reset, and starts one window
+  // length before it, but not before the previous cycle ends. A 5-hour window
+  // starts with the first request after a reset, so the time between two
+  // windows belongs to neither. A seen reset close to the current one is the
+  // same reset.
+  function paceCycles(resets, current, length) {
+    var ends = resets.slice();
+    if (current && !ends.some(function (t) { return Math.abs(t - current) < length / 2; })) ends.push(current);
+    ends.sort(function (a, b) { return a - b; });
+    return ends.map(function (end, i) { return [Math.max(end - length, i ? ends[i - 1] : -Infinity), end]; });
+  }
+
+  // The remaining an even pace leaves at t: 100% at the start of the cycle
+  // falling to 0% at its reset, or null outside the cycles.
+  function paceAt(cycles, t) {
+    for (var i = 0; i < cycles.length; i++) {
+      var c = cycles[i];
+      if (t >= c[0] && t <= c[1]) return 100 * (c[1] - t) / (c[1] - c[0]);
+    }
+    return null;
+  }
+
   // Detail: the selected row as a smoothed line that breaks at resets. A
-  // pooled row adds a band from its lowest to its highest account.
+  // pooled row adds a band from its lowest to its highest account; a single
+  // account adds an even-pace line for each cycle.
   function renderDetail(row, head, box) {
     var g = chartView, limit = gapLimit();
     snapPoints = row.points;
@@ -1446,6 +1474,10 @@
         fill: cssVar("--text-tertiary"), "class": "row-name" }, translate("no_data")));
     }
 
+    // Added before the curves, so the even-pace lines drawn into it later
+    // lie beneath them.
+    var paceLayer = svg("g", {});
+    root.appendChild(paceLayer);
     var resets = [];
     stretches.forEach(function (run) {
       // Hold the last value to the end of the stretch so the line reaches it.
@@ -1470,6 +1502,15 @@
         if (!group) root.appendChild(svg("path", { d: d + "L" + xy[xy.length - 1][0] + " " + y(0) + "L" + xy[0][0] + " " + y(0) + "Z", fill: "url(#chart-fade)" }));
         root.appendChild(svg("path", { d: d, fill: "none", stroke: cssVar("--text-primary"), "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }));
       });
+    });
+    // The accounts of a pooled row reset at different times, so it has no
+    // cycles of its own.
+    var cycles = group || !WINDOW_SECONDS[historyWindow] ? [] : paceCycles(resets, row.reset, WINDOW_SECONDS[historyWindow]);
+    cycles.forEach(function (c) {
+      var a = Math.max(c[0], g.from), b = Math.min(c[1], g.to);
+      if (b <= a) return;
+      paceLayer.appendChild(svg("line", { x1: g.x(a), y1: y(paceAt([c], a)), x2: g.x(b), y2: y(paceAt([c], b)),
+        stroke: cssVar("--text-tertiary"), "stroke-opacity": 0.8, "stroke-width": 1.5, "stroke-dasharray": "6 4" }));
     });
     var lastLabel = -99;
     resets.forEach(function (t) {
@@ -1541,6 +1582,9 @@
         if (row.children.length > 6) tip.appendChild(el("div", { class: "row muted", text: translate("more_accounts", row.children.length - 6) }));
       } else {
         tipRow(tip, row.name + (p ? translate(p[2] === 1 ? "passive_sample" : "active_sample") : ""), p ? p[1] : null, true);
+        var pace = paceAt(cycles, t);
+        if (pace != null) tip.appendChild(el("div", { class: "row pace" }, [el("span", { class: "key" }),
+          el("span", { class: "name", text: translate("pace_reference") }), el("span", { class: "value", text: pct(pace) })]));
       }
       var near = (g.to - g.from) / g.plotW * 8;
       resets.forEach(function (r) { if (Math.abs(r - t) <= near) tip.appendChild(el("div", { class: "note", text: fmtClock(unixDate(r)) + " " + translate("quota_reset") })); });
