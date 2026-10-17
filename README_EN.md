@@ -8,7 +8,7 @@ Lamplighter is a native plugin for [CLIProxyAPI](https://github.com/router-for-m
 
 ![Management page: quota per account and ignition plans](./docs/images/overview.png)
 
-![Quota chart: the 5-hour quota over the last 12 hours, with the Claude curve below it marking resets and ignition results](./docs/images/chart.png)
+![Quota chart: the 5-hour quota over the last 12 hours, with the Claude curve below it marking resets, an even-pace line for each cycle and ignition results](./docs/images/chart.png)
 
 ![Quota chart: Claude with two accounts expanded into one row each, and below it the total line with the range between accounts](./docs/images/chart-accounts.png)
 
@@ -267,7 +267,7 @@ The page shows:
 
 - the quota windows of each account with reset times and data sources, with buttons to refresh or name each account;
 - the next ignition, last result and failure protection state of each quota group, with an "ignite now" button; hidden while ignition is off;
-- a quota chart for either the 5-hour quota, over the last 1, 3, 6, 12, 24 or 26 hours (6 by default), or the 7-day quota, over the last 1, 4, 8 or 15 days, one month (from this date last month), or 36 days (8 days by default). The top part has one colored band per service, colored like the quota bars, in the order Claude, ChatGPT, Gemini, Kimi, Grok, Fable, Claude / GPT by default or by lowest remaining; a service with several accounts shows their total and expands into one row per account. The bottom part plots the selected row with its resets and ignition results. Only the window kinds the accounts have are offered; windows of other lengths only show on the account cards. With `remember_chart_filters` on, the page keeps the last choices;
+- a quota chart for either the 5-hour quota, over the last 1, 3, 6, 12, 24 or 26 hours (6 by default), or the 7-day quota, over the last 1, 4, 8 or 15 days, one month (from this date last month), or 36 days (8 days by default). The top part has one colored band per service, colored like the quota bars, in the order Claude, ChatGPT, Gemini, Kimi, Grok, Fable, Claude / GPT by default or by lowest remaining; a service with several accounts shows their total and expands into one row per account. The bottom part plots the selected row with its resets and ignition results; for a single account it also draws an even-pace line for each cycle, from 100% when the cycle starts to 0% at its reset, so a curve above the line is using the quota slower than an even pace. Only the window kinds the accounts have are offered; windows of other lengths only show on the account cards. With `remember_chart_filters` on, the page keeps the last choices;
 - recent events in columns for time, type, quota group and detail;
 - the settings form at the bottom, folded until you click "设置" (Settings), with a test notification button in the notification settings. The test goes to every configured channel and shows the result of each; it uses the settings the plugin has applied, so after changing a setting, wait a few seconds before testing. An empty ignition model field shows the model the next ignition will use in its hint; for Antigravity, the model of the Gemini group. Services that cannot be ignited show "No ignition". The model list is read when the plugin starts, when `cpa_base_url` or `models_api_key` changes and for every ignition, so a model newly listed by CPA shows after the next ignition, which already uses it.
 
