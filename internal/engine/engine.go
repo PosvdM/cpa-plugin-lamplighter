@@ -23,6 +23,7 @@ import (
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/ignite"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/models"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/notify"
+	"github.com/PosvdM/cpa-plugin-lamplighter/internal/release"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/store"
 )
 
@@ -35,6 +36,10 @@ const (
 	maxEvents          = 200
 	maxSleep           = time.Hour
 	restartDelay       = 30 * time.Second
+	// The latest release is read again after releaseCheckPeriod, and after
+	// releaseRetryPeriod when a read fails.
+	releaseCheckPeriod = 6 * time.Hour
+	releaseRetryPeriod = 30 * time.Minute
 )
 
 // confirmDelays are the waits between ignition confirmation checks.
@@ -79,6 +84,8 @@ type Engine struct {
 	lang      string // notification language, a copy of state.Language
 	// nextModels is the model automatic selection picks next, per provider.
 	nextModels map[string]string
+	// latest is the latest release when it is newer than this version.
+	latest release.Release
 
 	// Owned by the loop goroutine.
 	state     *store.State
@@ -443,6 +450,7 @@ func (e *Engine) run() {
 	now := e.now()
 	nextPoll := now
 	nextFeed := now
+	nextRelease := now
 	nextEnabledCheck := now
 	nextPrune := now
 	appliedCfg := cfg
@@ -483,6 +491,12 @@ func (e *Engine) run() {
 				e.history.Prune(e.now(), time.Duration(cfg.HistoryRetentionDays)*24*time.Hour)
 				nextPrune = e.now().Add(pruneInterval)
 			}
+			// Last in the round: queries and ignitions that are due run first.
+			// The request still holds the loop for up to the request timeout
+			// when GitHub does not answer, like Did Codex Reset.
+			if release.Comparable(e.version) && !now.Before(nextRelease) {
+				nextRelease = e.checkRelease(ctx, cfg)
+			}
 			e.flushSamples(e.now(), false)
 			e.refreshTargets(cfg)
 			e.saveState()
@@ -499,6 +513,9 @@ func (e *Engine) run() {
 		}
 		if enabled && cfg.CodexResetUpdates.Enabled && nextFeed.Before(wakeAt) {
 			wakeAt = nextFeed
+		}
+		if enabled && release.Comparable(e.version) && nextRelease.Before(wakeAt) {
+			wakeAt = nextRelease
 		}
 		if enabled && cfg.Ignition.Enabled {
 			if due := e.nextDue(cfg); !due.IsZero() && due.Before(wakeAt) {
@@ -541,6 +558,24 @@ func (e *Engine) run() {
 	}
 	e.flushSamples(e.now(), true)
 	e.saveState()
+}
+
+// checkRelease reads the latest release and returns when to read it again.
+// A failed read keeps the previous result and is only logged at debug level:
+// it does not affect quota monitoring.
+func (e *Engine) checkRelease(ctx context.Context, cfg config.Config) time.Time {
+	latest, err := release.Latest(ctx, &http.Client{Timeout: cfg.RequestTimeout()}, "cpa-plugin-lamplighter/"+e.version)
+	if err != nil {
+		e.logf("debug", "检查新版本失败：%v", err)
+		return e.now().Add(releaseRetryPeriod)
+	}
+	if !release.Newer(e.version, latest.Version) {
+		latest = release.Release{}
+	}
+	e.mu.Lock()
+	e.latest = latest
+	e.mu.Unlock()
+	return e.now().Add(releaseCheckPeriod)
 }
 
 // sameRuntimeConfig reports whether the settings used to build the

@@ -316,6 +316,10 @@ type Status struct {
 	// NotifyError is the reason the webhook settings were not applied.
 	NotifyError string `json:"notify_error,omitempty"`
 	DataDir     string `json:"data_dir"`
+	// LatestVersion and ReleaseURL describe the latest release when it is
+	// newer than Version.
+	LatestVersion string `json:"latest_version,omitempty"`
+	ReleaseURL    string `json:"release_url,omitempty"`
 	// Language is the notification language, "zh" or "en".
 	Language string `json:"language"`
 	// Timezone and UTCOffset describe the effective display time zone.
@@ -415,6 +419,7 @@ func (e *Engine) Status() Status {
 		Providers:   providerInfos(),
 		GroupOrder:  providers.GroupOrder(),
 	}
+	status.LatestVersion, status.ReleaseURL = e.latest.Version, e.latest.URL
 	_, status.UTCOffset = e.now().In(e.cfg.Location()).Zone()
 	creds := make([]*Cred, 0, len(e.creds))
 	for _, cred := range e.creds {

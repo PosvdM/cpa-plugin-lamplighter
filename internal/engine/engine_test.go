@@ -18,6 +18,7 @@ import (
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/notify"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/providers"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/quota"
+	"github.com/PosvdM/cpa-plugin-lamplighter/internal/release"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginapi"
 )
 
@@ -459,6 +460,45 @@ func TestStatusShowsNextAutomaticModels(t *testing.T) {
 	want := map[string]string{"codex": "gpt-6-luna", "claude": "claude-haiku-4-5-20251001", "antigravity": "gemini-3.8-flash-high"}
 	if !maps.Equal(got, want) {
 		t.Fatalf("next models %v", got)
+	}
+}
+
+func TestStatusReportsNewerRelease(t *testing.T) {
+	tag, status := "v0.5.0", http.StatusOK
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(status)
+		w.Write([]byte(`{"tag_name":"` + tag + `","html_url":"https://github.com/PosvdM/cpa-plugin-lamplighter/releases/tag/` + tag + `"}`))
+	}))
+	t.Cleanup(server.Close)
+	old := release.LatestURL
+	release.LatestURL = server.URL
+	t.Cleanup(func() { release.LatestURL = old })
+
+	c := &clock{t: time.Date(2026, 10, 4, 10, 0, 0, 0, shanghai)}
+	e, _ := newTestEngine(t, standardHost(c), c)
+	e.version = "0.4.0"
+	ctx := context.Background()
+	if next := e.checkRelease(ctx, e.config()); !next.Equal(c.t.Add(releaseCheckPeriod)) {
+		t.Fatalf("next check %v", next)
+	}
+	got := e.Status()
+	if got.LatestVersion != "0.5.0" || got.ReleaseURL != "https://github.com/PosvdM/cpa-plugin-lamplighter/releases/tag/v0.5.0" {
+		t.Fatalf("latest %q %q", got.LatestVersion, got.ReleaseURL)
+	}
+
+	// A failed read keeps the known release and is retried sooner.
+	status = http.StatusForbidden
+	if next := e.checkRelease(ctx, e.config()); !next.Equal(c.t.Add(releaseRetryPeriod)) {
+		t.Fatalf("next check after failure %v", next)
+	}
+	if got := e.Status().LatestVersion; got != "0.5.0" {
+		t.Fatalf("latest after failure %q", got)
+	}
+
+	tag, status = "v0.4.0", http.StatusOK
+	e.checkRelease(ctx, e.config())
+	if got := e.Status(); got.LatestVersion != "" || got.ReleaseURL != "" {
+		t.Fatalf("the current release is reported as newer: %q %q", got.LatestVersion, got.ReleaseURL)
 	}
 }
 

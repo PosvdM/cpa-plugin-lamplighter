@@ -89,6 +89,7 @@
   var I18N = {
     zh: {
       app_sub: "点灯人", repo_hint: "在 GitHub 上查看",
+      update_hint: "有新版本 v{0}，可在 CPA 插件商店更新",
       key_title: "需要管理密钥",
       key_hint: "在管理中心登录时勾选“记住密码”，此页面会直接使用该密钥；否则请在这里输入，密钥只保存在当前标签页。",
       key_placeholder: "CPA 管理密钥",
@@ -214,6 +215,7 @@
     },
     en: {
       app_sub: "", repo_hint: "View on GitHub",
+      update_hint: "v{0} is available; update it in the CPA plugin store",
       key_title: "Management key required",
       key_hint: "If you checked \"remember password\" when signing in to the Management Center, this page uses that key. Otherwise enter it here; it is kept in this tab only.",
       key_placeholder: "CPA management key",
@@ -583,11 +585,27 @@
     if (!status.enabled) state.appendChild(badge("muted", translate("state_disabled")));
     else if (!status.running) state.appendChild(badge("warning", translate("state_starting")));
     else state.appendChild(badge("success", translate("state_running")));
-    var parts = ["v" + status.version];
+    var parts = [];
     var last = parseTime(status.last_poll), next = parseTime(status.next_poll);
     if (last) parts.push(translate("last_poll", fmtClock(last), fmtAgo(last)));
     if (next) parts.push(translate("next_poll", fmtClock(next), fmtIn(next)));
-    $("meta").textContent = parts.join(" · ");
+    var meta = $("meta");
+    clear(meta);
+    meta.appendChild(document.createTextNode("v" + status.version));
+    if (status.latest_version && status.release_url) meta.appendChild(updateLink());
+    if (parts.length) meta.appendChild(document.createTextNode(" · " + parts.join(" · ")));
+  }
+
+  // A green circle with an up arrow after the version, linking to the newer
+  // release.
+  function updateLink() {
+    var hint = translate("update_hint", status.latest_version);
+    var icon = svg("svg", { viewBox: "0 0 16 16", width: 14, height: 14, "aria-hidden": "true" });
+    icon.appendChild(svg("circle", { cx: 8, cy: 8, r: 8 }));
+    icon.appendChild(svg("path", { d: "M8 11.5V4.5M5 7.5l3-3 3 3" }));
+    var link = el("a", { class: "update", href: status.release_url, target: "_blank", rel: "noopener", title: hint, "aria-label": hint });
+    link.appendChild(icon);
+    return link;
   }
 
   function notice(text) {
