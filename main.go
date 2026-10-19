@@ -61,7 +61,6 @@ import "C"
 import (
 	"errors"
 	"os"
-	"path/filepath"
 	"sync"
 	"unsafe"
 
@@ -95,21 +94,9 @@ func cliproxy_plugin_init(hostAPI *C.cliproxy_host_api, pluginAPI *C.cliproxy_pl
 	workDir, _ := os.Getwd()
 	hostConfigPath := config.HostConfigPath(os.Args, workDir)
 	instanceMu.Lock()
-	instance = plugin.New(host.RPC{Call: callHost}, version, defaultDataDir(hostConfigPath, workDir), hostConfigPath)
+	instance = plugin.New(host.RPC{Call: callHost}, version, config.DefaultDataDir(hostConfigPath, workDir), hostConfigPath)
 	instanceMu.Unlock()
 	return 0
-}
-
-// configDataDir places the data in <plugins.dir>/data/lamplighter, reading
-// plugins.dir from the CPA config file. A relative plugins.dir is relative to
-// the CPA working directory.
-func configDataDir(hostConfigPath, workDir string) string {
-	raw, _ := os.ReadFile(hostConfigPath)
-	dir := config.PluginsDir(raw)
-	if !filepath.IsAbs(dir) {
-		dir = filepath.Join(workDir, dir)
-	}
-	return filepath.Join(dir, "data", config.PluginID)
 }
 
 func currentInstance() *plugin.Plugin {

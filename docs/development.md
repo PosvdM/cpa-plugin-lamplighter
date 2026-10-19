@@ -6,7 +6,7 @@
 
 - Go 1.26（与 CPA v8 一致）。
 - 构建动态库需要 cgo 和目标平台的 C 编译器。Linux 版本在 `golang:1.26-bookworm` 中构建，与 CPA 官方镜像（Debian 12）使用相同的 glibc；macOS 版本用 Xcode 的 clang，Windows 版本用 MinGW-w64 的 gcc。
-- 运行测试不需要 cgo。`internal/` 下的包都是纯 Go，可以在 Windows、macOS 或 Linux 上测试；只有根目录的 `main.go` 和 `datadir_*.go` 需要 cgo。
+- 运行测试不需要 cgo。`internal/` 下的包都是纯 Go，可以在 Windows、macOS 或 Linux 上测试；只有根目录的 `main.go` 需要 cgo。
 
 ## 测试
 

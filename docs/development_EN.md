@@ -6,7 +6,7 @@
 
 - Go 1.26, matching CPA v8.
 - Building the shared library needs cgo and a C compiler for the target. Linux builds run in `golang:1.26-bookworm`, which has the same glibc as the official CPA image (Debian 12); macOS builds use Xcode's clang and Windows builds MinGW-w64 gcc.
-- Tests need no cgo. Everything under `internal/` is pure Go and can be tested on Windows, macOS or Linux; only `main.go` and `datadir_*.go` in the root need cgo.
+- Tests need no cgo. Everything under `internal/` is pure Go and can be tested on Windows, macOS or Linux; only `main.go` in the root needs cgo.
 
 ## Tests
 

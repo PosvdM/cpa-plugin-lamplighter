@@ -51,6 +51,19 @@ func PluginsDir(raw []byte) string {
 	return filepath.Clean(dir)
 }
 
+// DefaultDataDir returns <plugins.dir>/data/lamplighter, reading plugins.dir
+// from the CPA config file. A relative plugins.dir is relative to the CPA
+// working directory. CPA loads plugins from copies in the temp directory, so
+// the path of the loaded library does not point to the plugin directory.
+func DefaultDataDir(hostConfigPath, workDir string) string {
+	raw, _ := os.ReadFile(hostConfigPath)
+	dir := PluginsDir(raw)
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(workDir, dir)
+	}
+	return filepath.Join(dir, "data", PluginID)
+}
+
 // PluginEnabled reports whether the CPA config enables plugins and this
 // plugin. CPA keeps a disabled plugin loaded without notifying it, so the
 // plugin checks the flag itself before doing any work.
