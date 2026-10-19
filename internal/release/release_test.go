@@ -73,7 +73,7 @@ func TestLatestFailures(t *testing.T) {
 	}{
 		"rate limited": {http.StatusForbidden, `{"message":"API rate limit exceeded"}`},
 		"bad json":     {http.StatusOK, `<html>`},
-		"bad tag":      {http.StatusOK, `{"tag_name":"nightly","html_url":"https://github.com/x/y"}`},
+		"no tag":       {http.StatusOK, `{"tag_name":"","html_url":"https://github.com/x/y"}`},
 		"bad url":      {http.StatusOK, `{"tag_name":"v0.5.0","html_url":"javascript:alert(1)"}`},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -82,5 +82,16 @@ func TestLatestFailures(t *testing.T) {
 				t.Fatalf("Latest = %+v, want an error", got)
 			}
 		})
+	}
+}
+
+func TestLatestWithNonNumericTagIsNeverNewer(t *testing.T) {
+	serve(t, http.StatusOK, `{"tag_name":"v0.6.0-beta","html_url":"https://github.com/PosvdM/cpa-plugin-lamplighter/releases/tag/v0.6.0-beta"}`)
+	got, err := Latest(context.Background(), http.DefaultClient, "cpa-plugin-lamplighter/0.4.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if Newer("0.4.0", got.Version) {
+		t.Fatalf("%q is reported as newer", got.Version)
 	}
 }

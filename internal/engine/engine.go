@@ -491,7 +491,9 @@ func (e *Engine) run() {
 				e.history.Prune(e.now(), time.Duration(cfg.HistoryRetentionDays)*24*time.Hour)
 				nextPrune = e.now().Add(pruneInterval)
 			}
-			// Last, so an unreachable GitHub delays no query or ignition.
+			// Last in the round: queries and ignitions that are due run first.
+			// The request still holds the loop for up to the request timeout
+			// when GitHub does not answer, like Did Codex Reset.
 			if release.Comparable(e.version) && !now.Before(nextRelease) {
 				nextRelease = e.checkRelease(ctx, cfg)
 			}

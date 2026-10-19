@@ -23,7 +23,8 @@ type Release struct {
 	URL     string
 }
 
-// Latest reads the latest release.
+// Latest reads the latest release. A tag that is not a dotted numeric
+// version, such as v0.6.0-beta, is returned as is; Newer never reports it.
 func Latest(ctx context.Context, client *http.Client, userAgent string) (Release, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, LatestURL, nil)
 	if err != nil {
@@ -48,7 +49,7 @@ func Latest(ctx context.Context, client *http.Client, userAgent string) (Release
 		return Release{}, fmt.Errorf("GitHub 返回的 Release 无法解析: %w", err)
 	}
 	version := strings.TrimPrefix(strings.TrimSpace(payload.TagName), "v")
-	if parse(version) == nil || !strings.HasPrefix(payload.HTMLURL, "https://github.com/") {
+	if version == "" || !strings.HasPrefix(payload.HTMLURL, "https://github.com/") {
 		return Release{}, fmt.Errorf("GitHub 返回的 Release 无效: %q", payload.TagName)
 	}
 	return Release{Version: version, URL: payload.HTMLURL}, nil
