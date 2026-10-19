@@ -114,6 +114,27 @@ func TestPluginsDir(t *testing.T) {
 	}
 }
 
+func TestDefaultDataDir(t *testing.T) {
+	work := t.TempDir()
+	if got, want := DefaultDataDir(filepath.Join(work, "missing.yaml"), work), filepath.Join(work, "plugins", "data", "lamplighter"); got != want {
+		t.Fatalf("missing config: got %q, want %q", got, want)
+	}
+	cfgPath := filepath.Join(work, "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte("plugins:\n  dir: ext\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := DefaultDataDir(cfgPath, work), filepath.Join(work, "ext", "data", "lamplighter"); got != want {
+		t.Fatalf("relative: got %q, want %q", got, want)
+	}
+	abs := filepath.Join(t.TempDir(), "plugins")
+	if err := os.WriteFile(cfgPath, []byte("plugins:\n  dir: "+filepath.ToSlash(abs)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := DefaultDataDir(cfgPath, work), filepath.Join(abs, "data", "lamplighter"); got != want {
+		t.Fatalf("absolute: got %q, want %q", got, want)
+	}
+}
+
 func TestNotificationModes(t *testing.T) {
 	cfg, err := Parse(nil)
 	if err != nil {

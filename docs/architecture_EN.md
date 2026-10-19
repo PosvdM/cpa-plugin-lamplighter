@@ -9,11 +9,10 @@ Lamplighter is a CPA native plugin written in Go and built with `-buildmode=c-sh
 | Path | Responsibility |
 | --- | --- |
 | `main.go` | cgo entry point: exports the C ABI functions, forwards RPC, implements host calls |
-| `datadir_unix.go`, `datadir_windows.go` | the default data directory per platform |
 | `internal/plugin` | Plugin RPC methods: register, reconfigure, quiesce, management API, `usage.handle` |
 | `internal/engine` | Background loop: active queries, passive data, ignition, notifications, history and status data |
 | `internal/host` | Go wrapper of the host callbacks and timeout handling for `host.http.do` |
-| `internal/config` | Plugin config parsing, defaults and ranges; reads the CPA config to see whether the plugin is enabled |
+| `internal/config` | Plugin config parsing, defaults and ranges; reads the CPA config to see whether the plugin is enabled and to find the default data directory |
 | `internal/providers` | One file per service: quota request and parsing, response header parsing, ignition request, candidate models, defaults; the registry, see "Services" below |
 | `internal/quota` | Types of quota windows and upstream requests, window kinds, time parsing |
 | `internal/egress` | Picks the network exit of quota requests |
@@ -281,7 +280,7 @@ The schedule time comes from `scheduleWindow`, or `effectiveAt` without one, sho
 
 ## Data
 
-The data directory defaults to `data/lamplighter` in the plugin directory. On Linux and macOS, `datadir_unix.go` finds the library path with `dladdr`; when the library sits in `<plugins>/<goos>/<goarch>/`, those two levels are removed. On Windows CPA loads a copy of the DLL from the temp directory, so the library path does not point to the plugin directory; `datadir_windows.go` reads `plugins.dir` from CPA's `config.yaml` instead (default `plugins`, relative to CPA's working directory).
+The data directory defaults to `data/lamplighter` in the plugin directory. `config.DefaultDataDir` reads `plugins.dir` from CPA's `config.yaml` (default `plugins`; a leading `~` expands to the home directory, a relative path is relative to CPA's working directory), the same rules CPA uses for the plugin directory. On every platform CPA loads the library from a copy in the temp directory `cliproxy-pluginhost/pid-<pid>/`, which does not survive a CPA restart or a container rebuild, so the data directory cannot follow the library's location.
 
 | File | Content |
 | --- | --- |

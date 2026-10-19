@@ -9,11 +9,10 @@ Lamplighter 是用 Go 编写、以 `-buildmode=c-shared` 构建的 CPA 原生插
 | 路径 | 职责 |
 | --- | --- |
 | `main.go` | cgo 入口：导出 C ABI 函数，转发 RPC，实现宿主回调 |
-| `datadir_unix.go`、`datadir_windows.go` | 按平台计算默认数据目录 |
 | `internal/plugin` | 插件 RPC 方法：注册、重新配置、暂停、管理接口、`usage.handle` |
 | `internal/engine` | 后台循环：主动查询、被动数据、点火、通知、历史和状态页数据 |
 | `internal/host` | 宿主回调的 Go 封装，以及 `host.http.do` 的超时控制 |
-| `internal/config` | 插件配置解析、默认值和取值范围；读取 CPA 配置判断插件是否启用 |
+| `internal/config` | 插件配置解析、默认值和取值范围；读取 CPA 配置判断插件是否启用、计算默认数据目录 |
 | `internal/providers` | 每个服务一个文件：额度请求和解析、响应头解析、点火请求、候选模型、默认设置；注册表，见下文“服务” |
 | `internal/quota` | 额度窗口和上游请求的类型，窗口种类判断，时间解析 |
 | `internal/egress` | 选择额度请求的网络出口 |
@@ -281,7 +280,7 @@ Did Codex Reset 每 `poll_seconds` 秒（最少 300 秒，对齐时间边界）�
 
 ## 数据
 
-数据目录默认是插件目录下的 `data/lamplighter`。Linux 和 macOS 上，`datadir_unix.go` 用 `dladdr` 找到动态库路径，动态库位于 `<插件目录>/<goos>/<goarch>/` 时去掉这两层。Windows 上 CPA 从临时目录加载 DLL 的副本，动态库路径不指向插件目录，所以 `datadir_windows.go` 从 CPA 的 `config.yaml` 读取 `plugins.dir`（默认 `plugins`，相对路径以 CPA 的工作目录为准）。
+数据目录默认是插件目录下的 `data/lamplighter`。`config.DefaultDataDir` 从 CPA 的 `config.yaml` 读取 `plugins.dir`（默认 `plugins`，开头的 `~` 展开为用户主目录，相对路径以 CPA 的工作目录为准），与 CPA 解析插件目录的规则相同。CPA 在所有平台上都从临时目录 `cliproxy-pluginhost/pid-<进程号>/` 中的副本加载动态库，这个目录在 CPA 重启或容器重建后不保留，所以数据目录不能按动态库所在位置计算。
 
 | 文件 | 内容 |
 | --- | --- |
