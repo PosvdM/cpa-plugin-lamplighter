@@ -20,6 +20,7 @@ Lamplighter 是用 Go 编写、以 `-buildmode=c-shared` 构建的 CPA 原生插
 | `internal/models` | 读取 CPA 模型列表，提供按新旧排列候选模型的工具 |
 | `internal/ignite` | 点火时间计算、滑动重置判断、失败分类和失败保护 |
 | `internal/notify` | Bark 和 webhook 发送、额度提醒、Did Codex Reset 转发 |
+| `internal/release` | 读取 GitHub 上的最新 Release，比较版本号 |
 | `internal/store` | `state.json`、额度历史和实例锁 |
 | `internal/web` | 管理页面，HTML、CSS、JS 分文件编辑，运行时合成一个文档 |
 
@@ -107,10 +108,12 @@ Lamplighter 是用 Go 编写、以 `-buildmode=c-shared` 构建的 CPA 原生插
 1. 插件注册后启动，先等 20 秒，让 CPA 加载凭证和执行器。
 2. 打开数据目录，取得 `instance.lock`。
 3. 每 30 秒读取一次 CPA 的 `config.yaml`，判断 `plugins.enabled` 和本插件的 `enabled`。CPA 停用插件时不会通知插件，所以插件自己检查；停用期间不做任何工作。读不到配置文件时视为启用。
-4. 依次处理被动数据、Did Codex Reset、到点的主动查询、到期的点火、历史清理，并保存状态。
+4. 依次处理被动数据、Did Codex Reset、到点的主动查询、到期的点火、历史清理、新版本检查，并保存状态。
 5. 计算下一次需要醒来的时间，在这之前等待新的被动数据、管理操作或配置变更。
 
 `usage.handle` 和管理接口不直接执行网络请求：前者只解析响应头并放入队列（队列满时丢弃，丢一个被动样本没有影响），后者把操作交给后台循环并等待结果，最多 3 分钟。
+
+新版本检查读取 GitHub API 的 `releases/latest`（不含草稿和预发布版本），启动后立即读一次，之后每 6 小时读一次，失败后 30 分钟重试。请求使用 Did Codex Reset 相同的出口（环境变量中的代理或直连）。版本号按数字逐段比较；最新版本比当前版本新时，状态接口返回 `latest_version` 和 `release_url`，页面在版本号右边显示更新图标。失败只记 debug 日志，保留上一次的结果。开发版本（`dev`、`0.0.0-dev.<commit>`）不检查。
 
 后台循环崩溃时，`supervise` 记录日志并在 30 秒后重启。插件中任何未恢复的 panic 都会结束整个 CPA 进程，所以每个 goroutine 和每个 RPC 方法都有 `recover`。
 

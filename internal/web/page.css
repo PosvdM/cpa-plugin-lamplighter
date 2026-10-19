@@ -141,6 +141,9 @@ h1 .home:hover { opacity: 0.8; }
 h1 .sub { color: var(--text-tertiary); font-weight: 500; font-size: 15px; margin-left: 8px; }
 h1 .sub:empty { display: none; }
 header .meta { color: var(--text-tertiary); font-size: 12.5px; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+header .update { display: inline-flex; vertical-align: -2px; margin-left: 5px; color: var(--success-color); }
+header .update:hover { opacity: 0.75; }
+header .update svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 
 /* In the Management Center, a floating toolbar covers the top right corner
    of the page: 178 × 52 px, 24 px from the top and right edges of the

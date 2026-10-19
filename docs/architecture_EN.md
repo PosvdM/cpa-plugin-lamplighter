@@ -20,6 +20,7 @@ Lamplighter is a CPA native plugin written in Go and built with `-buildmode=c-sh
 | `internal/models` | Reads the CPA model list and provides the helpers that order candidates by recency |
 | `internal/ignite` | Ignition timing, rolling-reset detection, error classification and failure protection |
 | `internal/notify` | Bark and webhook delivery, quota alerts, Did Codex Reset forwarding |
+| `internal/release` | Reads the latest GitHub release and compares versions |
 | `internal/store` | `state.json`, quota history and the instance lock |
 | `internal/web` | Management page; HTML, CSS and JS are separate files combined into one document at runtime |
 
@@ -107,10 +108,12 @@ Each service is a `providers.Provider` in `internal/providers`, registered in di
 1. It starts after plugin registration and waits 20 seconds so that CPA can load credentials and executors.
 2. It opens the data directory and takes `instance.lock`.
 3. Every 30 seconds it reads CPA's `config.yaml` and checks `plugins.enabled` and the plugin's own `enabled`. CPA does not notify a plugin that it disabled, so the plugin checks itself and does nothing while disabled. An unreadable config file counts as enabled.
-4. It applies passive data, polls Did Codex Reset, runs due active queries and due ignitions, prunes history and saves the state.
+4. It applies passive data, polls Did Codex Reset, runs due active queries and due ignitions, prunes history, checks for a new version and saves the state.
 5. It computes the next wake-up time and until then waits for passive data, management actions or config changes.
 
 `usage.handle` and the management routes never make network requests themselves. The former parses headers and queues them (dropping a sample when the queue is full is harmless); the latter hands the action to the loop and waits up to 3 minutes for the result.
+
+The version check reads `releases/latest` from the GitHub API, which leaves out drafts and prereleases. It runs right after start and then every 6 hours, 30 minutes after a failure. The request uses the same exit as Did Codex Reset (the proxy from the environment, or a direct connection). Versions are compared by numeric segment; when the latest version is newer than the running one, the status endpoint returns `latest_version` and `release_url` and the page shows the update icon to the right of the version. A failure is logged at debug level only and keeps the previous result. Development builds (`dev`, `0.0.0-dev.<commit>`) are not checked.
 
 If the loop panics, `supervise` logs it and restarts the loop after 30 seconds. An unrecovered panic anywhere in the plugin ends the whole CPA process, so every goroutine and every RPC method recovers.
 
