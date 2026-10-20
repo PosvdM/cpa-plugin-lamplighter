@@ -1029,4 +1029,23 @@ func TestPlansComeFromTheUsageResponseAndADailyProfile(t *testing.T) {
 	if e.state.Plans["3"].Plan != "claude_max default_claude_max_20x" {
 		t.Fatalf("stored plan %+v", e.state.Plans["3"])
 	}
+
+	// A later failure keeps the plan read before.
+	profileStatus = 500
+	c.add(25 * time.Hour)
+	e.poll(context.Background(), e.config(), c.t, "", false)
+	if n, plan := h.requestsTo(providers.ClaudeProfileURL), accounts()["3"].Plan; n != 3 || plan != "Max 20x" {
+		t.Fatalf("after a failed read: %d requests, plan %q", n, plan)
+	}
+
+	// The plans are read back from state.json after a restart.
+	e.dirty = true
+	e.saveState()
+	restarted := New(Options{Host: h, Version: "test", Now: c.now})
+	if err := restarted.openStores(e.config()); err != nil {
+		t.Fatal(err)
+	}
+	if restarted.plans["3"] != "claude_max default_claude_max_20x" || restarted.plans["1"] != "pro" {
+		t.Fatalf("plans after a restart %v", restarted.plans)
+	}
 }

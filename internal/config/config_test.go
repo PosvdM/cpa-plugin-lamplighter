@@ -224,7 +224,7 @@ func TestProviderIDKeyWinsOverAnAlias(t *testing.T) {
 }
 
 func TestParseAccountWeightsDropsInvalidWeights(t *testing.T) {
-	cfg, err := Parse([]byte("account_weights:\n  a.json: 5\n  b.json: 0.5\n  c.json: 0\n  d.json: -2\n  e.json: .inf\n"))
+	cfg, err := Parse([]byte("account_weights:\n  a.json: 5\n  b.json: 0.5\n  c.json: 0\n  d.json: -2\n  e.json: .inf\n  f.json: .nan\n"))
 	if err != nil {
 		t.Fatal(err)
 	}

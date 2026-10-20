@@ -978,15 +978,16 @@
     var answer = prompt(translate("weight_prompt", account.title, fmtWeight(fallback)), current > 0 ? fmtWeight(current) : "");
     if (answer === null) return;
     answer = answer.trim();
-    var weights = JSON.parse(JSON.stringify(saved));
-    if (answer === "") delete weights[account.name];
-    else {
-      var value = Number(answer);
-      if (!isFinite(value) || value <= 0) { toast(translate("weight_invalid")); return; }
-      weights[account.name] = value;
-    }
+    var value = Number(answer);
+    if (answer !== "" && (!isFinite(value) || value <= 0)) { toast(translate("weight_invalid")); return; }
     button.disabled = true;
+    // The object is built in the queue, from the config the previous save
+    // wrote, so saving two weights in a row keeps both.
     saveQueue = saveQueue.then(function () {
+      var latest = rawConfig.account_weights;
+      var weights = latest && typeof latest === "object" ? JSON.parse(JSON.stringify(latest)) : {};
+      if (answer === "") delete weights[account.name];
+      else weights[account.name] = value;
       return api("PATCH", CONFIG_API, { account_weights: Object.keys(weights).length ? weights : null }).then(function () {
         return loadConfig().then(function () {
           toast(translate("weight_saved", account.title));
@@ -1029,8 +1030,11 @@
   // Quotas report whole percents; steps this small are a steady decline.
   var QUANTUM = 2;
   // Passive samples are written up to a minute after the value changes. A
-  // value unchanged for longer than this is held until now when the rate of
-  // use is estimated, so a pause shows as one.
+  // passive value unchanged for longer than this is held until now when the
+  // rate of use is estimated, so a pause shows as one. Active samples come
+  // once per poll, so an active value is held only after one and a half
+  // sample steps; holding it sooner would level the projection in the
+  // second half of every poll interval.
   var HOLD_AFTER = 120;
 
   var chartView = null;
@@ -1195,7 +1199,10 @@
       var rank = serviceOrder.indexOf(kids[0].source);
       if (rank < 0) rank = serviceOrder.length + index;
       if (kids.length === 1) { kids[0].order = rank; return kids[0]; }
-      var resets = kids.map(function (k) { return k.reset; }).filter(Boolean);
+      // The next reset of the accounts; a reset that has passed, of a window
+      // not opened again or not queried since, is not the next one.
+      var now = Date.now() / 1000;
+      var resets = kids.map(function (k) { return k.reset; }).filter(function (t) { return t > now; });
       var weights = kids.reduce(function (sum, k) { return sum + k.weight; }, 0);
       return { id: "group:" + id, name: kids[0].source, children: kids, points: pooled(kids, limit, "points"), floor: pooled(kids, limit, "floor"), order: rank,
         last: kids.reduce(function (sum, k) { return sum + k.weight * k.last; }, 0) / weights,
@@ -1641,7 +1648,7 @@
     var floor = row.floor, start = 0;
     for (var i = 1; i < floor.length; i++) if (floor[i][1] > floor[i - 1][1]) start = i;
     var pts = floor.slice(start), tail = pts[pts.length - 1];
-    if (g.now - tail[0] > HOLD_AFTER) pts.push([g.now, tail[1]]);
+    if (g.now - tail[0] > (tail[2] === 1 ? HOLD_AFTER : Math.max(HOLD_AFTER, sampleStep() * 1.5))) pts.push([g.now, tail[1]]);
     var slope = Math.min(0, recentSlope(pts)), t0 = lastRun.end, v0 = last[1];
     var out = slope < 0 ? t0 + v0 / -slope : Infinity;
     return { t0: t0, v0: v0, end: Math.min(out, g.to), out: out <= g.to ? out : null, left: out <= g.to ? 0 : v0 + slope * (g.to - t0),
@@ -2093,8 +2100,10 @@
   }
 
   // Loads the drawn chart again when the status shows newer readings. While
-  // the pointer is over the chart, a redraw would replace the crosshair and
-  // tooltip under it, so the new data waits until the pointer leaves.
+  // the pointer is over the chart or a sample has the keyboard focus, a
+  // redraw would replace the crosshair and tooltip, or the focused element,
+  // so the new data waits until the pointer and the focus leave.
+  var chartCard = $("chart").parentNode;
   var chartPointer = false;
   var chartBehind = false;
 
@@ -2104,7 +2113,7 @@
     fetchHistory(historyWindow, historyRange, true).then(function (data) {
       if (ticket !== historyTicket || historyWindow !== chartWindow || historyRange !== range) return;
       history = data;
-      if (chartPointer) chartBehind = true;
+      if (chartPointer || chartCard.contains(document.activeElement)) chartBehind = true;
       else renderChart();
     }).catch(function () { /* tried again after the next status */ });
   }
@@ -2515,11 +2524,13 @@
     renderChart();
   });
   renderRangeButtons();
-  var chartCard = $("chart").parentNode;
   chartCard.addEventListener("pointerenter", function () { chartPointer = true; });
   chartCard.addEventListener("pointerleave", function () {
     chartPointer = false;
-    if (chartBehind) renderChart();
+    if (chartBehind && !chartCard.contains(document.activeElement)) renderChart();
+  });
+  chartCard.addEventListener("focusout", function (e) {
+    if (chartBehind && !chartPointer && !chartCard.contains(e.relatedTarget)) renderChart();
   });
   window.addEventListener("resize", function () { if (history) renderChart(); });
   window.addEventListener("storage", function (e) {
