@@ -14,7 +14,8 @@ func TestCodexPlansAreWeightedByPrice(t *testing.T) {
 		"pro":                         {"Pro $200", 10},
 		"promax":                      {"Pro $500", 25},
 		"enterprise":                  {"Enterprise", 1},
-		"free":                        {"Free", 1},
+		"free":                        {"Free", 0.1},
+		"go":                          {"Go", 0.1},
 		"something_new":               {"something_new", 1},
 	} {
 		if got := PlanOf("codex", raw); got != want {

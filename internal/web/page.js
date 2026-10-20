@@ -1578,24 +1578,28 @@
     return out;
   }
 
-  // The cycles of the even-pace line. A single account uses the resets seen
-  // in its samples and its current reset. A pooled row joins the cycle ends
-  // of all its accounts, each found the same way, so its line falls from
-  // 100% at one account's reset to 0% at the next one's; ends of different
-  // accounts within one sample step are the same reset. The total's own
-  // jumps are not used: one account resetting can raise it by less than
-  // RESET_JUMP.
-  function rowCycles(row, resets, limit) {
+  // The even pace of a row: at(t) is its value, null outside the cycles, and
+  // breaks are the times where it can jump. A single account uses the
+  // resets seen in its samples and its current reset. A pooled row averages
+  // the even pace of its accounts, each found the same way, by their
+  // weights, over the accounts inside a cycle at that time; the total's own
+  // jumps are not used, since one account resetting can raise it by less
+  // than RESET_JUMP.
+  function rowPace(row, resets, limit) {
     var length = WINDOW_SECONDS[historyWindow];
-    if (!length) return [];
-    if (!row.children) return paceCycles(resets, row.reset, length);
-    var ends = [];
-    row.children.forEach(function (c) {
-      paceCycles(seenResets(c.points, limit), c.reset, length).forEach(function (cycle) { ends.push(cycle[1]); });
-    });
-    ends.sort(function (a, b) { return a - b; });
-    var step = sampleStep();
-    return paceCycles(ends.filter(function (t, i) { return !i || t - ends[i - 1] > step; }), null, length);
+    var parts = !length ? [] : row.children ? row.children.map(function (c) {
+      return { weight: c.weight, cycles: paceCycles(seenResets(c.points, limit), c.reset, length) };
+    }) : [{ weight: 1, cycles: paceCycles(resets, row.reset, length) }];
+    var breaks = [];
+    parts.forEach(function (part) { part.cycles.forEach(function (c) { breaks.push(c[0], c[1]); }); });
+    return { breaks: breaks, at: function (t) {
+      var sum = 0, total = 0;
+      parts.forEach(function (part) {
+        var value = paceAt(part.cycles, t);
+        if (value != null) { sum += part.weight * value; total += part.weight; }
+      });
+      return total ? sum / total : null;
+    } };
   }
 
   // The least-squares line through pts[a..b]: its slope per second and the
@@ -1674,7 +1678,7 @@
     });
     var resets = [];
     pieces.forEach(function (piece) { resets = resets.concat(piece.split.resets); });
-    var cycles = rowCycles(row, resets, limit);
+    var even = rowPace(row, resets, limit);
     var lastRun = stretches[stretches.length - 1];
     var ahead = projection(row, g, lastRun, limit);
 
@@ -1682,7 +1686,7 @@
     head.appendChild(el("span", { class: "muted", text: group ? translate("pooled_note", row.children.length) : row.sub }));
     // The difference from the even pace: green with more left than the pace
     // leaves, red with less.
-    var pace = paceAt(cycles, g.now), diff = pace == null ? null : Math.round(row.last - pace);
+    var pace = even.at(g.now), diff = pace == null ? null : Math.round(row.last - pace);
     [[translate(group ? "stat_total" : "stat_current"), pct(row.last)], [translate("stat_pace"), pct(pace)],
       [translate("stat_diff"), diff == null ? "—" : (diff > 0 ? "+" : diff < 0 ? "−" : "") + Math.abs(diff) + "%", diff > 0 ? "ahead" : diff < 0 ? "behind" : ""],
       [translate("stat_to_reset"), row.reset ? fmtCountdown(row.reset * 1000 - Date.now()) : "—"]].forEach(function (stat) {
@@ -1730,13 +1734,21 @@
 
     var plot = svg("g", { "clip-path": "url(#chart-plot)" });
     root.appendChild(plot);
-    // Drawn first, so the even-pace lines lie beneath the curves.
-    cycles.forEach(function (c) {
-      var a = Math.max(c[0], g.from), b = Math.min(c[1], g.to);
-      if (b <= a) return;
-      plot.appendChild(svg("line", { x1: g.x(a), y1: y(paceAt([c], a)), x2: g.x(b), y2: y(paceAt([c], b)),
-        stroke: cssVar("--text-tertiary"), "stroke-opacity": 0.8, "stroke-width": 1.5, "stroke-dasharray": "6 4" }));
-    });
+    // Drawn first, so the even-pace line lies beneath the curves. It is
+    // straight between two breaks, and its value just inside each end
+    // decides whether it continues from the previous piece or jumps.
+    var times = [g.from, g.to].concat(even.breaks.filter(function (t) { return t > g.from && t < g.to; })).sort(function (a, b) { return a - b; });
+    var paceD = "", paceEnd = null;
+    for (var k = 0; k + 1 < times.length; k++) {
+      var a = times[k], b = times[k + 1], inset = Math.min(1, (b - a) / 4);
+      if (b - a <= 0) continue;
+      var va = even.at(a + inset), vb = even.at(b - inset);
+      if (va == null || vb == null) { paceEnd = null; continue; }
+      if (paceEnd == null || Math.abs(paceEnd - va) > 0.5) paceD += "M" + g.x(a) + " " + y(va);
+      paceD += "L" + g.x(b) + " " + y(vb);
+      paceEnd = vb;
+    }
+    if (paceD) plot.appendChild(svg("path", { d: paceD, fill: "none", stroke: cssVar("--text-tertiary"), "stroke-opacity": 0.8, "stroke-width": 1.5, "stroke-dasharray": "6 4" }));
     pieces.forEach(function (piece) {
       if (group) splitAtResets(piece.pts, [3, 4]).parts.forEach(function (part) {
         if (part.length < 2) return;
@@ -1824,7 +1836,7 @@
     });
 
     function paceRow(t) {
-      var value = paceAt(cycles, t);
+      var value = even.at(t);
       if (value != null) tip.appendChild(el("div", { class: "row pace" }, [el("span", { class: "key" }),
         el("span", { class: "name", text: translate("pace_reference") }), el("span", { class: "value", text: pct(value) })]));
     }

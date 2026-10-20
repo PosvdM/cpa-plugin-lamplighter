@@ -21,12 +21,11 @@ func PlanOf(provider, raw string) Plan {
 
 // codexPlans maps plan_type to the names the Codex CLI shows (see
 // codex-rs/tui/src/subscription.rs) and to the price of the plan divided by
-// the $20 of Plus. Business and Enterprise seats have the quota of Plus. Pro
-// subscriptions started before 2026-10-29 keep 20 times the quota of Plus
-// until then; the default is the 10 times that follows.
+// the $20 of Plus. Business and Enterprise seats have the quota of Plus.
+// Free and Go get a tenth of it.
 var codexPlans = map[string]Plan{
-	"free":                            {"Free", 1},
-	"go":                              {"Go", 1},
+	"free":                            {"Free", 0.1},
+	"go":                              {"Go", 0.1},
 	"plus":                            {"Plus", 1},
 	"prolite":                         {"Pro $100", 5},
 	"pro":                             {"Pro $200", 10},

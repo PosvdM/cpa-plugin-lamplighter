@@ -35,7 +35,8 @@ When a service has several accounts, the total in the chart averages their remai
 
 | Service | Plan | Default weight |
 | --- | --- | --- |
-| ChatGPT | Plus, Business, Enterprise, Edu, Free, Go | 1 |
+| ChatGPT | Free, Go | 0.1 |
+| ChatGPT | Plus, Business, Enterprise, Edu | 1 |
 | ChatGPT | Pro $100, Business Premium | 5 |
 | ChatGPT | Pro $200 | 10 |
 | ChatGPT | Pro $500 | 25 |
@@ -43,7 +44,7 @@ When a service has several accounts, the total in the chart averages their remai
 | Claude | Max 5x | 5 |
 | Claude | Max 20x | 20 |
 
-Other services and unknown plans default to 1. ChatGPT Pro $200 subscriptions started before 2026-10-29 keep 20 times the quota of Plus until that day; the default weight is the 10 times that follows, so set the weight by hand if needed.
+Other services and unknown plans default to 1.
 
 ## Requirements
 
@@ -286,7 +287,7 @@ The page shows:
   - It shows either the 5-hour quota, over 1, 3, 6, 12, 24 or 26 hours (6 by default), or the 7-day quota, over 1, 4, 8 or 15 days, one month (from this date last month) or 36 days (8 days by default). Only the window kinds the accounts have are offered; windows of other lengths only show on the account cards. With `remember_chart_filters` on, the page keeps the last choices.
   - 1 and 3 hours and 1 and 4 days end now. Longer ranges end at the reset of the selected row's current window; 6 hours, for example, shows the current 5-hour window and the last hour of the previous one, with the time after now hatched. When the selected row has no reset, or its reset has passed (a 5-hour window no request has opened yet), these ranges also end now.
   - The top part has one colored band per service, colored like the quota bars by the lowest reading so far in each cycle, in the order Claude, ChatGPT, Gemini, Kimi, Grok, Fable, Claude / GPT by default or by lowest remaining. A service with several accounts shows their weighted total and expands into one row per account.
-  - The bottom part plots the selected row with its resets and ignition results, and an even-pace line for each cycle, from 100% when the cycle starts to 0% at its reset, so a curve above the line is using the quota slower than an even pace; for a total, the line runs from one account's reset to the next one's. Its header shows the current remaining, the even-pace value now and the difference between them, green above the pace and red below.
+  - The bottom part plots the selected row with its resets and ignition results, and an even-pace line for each cycle, from 100% when the cycle starts to 0% at its reset, so a curve above the line is using the quota slower than an even pace; for a total, it is the weighted mean of the accounts' even pace. Its header shows the current remaining, the even-pace value now and the difference between them, green above the pace and red below.
   - When the chart ends at a reset, a projection at the current rate starts now: if the quota runs out first, it is marked with the time (and the date for the 7-day quota); if the reset comes first, with what will be left. The rate comes from the latest stretch of steady use in this cycle, so in the first minutes of heavy use the projected time comes too early.
   - The page reads the status every 30 seconds and updates the chart when there is new data; while the pointer is over the chart, the update waits until it leaves.
 - recent events in columns for time, type, quota group and detail;
