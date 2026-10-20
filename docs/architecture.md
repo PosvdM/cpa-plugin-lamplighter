@@ -43,7 +43,7 @@ Lamplighter 是用 Go 编写、以 `-buildmode=c-shared` 构建的 CPA 原生插
 
 页面注册为资源 `GET /v0/resource/plugins/lamplighter/page`，菜单名为 `Lamplighter`。资源本身不需要认证，页面中的数据请求都带管理密钥。页面从管理中心保存在 `localStorage` 的 `cli-proxy-auth` 中读取密钥（管理中心用主机名和 User-Agent 做了可逆混淆），读不到时让用户输入并只保存在 `sessionStorage`。设置通过 CPA 的 `PATCH /v0/management/plugins/lamplighter/config` 自动保存：表单的 `change` 事件触发保存，每次只提交改动字段所在的顶层键。该接口只合并顶层键，所以 `ignition`、`providers`、`recovery_notify` 等对象以已保存的对象为基础整体提交。保存依次进行，后一次以前一次写入的配置为基础；数字不满足输入框的范围或步长时不保存。浏览器会把为本站保存的密码（通常是管理密钥）填进密码输入框。设置中只有 `models_api_key` 是密码框，它的值按以下规则保存：输入框没有焦点时由浏览器填入（匹配 `:autofill` 或 `:-webkit-autofill`）的值来自页面加载时的自动填入，不保存也不提示；与当前管理密钥相同的值不保存，并提示这是管理密钥；其他非空值先用它请求 `GET /v1/models`（插件读取模型列表的请求），返回 401 或 403 时不保存并提示 CPA 不接受这个 key，其他结果（包括请求失败）照常保存。不保存时输入框恢复为已保存的值。该输入框还带有让 1Password、Bitwarden 和 LastPass 跳过它的属性。`models_api_key` 输入框设为 `autocomplete="one-time-code"`：Chrome 的密码管理不把这类字段当作密码，表单中没有其他密码框时只把它作为备用字段，不在页面加载时自动填入，也不在修改后弹出保存或更新密码的提示。`autocomplete="off"` 对密码框不起作用，`new-password` 会让 Chrome 提示生成强密码，所以都不使用。`webhook.headers` 和 `webhook.success_json` 在页面上以文本编辑（每行一个 `名称: 值`、JSON 对象），无法解析时不保存。状态接口只返回 webhook 的地址、请求头和请求体是否已设置，页面从 CPA 的插件配置接口读取原值填入表单。最后一次保存 3 秒后，页面重新读取状态，把保存过的字段填成插件应用后的值，正在编辑的字段不回填；保存失败时恢复为已保存的值。测试推送等待未完成的保存后再发送。
 
-账号卡片上的“命名”用 CPA 的 `PATCH /v0/management/auth-files/fields` 写入凭证的 `note`：替换备注的第一行，保留其余各行，再调用 `refresh` 查询这个账号，使插件立即读到新名称。CPA 保存备注时去掉首尾空白，第一行为空的备注会以下一行为名称，所以有多行的备注清空名称时，确认后删除整条备注。额度查询失败不影响改名，只是不更新页面，所以 `refresh` 的结果不作为改名的结果显示。
+账号卡片上的“命名”用 CPA 的 `PATCH /v0/management/auth-files/fields` 写入凭证的 `note`：替换备注的第一行，保留其余各行，再调用 `refresh` 查询这个账号，使插件立即读到新名称。CPA 保存备注时去掉首尾空白，第一行为空的备注会以下一行为名称，所以有多行的备注清空名称时，确认后删除整条备注。额度查询失败不影响改名，只是不更新页面，所以 `refresh` 的结果不作为改名的结果显示。同一服务有多个账号时，卡片上还有“权重”：输入大于 0 的数字后，页面把整个 `account_weights` 对象通过插件配置接口保存（CPA 只合并顶层键），留空则删除这个账号的权重，并立即按新值重画；`config.Parse` 丢弃不大于 0 或无穷大的权重。
 
 页面标题旁的图标从 GitHub 加载仓库中的 `assets/logo.png`，更换图标不需要发布新版本；加载失败时不显示。
 
@@ -59,7 +59,7 @@ Lamplighter 是用 Go 编写、以 `-buildmode=c-shared` 构建的 CPA 原生插
 
 - **时间轴**：1、3 小时和 1、4 天的横轴右端是现在。从 6 小时、8 天起（5 小时额度的 6、12、24、26 小时，7 天额度的 8、15 天、1 个月和 36 天），横轴总长仍等于所选范围，右端是所选行当前窗口的重置时间，合计行取最早重置的账号，即行右侧 ↻ 的时间。例如 6 小时显示当前 5 小时窗口和上个窗口的最后 1 小时。`RANGES` 中的 `24h` 既是 5 小时额度的 24 小时，也是 7 天额度的 1 天，只有前者延伸（`extendsAhead`）。历史接口仍返回到现在为止的范围，页面不画横轴左端之前的部分。切换所选行时整张图平移；时间流逝时横轴不动，窗口重置后右端移到新窗口的重置时间。所选行没有重置时间、重置时间已过（5 小时窗口还没有被新请求开启），或重置时间离现在超过所选范围时，右端是现在。现在之后的部分画成与缺数据相同的斜纹，不画表示现在的竖线。概览图和详情图共用这条横轴。
 - **缺数据**：相邻样本间隔超过 3.5 个查询间隔（或接口的分段长度）时视为缺数据，画成斜线纹理，不延续前一个值。启用被动跳过时，阈值至少为 `passive_skip_max_minutes` 加 1.5 个查询间隔：响应头里没有的窗口（如没在使用的 Fable）在跳过期间只能等下一次主动查询，这段间隔不算缺数据。
-- **多账号合计**：同一服务、同一 `source_label` 的多个账号合成一行，取各账号剩余百分比的平均值。各账号套餐相同时，这等于总额度的剩余比例；接口只提供百分比，无法按额度大小加权。详情图同时画出各账号的最低到最高范围。
+- **多账号合计**：同一服务、同一 `source_label` 的多个账号合成一行，取各账号剩余百分比按权重的加权平均值（`pooled`），权重与各账号的额度大小成比例时，这等于总额度的剩余比例。合计行的当前值、曲线和延长线都用加权值；详情图的阴影仍是各账号的最低到最高。权重依次取 `account_weights` 中按凭证文件名（状态接口中账号的 `name`）设置的值、状态接口中账号的 `default_weight`，都没有时为 1（`accountWeight`）；权重全为 1 时就是简单平均。
 - **窗口种类**：图表按历史系列的 `kind` 分到“5 小时”和“7 天”两个标签页，只显示账号实际报告的种类（一个都不知道时两个都显示），默认打开第一个；其他长度的窗口不画进图表。同一额度名下有自己标签的窗口（例如 Claude 的 `7 Day Opus`）单独成行，不与主窗口合并。
 - **排序**：默认按状态接口的 `group_order`（Claude、ChatGPT、Gemini、Kimi、Grok、Fable、Claude / GPT，来自 `internal/providers/provider.go` 的 `groupOrder`）排列，其他额度按接口顺序排在后面；也可按当前剩余从低到高排列。状态接口中账号按服务的注册顺序排列，同一账号的额度组也按这个顺序排列，所以账号卡片上 Gemini 在 Claude / GPT 之前、Claude 在 Fable 之前。
 - **记住筛选**：`remember_chart_filters` 开启时，页面把所选窗口、排序和每个窗口各自的时间范围存在 `localStorage` 的 `lamplighter-chart-filters` 中，打开页面时恢复；5 小时和 7 天的时间范围选项不同，所以分开保存。保存的值不在当前选项中时使用默认值。开关读取设置表单中的勾选状态，所以改动在保存前就生效；关闭时删除这项记录。
@@ -156,6 +156,14 @@ token 来自凭证文件。CPA 在后台刷新 token 并写回文件，插件不
 - 没有 `proxy_url` 时调用 `host.http.do`。CPA 依次使用全局 `proxy-url`、环境变量代理、直连。`host.http.do` 本身没有超时，插件先用 `host.http.operation_open` 打开一个操作，超时后用 `host.http.cancel` 取消。
 
 CPA 的 `/api-call`（管理中心额度页使用）会忽略环境变量代理，而模型请求不会。插件按模型请求的规则选择出口。
+
+### 套餐
+
+状态接口的账号带 `plan`（套餐名，未识别时为空）和 `default_weight`（多账号合计中的默认权重），由 `providers.PlanOf` 按保存的原始套餐值得出。原始值按 `auth_index` 存在 `state.json` 的 `plans` 中，插件重启后不必等到下一次查询。默认权重是账号额度相对于该服务最便宜付费套餐的倍数。
+
+- Codex：取 `wham/usage` 返回的 `plan_type`，每次主动查询都更新，不另发请求。套餐名与 Codex CLI 的状态页一致（`codex-rs/tui/src/subscription.rs`），默认权重为价格除以 Plus 的 20 美元：`prolite`（Pro $100）和 `self_serve_business_prolite`（Business Premium）为 5，`pro`（Pro $200）为 10，`promax`（Pro $500）为 25，其余为 1；Business（`team`）、Enterprise 和 Edu 席位的额度与 Plus 相同。2026-10-29 前开通的 Pro $200 订阅在这一天之前仍是 Plus 的 20 倍，默认值取之后的 10 倍。未知的 `plan_type` 以原值作为套餐名，权重为 1。
+- Claude：额度响应里没有套餐。主动查询成功后请求 `GET https://api.anthropic.com/api/oauth/profile`，请求头与额度查询相同，每个账号每 24 小时最多一次（`plans` 中的 `checked`）。请求失败时保留上次的结果，只记 debug 日志，不影响额度查询。原始值是 `organization.organization_type` 和 `organization.rate_limit_tier` 以空格连接：`claude_pro` 为 Pro（1）；`claude_max` 的 tier 含 `20x` 为 Max 20x（20），含 `5x` 为 Max 5x（5），都不含时为 Max（5）；`claude_team`、`claude_enterprise` 为 Team、Enterprise（1）。没有 `organization_type` 时按 `account.has_claude_max`、`has_claude_pro` 判断。2026-10-20 在 Pro 账号上实测为 `claude_pro` 和 `default_claude_ai`；Max 和 Team 的取值来自 Claude Code 的已知用法，未经实测。
+- 其他服务没有套餐，默认权重为 1。
 
 ### 被动数据
 
@@ -287,7 +295,7 @@ Did Codex Reset 每 `poll_seconds` 秒（最少 300 秒，对齐时间边界）�
 
 | 文件 | 内容 |
 | --- | --- |
-| `state.json` | `groups`：每个窗口的通知基线；`scheduler`：每个额度组的点火状态；`codex_reset_updates`：已见记录和已推送的排期；`cooldown_notices`：已提醒的过期冷却；`language`：通知语言。写入临时文件后替换 |
+| `state.json` | `groups`：每个窗口的通知基线；`scheduler`：每个额度组的点火状态；`codex_reset_updates`：已见记录和已推送的排期；`cooldown_notices`：已提醒的过期冷却；`language`：通知语言；`plans`：各账号的原始套餐值和上次单独读取套餐的时间。写入临时文件后替换 |
 | `history/YYYY-MM-DD.jsonl` | 按 UTC 日期分文件的额度样本和事件 |
 | `instance.lock` | 实例锁 |
 

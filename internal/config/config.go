@@ -6,6 +6,7 @@ import (
 	_ "time/tzdata"
 
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -144,6 +145,11 @@ type Config struct {
 	// RememberChartFilters makes the page keep the chart filters in the
 	// browser and restore them when it opens.
 	RememberChartFilters bool `yaml:"remember_chart_filters" json:"remember_chart_filters"`
+
+	// AccountWeights maps a credential file name to the weight of the account
+	// in the total of several accounts on the page. Accounts without one use
+	// the default of their plan.
+	AccountWeights map[string]float64 `yaml:"account_weights,omitempty" json:"account_weights,omitempty"`
 }
 
 // DefaultProvider returns the built-in settings for provider.
@@ -333,6 +339,13 @@ func (c *Config) normalize() {
 	for name, provider := range c.Providers {
 		provider.Model = strings.TrimSpace(provider.Model)
 		c.Providers[name] = provider
+	}
+	// A weight must be a positive finite number; others are dropped, so the
+	// account uses the default of its plan.
+	for name, weight := range c.AccountWeights {
+		if !(weight > 0) || math.IsInf(weight, 0) {
+			delete(c.AccountWeights, name)
+		}
 	}
 }
 

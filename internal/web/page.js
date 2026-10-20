@@ -171,6 +171,8 @@
       refresh: "刷新", refreshed: "已刷新 {0}",
       rename: "命名", rename_prompt: "{0} 的名称，写入 CPA 凭证备注的第一行。留空则按邮箱区分账号。", renamed: "已保存 {0} 的名称",
       rename_clear_note: "这个账号的备注还有其他内容。清空名称会删除整条备注，继续吗？",
+      weight: "权重", weight_prompt: "{0} 的权重，多账号合计按权重平均各账号的剩余额度。留空则使用套餐的默认值 {1}。",
+      weight_saved: "已保存 {0} 的权重", plan: "套餐：{0}", weight_invalid: "权重必须是大于 0 的数字",
       cooldown_stale: "额度已恢复，但 CPA 仍冷却到 {0}，期间的请求和点火都会被拒绝；在 CPA 管理中心清除这个账号的冷却。",
       cooldown: "CPA 冷却到 {0}（{1}）",
       blocked_5h: "5 小时额度已用完", blocked_7d: "7 天额度已用完", blocked_other: "{0}额度已用完",
@@ -299,6 +301,8 @@
       refresh: "Refresh", refreshed: "Refreshed {0}",
       rename: "Name", rename_prompt: "Name of {0}, saved as the first line of the CPA credential note. Leave it empty to tell accounts apart by email.", renamed: "Saved the name of {0}",
       rename_clear_note: "The note of this account has more lines. Clearing the name deletes the whole note. Continue?",
+      weight: "Weight", weight_prompt: "Weight of {0}. The total of several accounts averages their remaining quota by weight. Leave it empty to use the default of the plan, {1}.",
+      weight_saved: "Saved the weight of {0}", plan: "Plan: {0}", weight_invalid: "The weight must be a number above 0",
       cooldown_stale: "Quota is back, but CPA cools this account down until {0} and rejects requests and ignition until then. Clear the cooldown in the CPA Management Center.",
       cooldown: "CPA cooldown until {0} ({1})",
       blocked_5h: "5-hour quota used up", blocked_7d: "7-day quota used up", blocked_other: "{0} quota used up",
@@ -675,18 +679,27 @@
       return;
     }
     var meterIndex = 0;
+    // Weights only matter for a total, so they show on services with
+    // several accounts.
+    var counts = {};
+    status.accounts.forEach(function (a) { counts[a.provider] = (counts[a.provider] || 0) + 1; });
     status.accounts.forEach(function (account) {
       var card = el("div", { class: "card account" });
+      var pooledAccount = counts[account.provider] > 1, weight = accountWeight(account);
       var refresh = el("button", { type: "button", class: "btn btn-ghost btn-sm", text: translate("refresh"), onclick: function () {
         runAction(refresh, API + "/refresh", { auth_index: account.auth_index }, translate("refreshed", account.title));
       } });
       var rename = el("button", { type: "button", class: "btn btn-ghost btn-sm", text: translate("rename"), onclick: function () {
         renameAccount(rename, account);
       } });
+      var weigh = pooledAccount ? el("button", { type: "button", class: "btn btn-ghost btn-sm", text: translate("weight"), onclick: function () {
+        setWeight(weigh, account);
+      } }) : null;
       card.appendChild(el("div", { class: "account-head" }, [
         el("span", { class: "type-badge type-" + account.provider, text: account.title }),
+        pooledAccount && weight !== 1 ? el("span", { class: "account-weight", title: translate("weight"), text: "×" + fmtWeight(weight) }) : null,
         el("span", { class: "account-email", title: account.email || account.name, text: account.email || account.name }),
-        rename, refresh
+        rename, weigh, refresh
       ]));
       (account.groups || []).forEach(function (group) {
         var block = el("div", { class: "quota-group" });
@@ -698,6 +711,7 @@
         if (foot) block.appendChild(foot);
         card.appendChild(block);
       });
+      if (account.plan) card.appendChild(el("div", { class: "cell-note", text: translate("plan", account.plan) }));
       var cooldown = parseTime(account.cooldown_until);
       if (cooldown && account.stale_cooldown) {
         card.appendChild(el("div", { class: "error-text", text: translate("cooldown_stale", fmtDateTime(cooldown)) }));
@@ -951,6 +965,41 @@
     }).then(function () { button.disabled = false; });
   }
 
+  function fmtWeight(weight) { return String(Math.round(weight * 100) / 100); }
+
+  // Weights are saved in account_weights by credential file name, which a
+  // rename does not change. An empty answer removes the weight, so the
+  // account uses the default of its plan. The page applies the saved weight
+  // at once.
+  function setWeight(button, account) {
+    var saved = rawConfig.account_weights && typeof rawConfig.account_weights === "object" ? rawConfig.account_weights : {};
+    var current = Number(saved[account.name]);
+    var fallback = Number(account.default_weight) > 0 ? Number(account.default_weight) : 1;
+    var answer = prompt(translate("weight_prompt", account.title, fmtWeight(fallback)), current > 0 ? fmtWeight(current) : "");
+    if (answer === null) return;
+    answer = answer.trim();
+    var weights = JSON.parse(JSON.stringify(saved));
+    if (answer === "") delete weights[account.name];
+    else {
+      var value = Number(answer);
+      if (!isFinite(value) || value <= 0) { toast(translate("weight_invalid")); return; }
+      weights[account.name] = value;
+    }
+    button.disabled = true;
+    saveQueue = saveQueue.then(function () {
+      return api("PATCH", CONFIG_API, { account_weights: Object.keys(weights).length ? weights : null }).then(function () {
+        return loadConfig().then(function () {
+          toast(translate("weight_saved", account.title));
+          renderAccounts();
+          if (history) renderChart();
+        });
+      }).catch(function (err) {
+        if (err.message !== "unauthorized") toast(translate("save_failed", err.message));
+        button.disabled = false;
+      });
+    });
+  }
+
   // ---- Chart ----
 
   // Time ranges follow the quota window, in hours for the 5-hour quota and
@@ -1065,10 +1114,21 @@
     return Math.max(history.bucket_seconds || 0, Number(cfg.poll_interval_seconds) || 300);
   }
 
-  // Pooled remaining of several accounts: the mean percentage, which is the
-  // share of the total quota left when the accounts have the same plan. Each
-  // point also carries the lowest and highest account for the range band.
-  // key is "points" or "floor".
+  // The weight of an account in a pooled row: the weight set on its card, or
+  // the default of its plan.
+  function accountWeight(account) {
+    var saved = rawConfig.account_weights;
+    var weight = saved && typeof saved === "object" ? Number(saved[account.name]) : NaN;
+    if (isFinite(weight) && weight > 0) return weight;
+    weight = Number(account.default_weight);
+    return isFinite(weight) && weight > 0 ? weight : 1;
+  }
+
+  // Pooled remaining of several accounts: the mean percentage weighted by
+  // the accounts' weights, which is the share of the total quota left when
+  // the weights match the sizes of the plans. Each point also carries the
+  // lowest and highest account for the range band. key is "points" or
+  // "floor".
   function pooled(rows, limit, key) {
     var times = [];
     rows.forEach(function (r) { r[key].forEach(function (p) { times.push(p[0]); }); });
@@ -1076,13 +1136,13 @@
     var out = [];
     times.forEach(function (t, i) {
       if (i && t === times[i - 1]) return;
-      var sum = 0, n = 0, lo = 101, hi = -1;
+      var sum = 0, total = 0, lo = 101, hi = -1;
       rows.forEach(function (r) {
         var p = valueAt(r[key], t);
         if (!p || t - p[0] > limit) return;
-        sum += p[1]; n++; lo = Math.min(lo, p[1]); hi = Math.max(hi, p[1]);
+        sum += r.weight * p[1]; total += r.weight; lo = Math.min(lo, p[1]); hi = Math.max(hi, p[1]);
       });
-      if (n) out.push([t, sum / n, 0, lo, hi]);
+      if (total) out.push([t, sum / total, 0, lo, hi]);
     });
     return out;
   }
@@ -1111,7 +1171,7 @@
       (a.groups || []).forEach(function (g) {
         (g.windows || []).forEach(function (w) {
           var reset = parseTime(w.reset);
-          info[g.key + "|" + w.id] = { email: a.email || a.name, reset: reset ? reset.getTime() / 1000 : null };
+          info[g.key + "|" + w.id] = { email: a.email || a.name, reset: reset ? reset.getTime() / 1000 : null, weight: accountWeight(a) };
         });
       });
     });
@@ -1127,7 +1187,7 @@
       var id = s.provider + "|" + source;
       if (!byLabel[id]) { byLabel[id] = []; order.push(id); }
       byLabel[id].push({ id: s.group + "|" + s.window, name: s.label + extra, source: source, sub: meta.email || s.auth_index || "", group: s.group,
-        points: s.points, floor: cycleFloor(s.points), reset: meta.reset, last: s.points[s.points.length - 1][1] });
+        points: s.points, floor: cycleFloor(s.points), reset: meta.reset, weight: meta.weight || 1, last: s.points[s.points.length - 1][1] });
     });
     var rows = order.map(function (id, index) {
       var kids = byLabel[id];
@@ -1136,8 +1196,9 @@
       if (rank < 0) rank = serviceOrder.length + index;
       if (kids.length === 1) { kids[0].order = rank; return kids[0]; }
       var resets = kids.map(function (k) { return k.reset; }).filter(Boolean);
+      var weights = kids.reduce(function (sum, k) { return sum + k.weight; }, 0);
       return { id: "group:" + id, name: kids[0].source, children: kids, points: pooled(kids, limit, "points"), floor: pooled(kids, limit, "floor"), order: rank,
-        last: kids.reduce(function (sum, k) { return sum + k.last; }, 0) / kids.length,
+        last: kids.reduce(function (sum, k) { return sum + k.weight * k.last; }, 0) / weights,
         reset: resets.length ? Math.min.apply(null, resets) : null, groups: kids.map(function (k) { return k.group; }) };
     });
     var lowFirst = chartSort === "low";

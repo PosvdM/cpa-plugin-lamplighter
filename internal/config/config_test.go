@@ -222,3 +222,13 @@ func TestProviderIDKeyWinsOverAnAlias(t *testing.T) {
 		}
 	}
 }
+
+func TestParseAccountWeightsDropsInvalidWeights(t *testing.T) {
+	cfg, err := Parse([]byte("account_weights:\n  a.json: 5\n  b.json: 0.5\n  c.json: 0\n  d.json: -2\n  e.json: .inf\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.AccountWeights) != 2 || cfg.AccountWeights["a.json"] != 5 || cfg.AccountWeights["b.json"] != 0.5 {
+		t.Fatalf("account weights %v", cfg.AccountWeights)
+	}
+}

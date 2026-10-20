@@ -31,6 +31,20 @@ Kimi quota queries follow the CPA Management Center; parsing is tested with a re
 
 When a service has several accounts, notifications and the page tell them apart by the last two characters of the email user name, for example `ChatGPT#rk`. A named account shows its name instead, for example `ChatGPT#main`. To name an account, click "Name" on its card in the Lamplighter page, or edit the credential's "Note" in the CPA Management Center. The name is the first line of the note, cut at 20 characters. A service with one account also shows its name. When a name equals the name or email suffix of another account of the service, the email suffix follows the name. For a note with more lines, clearing the name in the Lamplighter page deletes the whole note. A note changed in the CPA Management Center takes effect after the next poll or a manual refresh. Recorded events keep their original label.
 
+When a service has several accounts, the total in the chart averages their remaining quota by weight; the weight says how many times the quota of the service's cheapest paid plan the account has. The default weight follows the detected plan, whose name shows at the bottom of the account card. The ChatGPT plan comes with the quota query; the Claude plan is read from the account profile once a day per account, and the weight is 1 when that read fails. "Weight" on an account card sets a weight by hand, decimals allowed; leave it empty to restore the default. Weights set by hand are saved in `account_weights` and take precedence over the defaults. A weight other than 1 shows after the account title, for example `×5`.
+
+| Service | Plan | Default weight |
+| --- | --- | --- |
+| ChatGPT | Plus, Business, Enterprise, Edu, Free, Go | 1 |
+| ChatGPT | Pro $100, Business Premium | 5 |
+| ChatGPT | Pro $200 | 10 |
+| ChatGPT | Pro $500 | 25 |
+| Claude | Pro, Team, Enterprise | 1 |
+| Claude | Max 5x | 5 |
+| Claude | Max 20x | 20 |
+
+Other services and unknown plans default to 1. ChatGPT Pro $200 subscriptions started before 2026-10-29 keep 20 times the quota of Plus until that day; the default weight is the 10 times that follows, so set the weight by hand if needed.
+
 ## Requirements
 
 - CPA v8.0.4 or later with plugins enabled (`plugins.enabled: true`). The plugin is built for Linux amd64/arm64, macOS amd64/arm64 and Windows amd64; the macOS builds are only built and tested in CI and have not been tried on a running CPA.
@@ -132,6 +146,7 @@ All settings live under `plugins.configs.lamplighter` in `config.yaml`, and can 
 | `cpa_base_url` | `http://127.0.0.1:8317` | Address the plugin uses to reach CPA; change it when CPA uses another port or TLS |
 | `history_retention_days` | `40` | Days of quota history to keep |
 | `remember_chart_filters` | `false` | The management page remembers, in the current browser, the quota window, time range and order last chosen in the quota chart; when off, the page opens with the defaults |
+| `account_weights` | empty | The weight of each account in the total of several accounts, keyed by credential file name, a number above 0; accounts without one use the default of their plan, see above |
 | `data_dir` | `data/lamplighter` in the plugin directory | State and history directory |
 
 With both `bark_url` and `webhook.url` empty, notifications are off: nothing is sent and no failed notifications are logged as events. Quota alerts from that time are not sent once a URL is set; Did Codex Reset signals that have not expired are still sent.
@@ -265,12 +280,12 @@ plugins:
 
 The page shows:
 
-- the quota windows of each account with reset times and data sources, with buttons to refresh or name each account;
+- the quota windows of each account with reset times, data sources and plan, with buttons to refresh each account, name it or set its weight in the total;
 - the next ignition, last result and failure protection state of each quota group, with an "ignite now" button; hidden while ignition is off;
 - a quota chart:
   - It shows either the 5-hour quota, over 1, 3, 6, 12, 24 or 26 hours (6 by default), or the 7-day quota, over 1, 4, 8 or 15 days, one month (from this date last month) or 36 days (8 days by default). Only the window kinds the accounts have are offered; windows of other lengths only show on the account cards. With `remember_chart_filters` on, the page keeps the last choices.
   - 1 and 3 hours and 1 and 4 days end now. Longer ranges end at the reset of the selected row's current window; 6 hours, for example, shows the current 5-hour window and the last hour of the previous one, with the time after now hatched. When the selected row has no reset, or its reset has passed (a 5-hour window no request has opened yet), these ranges also end now.
-  - The top part has one colored band per service, colored like the quota bars by the lowest reading so far in each cycle, in the order Claude, ChatGPT, Gemini, Kimi, Grok, Fable, Claude / GPT by default or by lowest remaining. A service with several accounts shows their total and expands into one row per account.
+  - The top part has one colored band per service, colored like the quota bars by the lowest reading so far in each cycle, in the order Claude, ChatGPT, Gemini, Kimi, Grok, Fable, Claude / GPT by default or by lowest remaining. A service with several accounts shows their weighted total and expands into one row per account.
   - The bottom part plots the selected row with its resets and ignition results, and an even-pace line for each cycle, from 100% when the cycle starts to 0% at its reset, so a curve above the line is using the quota slower than an even pace; for a total, the line runs from one account's reset to the next one's. Its header shows the current remaining, the even-pace value now and the difference between them, green above the pace and red below.
   - When the chart ends at a reset, a projection at the current rate starts now: if the quota runs out first, it is marked with the time (and the date for the 7-day quota); if the reset comes first, with what will be left. The rate comes from the latest stretch of steady use in this cycle, so in the first minutes of heavy use the projected time comes too early.
   - The page reads the status every 30 seconds and updates the chart when there is new data; while the pointer is over the chart, the update waits until it leaves.

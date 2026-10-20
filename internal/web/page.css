@@ -260,6 +260,7 @@ input[type="checkbox"] { width: 16px; height: 16px; padding: 0; accent-color: va
   min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: var(--text-secondary); font-size: 13px;
 }
+.account-weight { flex: none; font-family: var(--font-mono); font-size: 12px; font-weight: 650; color: var(--text-secondary); }
 .type-badge {
   flex: none; padding: 2px 9px; border-radius: 9999px; font-size: 12px; font-weight: 650;
   background: var(--bg-tertiary); color: var(--text-secondary);

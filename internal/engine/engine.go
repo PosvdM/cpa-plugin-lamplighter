@@ -86,6 +86,8 @@ type Engine struct {
 	nextModels map[string]string
 	// latest is the latest release when it is newer than this version.
 	latest release.Release
+	// plans is the raw plan per auth index, a copy of state.Plans.
+	plans map[string]string
 
 	// Owned by the loop goroutine.
 	state     *store.State
@@ -141,6 +143,7 @@ func New(opts Options) *Engine {
 		enabled:        true,
 		creds:          map[string]*Cred{},
 		groups:         map[string]*GroupView{},
+		plans:          map[string]string{},
 		pollErrs:       map[string]string{},
 		passiveAt:      map[string]time.Time{},
 		activeAt:       map[string]time.Time{},
@@ -328,6 +331,12 @@ func (e *Engine) openStores(cfg config.Config) error {
 	e.mu.Lock()
 	e.dataDir = dir
 	e.lang = notify.NormalizeLang(state.Language)
+	e.plans = map[string]string{}
+	for authIndex, plan := range state.Plans {
+		if plan != nil && plan.Plan != "" {
+			e.plans[authIndex] = plan.Plan
+		}
+	}
 	e.mu.Unlock()
 	if e.alerts != nil {
 		e.alerts.Lang = e.language()
