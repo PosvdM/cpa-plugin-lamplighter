@@ -260,6 +260,7 @@ input[type="checkbox"] { width: 16px; height: 16px; padding: 0; accent-color: va
   min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: var(--text-secondary); font-size: 13px;
 }
+.account-weight { flex: none; font-family: var(--font-mono); font-size: 12px; font-weight: 650; color: var(--text-secondary); }
 .type-badge {
   flex: none; padding: 2px 9px; border-radius: 9999px; font-size: 12px; font-weight: 650;
   background: var(--bg-tertiary); color: var(--text-secondary);
@@ -338,6 +339,8 @@ td.actions { text-align: right; }
 }
 .detail-name { font-size: 14px; font-weight: 650; color: var(--text-primary); }
 .detail-stat strong { margin-left: 4px; color: var(--text-primary); font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: 600; }
+.detail-stat strong.ahead { color: var(--viz-success); }
+.detail-stat strong.behind { color: var(--viz-failure); }
 .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: var(--text-secondary); margin: 10px 0 0; }
 .legend .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
 .legend .swatch.hatch {
@@ -345,6 +348,7 @@ td.actions { text-align: right; }
   border: 1px solid var(--border-color);
 }
 .legend .swatch.pace { width: 14px; height: 0; border-radius: 0; border-top: 1.5px dashed var(--text-tertiary); vertical-align: 3px; }
+.legend .swatch.projection { width: 14px; height: 0; border-radius: 0; border-top: 2px dotted var(--text-primary); vertical-align: 3px; }
 .legend .muted { color: var(--text-tertiary); }
 .tooltip {
   position: absolute; pointer-events: none; background: var(--floating-surface); border: 1px solid var(--border-color);
@@ -357,6 +361,7 @@ td.actions { text-align: right; }
 .tooltip .key { width: 8px; height: 8px; border-radius: 2px; }
 .tooltip .row.pace { color: var(--text-tertiary); }
 .tooltip .row.pace .key { height: 0; border-radius: 0; border-top: 1.5px dashed var(--text-tertiary); }
+.tooltip .row.projection .key { height: 0; border-radius: 0; border-top: 2px dotted var(--text-primary); }
 .tooltip .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tooltip .value { font-family: var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; }
 .tooltip .note { color: var(--text-secondary); border-top: 1px solid var(--border-color); margin-top: 5px; padding-top: 5px; }

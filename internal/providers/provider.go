@@ -37,6 +37,13 @@ type Provider struct {
 	// Headers reads quota windows from the response headers of a model
 	// request. It is nil when the provider sends no quota in its headers.
 	Headers func(header http.Header, now time.Time) []quota.RawGroup
+	// Plan names the raw plan value of an account, from RawGroup.Plan or
+	// Profile. It is nil when the provider reports no plan.
+	Plan func(raw string) Plan
+	// Profile reads the raw plan value with a request of its own, for a
+	// provider whose usage response does not state the plan. The engine
+	// calls it at most once a day per account.
+	Profile func(ctx context.Context, doer quota.Doer, cred Credential) (string, error)
 	// Ignition is nil when the provider cannot be ignited.
 	Ignition *Ignition
 }

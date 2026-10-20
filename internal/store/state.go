@@ -112,6 +112,29 @@ type State struct {
 	// Language is the notification language, the Management Center language
 	// last reported by the management page.
 	Language string `json:"language,omitempty"`
+	// Plans maps an auth index to the plan last read for the account.
+	Plans map[string]*PlanState `json:"plans,omitempty"`
+}
+
+// PlanState is the raw plan value of one account, see providers.PlanOf.
+type PlanState struct {
+	Plan string `json:"plan,omitempty"`
+	// Checked is when the plan was last requested on its own, in Unix
+	// seconds, for providers whose usage response does not state it.
+	Checked int64 `json:"checked,omitempty"`
+}
+
+// PlanFor returns the plan state of authIndex, creating it when missing.
+func (s *State) PlanFor(authIndex string) *PlanState {
+	if s.Plans == nil {
+		s.Plans = map[string]*PlanState{}
+	}
+	plan, ok := s.Plans[authIndex]
+	if !ok || plan == nil {
+		plan = &PlanState{}
+		s.Plans[authIndex] = plan
+	}
+	return plan
 }
 
 // CooldownNotice records that the stale cooldown of authIndex ending at

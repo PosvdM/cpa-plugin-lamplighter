@@ -302,6 +302,11 @@ type AccountStatus struct {
 	StaleCooldown bool          `json:"stale_cooldown,omitempty"`
 	Error         string        `json:"error,omitempty"`
 	Groups        []GroupStatus `json:"groups"`
+	// Plan is the name of the account's plan, empty while it is not known,
+	// and DefaultWeight the weight of the account in the total of several
+	// accounts when account_weights does not set one.
+	Plan          string  `json:"plan,omitempty"`
+	DefaultWeight float64 `json:"default_weight"`
 }
 
 // Status is the response of the status endpoint.
@@ -442,6 +447,8 @@ func (e *Engine) Status() Status {
 			Unavailable: cred.Unavailable,
 			Error:       e.pollErrs[cred.AuthIndex],
 		}
+		plan := providers.PlanOf(cred.Provider, e.plans[cred.AuthIndex])
+		account.Plan, account.DefaultWeight = plan.Name, plan.Weight
 		var groups []*GroupView
 		for _, group := range e.groups {
 			if group.AuthIndex == cred.AuthIndex {

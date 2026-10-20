@@ -15,8 +15,9 @@ import (
 // Claude endpoint and headers, the same as the CPA Management Center quota
 // page. The User-Agent matches CPA's default Claude Code fingerprint.
 const (
-	ClaudeUsageURL  = "https://api.anthropic.com/api/oauth/usage"
-	ClaudeUserAgent = "claude-cli/2.1.280 (external, cli)"
+	ClaudeUsageURL   = "https://api.anthropic.com/api/oauth/usage"
+	ClaudeProfileURL = "https://api.anthropic.com/api/oauth/profile"
+	ClaudeUserAgent  = "claude-cli/2.1.280 (external, cli)"
 )
 
 // FableGroupKey is the raw group key of Claude's Fable window, the same for
@@ -29,6 +30,8 @@ var claude = &Provider{
 	Monitor: true,
 	Ignite:  true,
 	Fetch:   fetchClaude,
+	Plan:    claudePlan,
+	Profile: fetchClaudeProfile,
 	Headers: func(header http.Header, _ time.Time) []quota.RawGroup { return parseClaudeHeaders(header) },
 	Ignition: &Ignition{
 		Protocol: "claude",
@@ -78,6 +81,41 @@ func fetchClaude(ctx context.Context, doer quota.Doer, cred Credential, _ time.T
 		return nil, err
 	}
 	return ParseClaudeUsage(payload)
+}
+
+// fetchClaudeProfile reads the plan of a Claude account from the OAuth
+// profile, which the usage response does not state. The request carries the
+// headers of the usage query.
+func fetchClaudeProfile(ctx context.Context, doer quota.Doer, cred Credential) (string, error) {
+	header := bearer(cred)
+	header.Set("User-Agent", ClaudeUserAgent)
+	header.Set("anthropic-beta", "oauth-2025-04-20")
+	payload, err := send(ctx, doer, cred, quota.Request{Method: http.MethodGet, URL: ClaudeProfileURL, Header: header})
+	if err != nil {
+		return "", err
+	}
+	return ParseClaudeProfile(payload)
+}
+
+// ParseClaudeProfile returns the raw plan of an OAuth profile, as claudePlan
+// reads it: the organization type and the rate limit tier joined by a space,
+// such as "claude_pro default_claude_ai". Without an organization type, the
+// account's has_claude_max and has_claude_pro flags decide.
+func ParseClaudeProfile(payload map[string]any) (string, error) {
+	org, _ := payload["organization"].(map[string]any)
+	kind := scalarString(field(org, "organization_type"))
+	if kind == "" {
+		account, _ := payload["account"].(map[string]any)
+		switch {
+		case account["has_claude_max"] == true:
+			kind = "claude_max"
+		case account["has_claude_pro"] == true:
+			kind = "claude_pro"
+		default:
+			return "", errors.New("Claude 账号资料中没有套餐")
+		}
+	}
+	return strings.TrimSpace(kind + " " + scalarString(field(org, "rate_limit_tier"))), nil
 }
 
 // ParseClaudeUsage converts an oauth/usage response into Claude groups. The

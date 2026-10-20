@@ -367,7 +367,46 @@ func (e *Engine) refreshCred(ctx context.Context, cfg config.Config, cred *Cred)
 	now := e.now()
 	e.activeAt[cred.AuthIndex] = now
 	e.applyGroups(ctx, cfg, cred, groups, quota.SourceActive, now)
+	e.notePlan(ctx, p, cred, credential, groups, now)
 	return nil
+}
+
+// planCheckPeriod is how often the plan of an account is requested on its
+// own, for providers whose usage response does not state it.
+const planCheckPeriod = 24 * time.Hour
+
+// notePlan records the plan of cred after a successful quota query: from the
+// usage response when it states one, otherwise from the provider's own
+// request, at most once per planCheckPeriod. A failed request keeps the plan
+// read before, waits for the next period and does not affect the quota.
+func (e *Engine) notePlan(ctx context.Context, p *providers.Provider, cred *Cred, credential providers.Credential, groups []quota.RawGroup, now time.Time) {
+	if p.Plan == nil {
+		return
+	}
+	state := e.state.PlanFor(cred.AuthIndex)
+	raw := ""
+	for _, g := range groups {
+		if g.Plan != "" {
+			raw = g.Plan
+		}
+	}
+	if raw == "" && p.Profile != nil && now.Sub(time.Unix(state.Checked, 0)) >= planCheckPeriod {
+		state.Checked = now.Unix()
+		e.dirty = true
+		plan, err := p.Profile(ctx, e.egress, credential)
+		if err != nil {
+			e.logf("debug", "读取套餐失败：%s：%v", labelFor(providers.Title(cred.Provider), cred), err)
+		}
+		raw = plan
+	}
+	if raw == "" || raw == state.Plan {
+		return
+	}
+	state.Plan = raw
+	e.dirty = true
+	e.mu.Lock()
+	e.plans[cred.AuthIndex] = raw
+	e.mu.Unlock()
 }
 
 // applyGroups merges new windows into the current view, records history,
