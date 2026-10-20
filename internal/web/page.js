@@ -1047,16 +1047,17 @@
   // Pooled remaining of several accounts: the mean percentage, which is the
   // share of the total quota left when the accounts have the same plan. Each
   // point also carries the lowest and highest account for the range band.
-  function pooled(rows, limit) {
+  // key is "points" or "floor".
+  function pooled(rows, limit, key) {
     var times = [];
-    rows.forEach(function (r) { r.points.forEach(function (p) { times.push(p[0]); }); });
+    rows.forEach(function (r) { r[key].forEach(function (p) { times.push(p[0]); }); });
     times.sort(function (a, b) { return a - b; });
     var out = [];
     times.forEach(function (t, i) {
       if (i && t === times[i - 1]) return;
       var sum = 0, n = 0, lo = 101, hi = -1;
       rows.forEach(function (r) {
-        var p = valueAt(r.points, t);
+        var p = valueAt(r[key], t);
         if (!p || t - p[0] > limit) return;
         sum += p[1]; n++; lo = Math.min(lo, p[1]); hi = Math.max(hi, p[1]);
       });
@@ -1065,8 +1066,24 @@
     return out;
   }
 
+  // The lowest remaining so far in each cycle. Response headers report a
+  // point more than active queries (51 against 50), which near a threshold
+  // flips the band's color for a moment; a rise by a reset starts a new
+  // cycle. Unlike declining(), which averages 50 and 51 to 50.5, this keeps
+  // the lower reading.
+  function cycleFloor(points) {
+    var low = null;
+    return points.map(function (p) {
+      low = low == null || p[1] - low >= RESET_JUMP ? p[1] : Math.min(low, p[1]);
+      var q = p.slice();
+      q[1] = low;
+      return q;
+    });
+  }
+
   // One row per quota group label. A label with several accounts becomes a
-  // pooled row that expands into one row per account.
+  // pooled row that expands into one row per account. floor holds the
+  // samples as cycleFloor() leaves them, for the band and the rate of use.
   function chartRows() {
     var info = {};
     status.accounts.forEach(function (a) {
@@ -1089,7 +1106,7 @@
       var id = s.provider + "|" + source;
       if (!byLabel[id]) { byLabel[id] = []; order.push(id); }
       byLabel[id].push({ id: s.group + "|" + s.window, name: s.label + extra, source: source, sub: meta.email || s.auth_index || "", group: s.group,
-        points: s.points, reset: meta.reset, last: s.points[s.points.length - 1][1] });
+        points: s.points, floor: cycleFloor(s.points), reset: meta.reset, last: s.points[s.points.length - 1][1] });
     });
     var rows = order.map(function (id, index) {
       var kids = byLabel[id];
@@ -1098,7 +1115,7 @@
       if (rank < 0) rank = serviceOrder.length + index;
       if (kids.length === 1) { kids[0].order = rank; return kids[0]; }
       var resets = kids.map(function (k) { return k.reset; }).filter(Boolean);
-      return { id: "group:" + id, name: kids[0].source, children: kids, points: pooled(kids, limit), order: rank,
+      return { id: "group:" + id, name: kids[0].source, children: kids, points: pooled(kids, limit, "points"), floor: pooled(kids, limit, "floor"), order: rank,
         last: kids.reduce(function (sum, k) { return sum + k.last; }, 0) / kids.length,
         reset: resets.length ? Math.min.apply(null, resets) : null, groups: kids.map(function (k) { return k.group; }) };
     });
@@ -1258,7 +1275,7 @@
         fill: cssVar(f.depth ? "--text-secondary" : "--text-primary"), "class": "row-name" }, name));
       if (r.children) root.appendChild(svgText({ x: nameX + name.length * 8 + 8, y: y0 + 15, "font-size": 11, fill: cssVar("--text-tertiary") }, "×" + r.children.length));
       root.appendChild(svg("rect", { x: g.labelW, y: y0, width: g.plotW, height: LANE, rx: 4, fill: cssVar("--chart-lane") }));
-      drawBand(root, g, r.points, y0, limit);
+      drawBand(root, g, r.floor, y0, limit);
       var rx = g.width - g.rightW + 14;
       root.appendChild(svg("rect", { x: rx, y: y0 + 7, width: 8, height: 8, rx: 2, fill: cssVar(levelVar(r.last)) }));
       root.appendChild(svgText({ x: rx + 14, y: y0 + 15, "font-size": 13, "font-weight": 650, fill: cssVar("--text-primary") }, pct(r.last)));
