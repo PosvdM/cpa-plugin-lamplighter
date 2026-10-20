@@ -8,9 +8,9 @@ Lamplighter is a native plugin for [CLIProxyAPI](https://github.com/router-for-m
 
 ![Management page: quota per account and ignition plans](./docs/images/overview.png)
 
-![Quota chart: the 5-hour quota over the last 12 hours, with the Claude curve below it marking resets, an even-pace line for each cycle and ignition results](./docs/images/chart.png)
+![Quota chart: the 5-hour quota over a 12-hour range that ends at the reset of the current Claude window, with the Claude curve below it marking resets, an even-pace line for each cycle, the projection at the current rate and ignition results](./docs/images/chart.png)
 
-![Quota chart: Claude with two accounts expanded into one row each, and below it the total line with the range between accounts](./docs/images/chart-accounts.png)
+![Quota chart: Claude with two accounts expanded into one row each, and below it the weighted total line with the range between accounts and the projection of the total](./docs/images/chart-accounts.png)
 
 ## Features
 

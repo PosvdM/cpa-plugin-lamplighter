@@ -10,9 +10,9 @@ Lamplighter（点灯人）是 [CLIProxyAPI](https://github.com/router-for-me/CLI
 
 ![管理页面：各账号额度和自动点火计划](./docs/images/overview.png)
 
-![额度变化图表：最近 12 小时的 5 小时额度，下方为 Claude 的额度曲线，标出重置、每个周期的匀速参考线和点火结果](./docs/images/chart.png)
+![额度变化图表：12 小时范围的 5 小时额度，横轴右端是 Claude 当前窗口的重置时间；下方为 Claude 的额度曲线，标出重置、每个周期的匀速参考线、按当前速度的延长线和点火结果](./docs/images/chart.png)
 
-![额度变化图表：多账号的 Claude 展开为各账号，下方为合计曲线和账号间的范围](./docs/images/chart-accounts.png)
+![额度变化图表：多账号的 Claude 展开为各账号，下方为按权重计算的合计曲线、账号间的范围和合计的延长线](./docs/images/chart-accounts.png)
 
 ## 功能
 
