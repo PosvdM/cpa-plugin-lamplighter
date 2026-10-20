@@ -57,6 +57,9 @@ type RawGroup struct {
 	Key         string
 	SourceLabel string
 	Windows     []Window
+	// Plan is the plan of the account when the usage response states it,
+	// such as the plan_type of Codex, and empty otherwise.
+	Plan string
 }
 
 // ShortLabel returns the compact window label used in notifications.

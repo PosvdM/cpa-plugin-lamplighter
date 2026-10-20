@@ -969,3 +969,83 @@ func TestKimiAliasIsMonitoredButNeverIgnited(t *testing.T) {
 		t.Fatalf("Kimi has no ignition, got %d targets", len(targets))
 	}
 }
+
+func TestPlansComeFromTheUsageResponseAndADailyProfile(t *testing.T) {
+	c := &clock{t: time.Date(2026, 10, 20, 10, 0, 0, 0, shanghai)}
+	h := standardHost(c)
+	usage := h.http
+	profileStatus := 500
+	h.http = func(req pluginapi.HTTPRequest) pluginapi.HTTPResponse {
+		switch req.URL {
+		case providers.CodexUsageURL:
+			resp := usage(req)
+			resp.Body = append([]byte(`{"plan_type":"pro",`), resp.Body[1:]...)
+			return resp
+		case providers.ClaudeProfileURL:
+			if req.Headers.Get("anthropic-beta") != "oauth-2025-04-20" || req.Headers.Get("Authorization") != "Bearer t3" {
+				t.Errorf("profile request headers %v", req.Headers)
+			}
+			if profileStatus != 200 {
+				return pluginapi.HTTPResponse{StatusCode: profileStatus}
+			}
+			return pluginapi.HTTPResponse{StatusCode: 200, Body: []byte(`{"organization":{"organization_type":"claude_max","rate_limit_tier":"default_claude_max_20x"}}`)}
+		}
+		return usage(req)
+	}
+	e, _ := newTestEngine(t, h, c)
+	accounts := func() map[string]AccountStatus {
+		out := map[string]AccountStatus{}
+		for _, a := range e.Status().Accounts {
+			out[a.AuthIndex] = a
+		}
+		return out
+	}
+
+	e.poll(context.Background(), e.config(), c.t, "", false)
+	got := accounts()
+	if got["1"].Plan != "Pro $200" || got["1"].DefaultWeight != 10 {
+		t.Fatalf("codex plan %q weight %v", got["1"].Plan, got["1"].DefaultWeight)
+	}
+	// A failed profile request leaves the plan unknown and the quota read.
+	if got["3"].Plan != "" || got["3"].DefaultWeight != 1 || got["3"].Error != "" || len(got["3"].Groups) == 0 {
+		t.Fatalf("claude account after a failed profile %+v", got["3"])
+	}
+	if got["4"].Plan != "" || got["4"].DefaultWeight != 1 || h.requestsTo(providers.ClaudeProfileURL) != 1 {
+		t.Fatalf("antigravity has no plan; one profile request, got %d", h.requestsTo(providers.ClaudeProfileURL))
+	}
+
+	profileStatus = 200
+	c.add(time.Hour)
+	e.poll(context.Background(), e.config(), c.t, "", false)
+	if n := h.requestsTo(providers.ClaudeProfileURL); n != 1 {
+		t.Fatalf("the profile is read at most once a day, got %d requests", n)
+	}
+	c.add(24 * time.Hour)
+	e.poll(context.Background(), e.config(), c.t, "", false)
+	got = accounts()
+	if n := h.requestsTo(providers.ClaudeProfileURL); n != 2 || got["3"].Plan != "Max 20x" || got["3"].DefaultWeight != 20 {
+		t.Fatalf("after a day: %d requests, plan %q weight %v", n, got["3"].Plan, got["3"].DefaultWeight)
+	}
+	if e.state.Plans["3"].Plan != "claude_max default_claude_max_20x" {
+		t.Fatalf("stored plan %+v", e.state.Plans["3"])
+	}
+
+	// A later failure keeps the plan read before.
+	profileStatus = 500
+	c.add(25 * time.Hour)
+	e.poll(context.Background(), e.config(), c.t, "", false)
+	if n, plan := h.requestsTo(providers.ClaudeProfileURL), accounts()["3"].Plan; n != 3 || plan != "Max 20x" {
+		t.Fatalf("after a failed read: %d requests, plan %q", n, plan)
+	}
+
+	// The plans are read back from state.json after a restart.
+	e.dirty = true
+	e.saveState()
+	restarted := New(Options{Host: h, Version: "test", Now: c.now})
+	if err := restarted.openStores(e.config()); err != nil {
+		t.Fatal(err)
+	}
+	if restarted.plans["3"] != "claude_max default_claude_max_20x" || restarted.plans["1"] != "pro" {
+		t.Fatalf("plans after a restart %v", restarted.plans)
+	}
+}

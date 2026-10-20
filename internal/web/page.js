@@ -171,6 +171,8 @@
       refresh: "刷新", refreshed: "已刷新 {0}",
       rename: "命名", rename_prompt: "{0} 的名称，写入 CPA 凭证备注的第一行。留空则按邮箱区分账号。", renamed: "已保存 {0} 的名称",
       rename_clear_note: "这个账号的备注还有其他内容。清空名称会删除整条备注，继续吗？",
+      weight: "权重", weight_prompt: "{0} 的权重，多账号合计按权重平均各账号的剩余额度。留空则使用套餐的默认值 {1}。",
+      weight_saved: "已保存 {0} 的权重", plan: "套餐：{0}", weight_invalid: "权重必须是大于 0 的数字",
       cooldown_stale: "额度已恢复，但 CPA 仍冷却到 {0}，期间的请求和点火都会被拒绝；在 CPA 管理中心清除这个账号的冷却。",
       cooldown: "CPA 冷却到 {0}（{1}）",
       blocked_5h: "5 小时额度已用完", blocked_7d: "7 天额度已用完", blocked_other: "{0}额度已用完",
@@ -198,7 +200,9 @@
       ignition_lane: "点火", lane_ok: "{0} 成功", lane_failed: " · {0} 失败",
       total: "合计", total_suffix: " 合计", more_accounts: "　… 另 {0} 个账号",
       pooled_note: "{0} 个账号合计，阴影为账号间的最低到最高",
-      stat_total: "合计", stat_current: "当前", stat_min_account: "单账号最低", stat_min: "最低", stat_to_reset: "距重置",
+      stat_total: "合计", stat_current: "当前", stat_pace: "匀速", stat_diff: "差值", stat_to_reset: "距重置",
+      projected_rate: "按当前速度", projected_out: "{0} 用完", projected_left: "剩 {0}",
+      legend_projection: "按当前速度的延长线", legend_hatch: "无数据或尚未到来",
       detail_aria: "{0} 剩余百分比",
       detail_keys: "按左右方向键查看各时刻的数值",
       passive_sample: "（被动）", active_sample: "（主动）",
@@ -297,6 +301,8 @@
       refresh: "Refresh", refreshed: "Refreshed {0}",
       rename: "Name", rename_prompt: "Name of {0}, saved as the first line of the CPA credential note. Leave it empty to tell accounts apart by email.", renamed: "Saved the name of {0}",
       rename_clear_note: "The note of this account has more lines. Clearing the name deletes the whole note. Continue?",
+      weight: "Weight", weight_prompt: "Weight of {0}. The total of several accounts averages their remaining quota by weight. Leave it empty to use the default of the plan, {1}.",
+      weight_saved: "Saved the weight of {0}", plan: "Plan: {0}", weight_invalid: "The weight must be a number above 0",
       cooldown_stale: "Quota is back, but CPA cools this account down until {0} and rejects requests and ignition until then. Clear the cooldown in the CPA Management Center.",
       cooldown: "CPA cooldown until {0} ({1})",
       blocked_5h: "5-hour quota used up", blocked_7d: "7-day quota used up", blocked_other: "{0} quota used up",
@@ -324,7 +330,9 @@
       ignition_lane: "Ignition", lane_ok: "{0} succeeded", lane_failed: " · {0} failed",
       total: "Total", total_suffix: " total", more_accounts: "　… {0} more accounts",
       pooled_note: "Total of {0} accounts; the shade spans the lowest to the highest account",
-      stat_total: "Total", stat_current: "Now", stat_min_account: "Lowest account", stat_min: "Lowest", stat_to_reset: "Until reset",
+      stat_total: "Total", stat_current: "Now", stat_pace: "Even pace", stat_diff: "Difference", stat_to_reset: "Until reset",
+      projected_rate: "At the current rate", projected_out: "out at {0}", projected_left: "{0} left",
+      legend_projection: "Projection at the current rate", legend_hatch: "No data, or not yet",
       detail_aria: "{0} remaining percent",
       detail_keys: "Use the left and right arrow keys to step through the values",
       passive_sample: " (passive)", active_sample: " (active)",
@@ -547,7 +555,7 @@
     var minutes = Math.round(ms / 60000);
     if (minutes < 60) return minutes + "m";
     var hours = Math.floor(minutes / 60);
-    if (hours < 48) return hours + "h " + pad(minutes % 60) + "m";
+    if (hours < 24) return hours + "h " + pad(minutes % 60) + "m";
     return Math.floor(hours / 24) + "d " + (hours % 24) + "h";
   }
 
@@ -671,18 +679,27 @@
       return;
     }
     var meterIndex = 0;
+    // Weights only matter for a total, so they show on services with
+    // several accounts.
+    var counts = {};
+    status.accounts.forEach(function (a) { counts[a.provider] = (counts[a.provider] || 0) + 1; });
     status.accounts.forEach(function (account) {
       var card = el("div", { class: "card account" });
+      var pooledAccount = counts[account.provider] > 1, weight = accountWeight(account);
       var refresh = el("button", { type: "button", class: "btn btn-ghost btn-sm", text: translate("refresh"), onclick: function () {
         runAction(refresh, API + "/refresh", { auth_index: account.auth_index }, translate("refreshed", account.title));
       } });
       var rename = el("button", { type: "button", class: "btn btn-ghost btn-sm", text: translate("rename"), onclick: function () {
         renameAccount(rename, account);
       } });
+      var weigh = pooledAccount ? el("button", { type: "button", class: "btn btn-ghost btn-sm", text: translate("weight"), onclick: function () {
+        setWeight(weigh, account);
+      } }) : null;
       card.appendChild(el("div", { class: "account-head" }, [
         el("span", { class: "type-badge type-" + account.provider, text: account.title }),
+        pooledAccount && weight !== 1 ? el("span", { class: "account-weight", title: translate("weight"), text: "×" + fmtWeight(weight) }) : null,
         el("span", { class: "account-email", title: account.email || account.name, text: account.email || account.name }),
-        rename, refresh
+        rename, weigh, refresh
       ]));
       (account.groups || []).forEach(function (group) {
         var block = el("div", { class: "quota-group" });
@@ -694,6 +711,7 @@
         if (foot) block.appendChild(foot);
         card.appendChild(block);
       });
+      if (account.plan) card.appendChild(el("div", { class: "cell-note", text: translate("plan", account.plan) }));
       var cooldown = parseTime(account.cooldown_until);
       if (cooldown && account.stale_cooldown) {
         card.appendChild(el("div", { class: "error-text", text: translate("cooldown_stale", fmtDateTime(cooldown)) }));
@@ -947,6 +965,42 @@
     }).then(function () { button.disabled = false; });
   }
 
+  function fmtWeight(weight) { return String(Math.round(weight * 100) / 100); }
+
+  // Weights are saved in account_weights by credential file name, which a
+  // rename does not change. An empty answer removes the weight, so the
+  // account uses the default of its plan. The page applies the saved weight
+  // at once.
+  function setWeight(button, account) {
+    var saved = rawConfig.account_weights && typeof rawConfig.account_weights === "object" ? rawConfig.account_weights : {};
+    var current = Number(saved[account.name]);
+    var fallback = Number(account.default_weight) > 0 ? Number(account.default_weight) : 1;
+    var answer = prompt(translate("weight_prompt", account.title, fmtWeight(fallback)), current > 0 ? fmtWeight(current) : "");
+    if (answer === null) return;
+    answer = answer.trim();
+    var value = Number(answer);
+    if (answer !== "" && (!isFinite(value) || value <= 0)) { toast(translate("weight_invalid")); return; }
+    button.disabled = true;
+    // The object is built in the queue, from the config the previous save
+    // wrote, so saving two weights in a row keeps both.
+    saveQueue = saveQueue.then(function () {
+      var latest = rawConfig.account_weights;
+      var weights = latest && typeof latest === "object" ? JSON.parse(JSON.stringify(latest)) : {};
+      if (answer === "") delete weights[account.name];
+      else weights[account.name] = value;
+      return api("PATCH", CONFIG_API, { account_weights: Object.keys(weights).length ? weights : null }).then(function () {
+        return loadConfig().then(function () {
+          toast(translate("weight_saved", account.title));
+          renderAccounts();
+          if (history) renderChart();
+        });
+      }).catch(function (err) {
+        if (err.message !== "unauthorized") toast(translate("save_failed", err.message));
+        button.disabled = false;
+      });
+    });
+  }
+
   // ---- Chart ----
 
   // Time ranges follow the quota window, in hours for the 5-hour quota and
@@ -961,6 +1015,12 @@
   };
   // The default ranges are the shortest that cover one whole window.
   var DEFAULT_RANGE = { "5h": "6h", "7d": "8d" };
+  // From a window plus one on, the axis ends at the reset of the selected
+  // row, so the rest of its window lies ahead of now. "24h" extends as a
+  // range of the 5-hour window, not as the 1d range of the 7-day window.
+  function extendsAhead(kind, name) {
+    return (RANGES[kind] || []).some(function (r, i) { return i >= 2 && r[0] === name; });
+  }
   // The default row order is the status API's group_order, by quota name;
   // other quotas follow in API order. The status API orders the quota groups
   // of an account the same way.
@@ -969,6 +1029,13 @@
   var RESET_JUMP = 5;
   // Quotas report whole percents; steps this small are a steady decline.
   var QUANTUM = 2;
+  // Passive samples are written up to a minute after the value changes. A
+  // passive value unchanged for longer than this is held until now when the
+  // rate of use is estimated, so a pause shows as one. Active samples come
+  // once per poll, so an active value is held only after one and a half
+  // sample steps; holding it sooner would level the projection in the
+  // second half of every poll interval.
+  var HOLD_AFTER = 120;
 
   var chartView = null;
   var hoverSource = "";
@@ -1037,43 +1104,78 @@
   function gapLimit() {
     var cfg = status && status.config ? status.config : {};
     var poll = Number(cfg.poll_interval_seconds) || 300;
-    var limit = Math.max(history.bucket_seconds || 0, poll) * 3.5;
+    var limit = sampleStep() * 3.5;
     if (Number(cfg.passive_skip_seconds) > 0) {
       limit = Math.max(limit, (Number(cfg.passive_skip_max_minutes) || 0) * 60 + poll * 1.5);
     }
     return limit;
   }
 
-  // Pooled remaining of several accounts: the mean percentage, which is the
-  // share of the total quota left when the accounts have the same plan. Each
-  // point also carries the lowest and highest account for the range band.
-  function pooled(rows, limit) {
+  // The usual time between two samples: the poll interval, or the bucket of
+  // a long range.
+  function sampleStep() {
+    var cfg = status && status.config ? status.config : {};
+    return Math.max(history.bucket_seconds || 0, Number(cfg.poll_interval_seconds) || 300);
+  }
+
+  // The weight of an account in a pooled row: the weight set on its card, or
+  // the default of its plan.
+  function accountWeight(account) {
+    var saved = rawConfig.account_weights;
+    var weight = saved && typeof saved === "object" ? Number(saved[account.name]) : NaN;
+    if (isFinite(weight) && weight > 0) return weight;
+    weight = Number(account.default_weight);
+    return isFinite(weight) && weight > 0 ? weight : 1;
+  }
+
+  // Pooled remaining of several accounts: the mean percentage weighted by
+  // the accounts' weights, which is the share of the total quota left when
+  // the weights match the sizes of the plans. Each point also carries the
+  // lowest and highest account for the range band. key is "points" or
+  // "floor".
+  function pooled(rows, limit, key) {
     var times = [];
-    rows.forEach(function (r) { r.points.forEach(function (p) { times.push(p[0]); }); });
+    rows.forEach(function (r) { r[key].forEach(function (p) { times.push(p[0]); }); });
     times.sort(function (a, b) { return a - b; });
     var out = [];
     times.forEach(function (t, i) {
       if (i && t === times[i - 1]) return;
-      var sum = 0, n = 0, lo = 101, hi = -1;
+      var sum = 0, total = 0, lo = 101, hi = -1;
       rows.forEach(function (r) {
-        var p = valueAt(r.points, t);
+        var p = valueAt(r[key], t);
         if (!p || t - p[0] > limit) return;
-        sum += p[1]; n++; lo = Math.min(lo, p[1]); hi = Math.max(hi, p[1]);
+        sum += r.weight * p[1]; total += r.weight; lo = Math.min(lo, p[1]); hi = Math.max(hi, p[1]);
       });
-      if (n) out.push([t, sum / n, 0, lo, hi]);
+      if (total) out.push([t, sum / total, 0, lo, hi]);
     });
     return out;
   }
 
+  // The lowest remaining so far in each cycle. Response headers report a
+  // point more than active queries (51 against 50), which near a threshold
+  // flips the band's color for a moment; a rise by a reset starts a new
+  // cycle. Unlike declining(), which averages 50 and 51 to 50.5, this keeps
+  // the lower reading.
+  function cycleFloor(points) {
+    var low = null;
+    return points.map(function (p) {
+      low = low == null || p[1] - low >= RESET_JUMP ? p[1] : Math.min(low, p[1]);
+      var q = p.slice();
+      q[1] = low;
+      return q;
+    });
+  }
+
   // One row per quota group label. A label with several accounts becomes a
-  // pooled row that expands into one row per account.
+  // pooled row that expands into one row per account. floor holds the
+  // samples as cycleFloor() leaves them, for the band and the rate of use.
   function chartRows() {
     var info = {};
     status.accounts.forEach(function (a) {
       (a.groups || []).forEach(function (g) {
         (g.windows || []).forEach(function (w) {
           var reset = parseTime(w.reset);
-          info[g.key + "|" + w.id] = { email: a.email || a.name, reset: reset ? reset.getTime() / 1000 : null };
+          info[g.key + "|" + w.id] = { email: a.email || a.name, reset: reset ? reset.getTime() / 1000 : null, weight: accountWeight(a) };
         });
       });
     });
@@ -1089,7 +1191,7 @@
       var id = s.provider + "|" + source;
       if (!byLabel[id]) { byLabel[id] = []; order.push(id); }
       byLabel[id].push({ id: s.group + "|" + s.window, name: s.label + extra, source: source, sub: meta.email || s.auth_index || "", group: s.group,
-        points: s.points, reset: meta.reset, last: s.points[s.points.length - 1][1] });
+        points: s.points, floor: cycleFloor(s.points), reset: meta.reset, weight: meta.weight || 1, last: s.points[s.points.length - 1][1] });
     });
     var rows = order.map(function (id, index) {
       var kids = byLabel[id];
@@ -1097,9 +1199,13 @@
       var rank = serviceOrder.indexOf(kids[0].source);
       if (rank < 0) rank = serviceOrder.length + index;
       if (kids.length === 1) { kids[0].order = rank; return kids[0]; }
-      var resets = kids.map(function (k) { return k.reset; }).filter(Boolean);
-      return { id: "group:" + id, name: kids[0].source, children: kids, points: pooled(kids, limit), order: rank,
-        last: kids.reduce(function (sum, k) { return sum + k.last; }, 0) / kids.length,
+      // The next reset of the accounts; a reset that has passed, of a window
+      // not opened again or not queried since, is not the next one.
+      var now = Date.now() / 1000;
+      var resets = kids.map(function (k) { return k.reset; }).filter(function (t) { return t > now; });
+      var weights = kids.reduce(function (sum, k) { return sum + k.weight; }, 0);
+      return { id: "group:" + id, name: kids[0].source, children: kids, points: pooled(kids, limit, "points"), floor: pooled(kids, limit, "floor"), order: rank,
+        last: kids.reduce(function (sum, k) { return sum + k.weight * k.last; }, 0) / weights,
         reset: resets.length ? Math.min.apply(null, resets) : null, groups: kids.map(function (k) { return k.group; }) };
     });
     var lowFirst = chartSort === "low";
@@ -1119,12 +1225,24 @@
     return hit;
   }
 
-  function geometry(width) {
-    var from = new Date(history.from).getTime() / 1000;
-    var to = new Date(history.to).getTime() / 1000;
+  // The right end of the time axis: for a range that extends ahead, the
+  // reset of the selected row's window (the earliest account's for a pooled
+  // row), otherwise now. Without a reset still to come, such as a 5-hour
+  // window no request has opened yet, it is now.
+  function axisEnd(row) {
+    var from = new Date(history.from).getTime() / 1000, now = new Date(history.to).getTime() / 1000;
+    if (!extendsAhead(historyWindow, historyRange) || !row || !row.reset || row.reset <= now || row.reset - now >= now - from) return now;
+    return row.reset;
+  }
+
+  // The axis spans the chosen range and ends at end. The history covers the
+  // range up to now, so an axis that ends later leaves out its oldest part.
+  function geometry(width, end) {
+    var now = new Date(history.to).getTime() / 1000;
+    var to = end || now, from = to - (now - new Date(history.from).getTime() / 1000);
     var labelW = width < 640 ? 120 : 190, rightW = width < 640 ? 112 : 136;
     var plotW = width - labelW - rightW;
-    return { from: from, to: to, width: width, labelW: labelW, rightW: rightW, plotW: plotW,
+    return { from: from, to: to, now: now, width: width, labelW: labelW, rightW: rightW, plotW: plotW,
       x: function (t) { return labelW + (t - from) / (to - from) * plotW; },
       t: function (px) { return from + (px - labelW) / plotW * (to - from); } };
   }
@@ -1175,15 +1293,23 @@
     return node;
   }
 
+  // Hatching from a to b, cut to the axis: missing data, and the time after
+  // now, which has none yet.
+  function hatchRect(root, g, a, b, y0, height) {
+    a = Math.max(a, g.from);
+    if (g.x(b) - g.x(a) > 1) root.appendChild(svg("rect", { x: g.x(a), y: y0, width: g.x(b) - g.x(a), height: height, fill: "url(#chart-hatch)" }));
+  }
+
+  // The start of the hatching after the last stretch: now, or the end of
+  // the data when it stopped before.
+  function dataEnd(g, cursor, limit) { return cursor < g.now - limit ? cursor : g.now; }
+
   // A band of solid color per quota level. Samples merge while the level
   // stays the same, and edges snap to whole pixels so neighbours leave no seam.
   function drawBand(root, g, points, y0, limit) {
     var cursor = g.from;
-    function hatch(a, b) {
-      if (g.x(b) - g.x(a) > 1) root.appendChild(svg("rect", { x: g.x(a), y: y0, width: g.x(b) - g.x(a), height: LANE, fill: "url(#chart-hatch)" }));
-    }
-    runs(points, limit, g.to).forEach(function (run) {
-      if (run.start > cursor + limit) hatch(cursor, run.start);
+    runs(points, limit, g.now).forEach(function (run) {
+      if (run.start > cursor + limit) hatchRect(root, g, cursor, run.start, y0, LANE);
       cursor = run.end;
       var segments = [];
       run.pts.forEach(function (p, i) {
@@ -1193,20 +1319,20 @@
         else segments.push({ start: Math.max(g.from, p[0]), end: end, level: level });
       });
       segments.forEach(function (seg) {
+        if (seg.end <= g.from) return;
         var x0 = Math.round(g.x(seg.start)), x1 = Math.max(x0 + 1, Math.round(g.x(seg.end)));
         root.appendChild(svg("rect", { x: x0, y: y0, width: x1 - x0, height: LANE, fill: cssVar(seg.level), "fill-opacity": 0.8, "shape-rendering": "crispEdges" }));
       });
     });
-    if (cursor < g.to - limit) hatch(cursor, g.to);
+    hatchRect(root, g, dataEnd(g, cursor, limit), g.to, y0, LANE);
   }
 
-  function ignitionEvents() {
-    var from = new Date(history.from).getTime() / 1000;
+  function ignitionEvents(g) {
     return (history.events || []).map(function (ev) {
       var parts = eventParts(ev);
       return { t: new Date(ev.time).getTime() / 1000, failed: ev.kind === "ignite_failed" || ev.kind === "ignite_paused",
         message: (parts.label !== "—" ? parts.label + " " : "") + parts.detail, group: ev.group };
-    }).filter(function (ev) { return ev.t >= from; });
+    }).filter(function (ev) { return ev.t >= g.from; });
   }
 
   function placeTip(tip, box, g, t, top) {
@@ -1226,8 +1352,8 @@
 
   // Overview: one band per row on a shared time axis, the ignition lane
   // below, and a crosshair shared with the detail chart.
-  function renderOverview(rows, box) {
-    var g = chartView = geometry(Math.max(480, box.clientWidth || 800));
+  function renderOverview(rows, box, end) {
+    var g = chartView = geometry(Math.max(480, box.clientWidth || 800), end);
     var limit = gapLimit();
     var flat = [];
     rows.forEach(function (r) {
@@ -1258,7 +1384,7 @@
         fill: cssVar(f.depth ? "--text-secondary" : "--text-primary"), "class": "row-name" }, name));
       if (r.children) root.appendChild(svgText({ x: nameX + name.length * 8 + 8, y: y0 + 15, "font-size": 11, fill: cssVar("--text-tertiary") }, "×" + r.children.length));
       root.appendChild(svg("rect", { x: g.labelW, y: y0, width: g.plotW, height: LANE, rx: 4, fill: cssVar("--chart-lane") }));
-      drawBand(root, g, r.points, y0, limit);
+      drawBand(root, g, r.floor, y0, limit);
       var rx = g.width - g.rightW + 14;
       root.appendChild(svg("rect", { x: rx, y: y0 + 7, width: 8, height: 8, rx: 2, fill: cssVar(levelVar(r.last)) }));
       root.appendChild(svgText({ x: rx + 14, y: y0 + 15, "font-size": 13, "font-weight": 650, fill: cssVar("--text-primary") }, pct(r.last)));
@@ -1278,7 +1404,7 @@
     var ey = AXIS_H + flat.length * (LANE + LANE_GAP) + 4, cy = ey + 9;
     root.appendChild(svgText({ x: 4, y: ey + 13, "font-size": 12, fill: cssVar("--text-tertiary"), "class": "row-name" }, translate("ignition_lane")));
     root.appendChild(svg("line", { x1: g.labelW, x2: g.labelW + g.plotW, y1: cy, y2: cy, stroke: cssVar("--border-color") }));
-    var events = ignitionEvents(), clusters = [];
+    var events = ignitionEvents(g), clusters = [];
     events.slice().sort(function (a, b) { return a.t - b.t; }).forEach(function (ev) {
       var last = clusters[clusters.length - 1];
       if (last && g.x(ev.t) - g.x(last.t) < 26) { last.n++; last.failed = last.failed || ev.failed; }
@@ -1308,7 +1434,8 @@
     hoverListeners.push(function (t, rowId) {
       if (t == null) { cross.setAttribute("visibility", "hidden"); tip.hidden = true; return; }
       cross.setAttribute("x1", g.x(t)); cross.setAttribute("x2", g.x(t)); cross.setAttribute("visibility", "visible");
-      if (hoverSource !== "overview") { tip.hidden = true; return; }
+      // After now only the detail chart has values, its projection.
+      if (hoverSource !== "overview" || t > g.now) { tip.hidden = true; return; }
       clear(tip);
       tip.appendChild(el("div", { class: "time", text: fmtDateTime(unixDate(t)) }));
       function at(row) {
@@ -1443,19 +1570,127 @@
     return null;
   }
 
-  // Detail: the selected row as a smoothed line that breaks at resets. A
-  // pooled row adds a band from its lowest to its highest account; a single
-  // account adds an even-pace line for each cycle.
+  // Resets seen in the samples of one account, found as in the detail
+  // chart: per stretch of samples, so a reset inside a gap is not seen.
+  function seenResets(points, limit) {
+    var out = [];
+    runs(points, limit, Infinity).forEach(function (run) { out = out.concat(splitAtResets(run.pts, [1]).resets); });
+    return out;
+  }
+
+  // The even pace of a row: at(t) is its value, null outside the cycles, and
+  // breaks are the times where it can jump. A single account uses the
+  // resets seen in its samples and its current reset. A pooled row averages
+  // the even pace of its accounts, each found the same way, by their
+  // weights, over the accounts inside a cycle at that time; the total's own
+  // jumps are not used, since one account resetting can raise it by less
+  // than RESET_JUMP.
+  function rowPace(row, resets, limit) {
+    var length = WINDOW_SECONDS[historyWindow];
+    var parts = !length ? [] : row.children ? row.children.map(function (c) {
+      return { weight: c.weight, cycles: paceCycles(seenResets(c.points, limit), c.reset, length) };
+    }) : [{ weight: 1, cycles: paceCycles(resets, row.reset, length) }];
+    var breaks = [];
+    parts.forEach(function (part) { part.cycles.forEach(function (c) { breaks.push(c[0], c[1]); }); });
+    return { breaks: breaks, at: function (t) {
+      var sum = 0, total = 0;
+      parts.forEach(function (part) {
+        var value = paceAt(part.cycles, t);
+        if (value != null) { sum += part.weight * value; total += part.weight; }
+      });
+      return total ? sum / total : null;
+    } };
+  }
+
+  // The least-squares line through pts[a..b]: its slope per second and the
+  // largest distance of a sample from it, in points.
+  function lineFit(pts, a, b) {
+    var n = b - a + 1, t0 = pts[a][0], st = 0, sv = 0, stt = 0, stv = 0, i, t;
+    for (i = a; i <= b; i++) {
+      t = pts[i][0] - t0;
+      st += t; sv += pts[i][1]; stt += t * t; stv += t * pts[i][1];
+    }
+    var d = n * stt - st * st, slope = d ? (n * stv - st * sv) / d : 0, base = (sv - slope * st) / n, error = 0;
+    for (i = a; i <= b; i++) error = Math.max(error, Math.abs(base + slope * (pts[i][0] - t0) - pts[i][1]));
+    return { slope: slope, error: error };
+  }
+
+  // The current rate of use, in points per second, from a bottom-up
+  // piecewise linear fit: neighbouring pieces merge, the closest fit first,
+  // while one line stays within QUANTUM points of all their samples. Steps
+  // of whole percents then fit as one line, while a pause or a change in the
+  // rate of use starts a new piece, so how far back the rate looks depends
+  // on the samples. The slope between two samples of a staircase would be
+  // zero or a whole point in a moment.
+  function recentSlope(pts) {
+    if (pts.length < 2) return 0;
+    var pieces = [], costs = [], i, j;
+    for (i = 0; i + 1 < pts.length; i++) pieces.push([i, i + 1]);
+    function cost(k) { return lineFit(pts, pieces[k][0], pieces[k + 1][1]).error; }
+    for (i = 0; i + 1 < pieces.length; i++) costs.push(cost(i));
+    while (costs.length) {
+      for (j = 0, i = 1; i < costs.length; i++) if (costs[i] < costs[j]) j = i;
+      if (costs[j] > QUANTUM) break;
+      pieces.splice(j, 2, [pieces[j][0], pieces[j + 1][1]]);
+      costs.splice(j, 1);
+      if (j < costs.length) costs[j] = cost(j);
+      if (j > 0) costs[j - 1] = cost(j - 1);
+    }
+    var last = pieces[pieces.length - 1];
+    return lineFit(pts, last[0], last[1]).slope;
+  }
+
+  // The projection at the current rate of use: from the latest sample along
+  // the rate of this cycle, taken from its lowest readings so far
+  // (cycleFloor), until the quota runs out (out) or the window resets, with
+  // what is left then (left). A rate that does not fall stays level. Null
+  // without a reset ahead on the axis, without current data or with nothing
+  // left.
+  function projection(row, g, lastRun, limit) {
+    var last = row.points[row.points.length - 1];
+    if (g.to <= g.now || !lastRun || lastRun.end < g.now - limit || !(last[1] > 0)) return null;
+    var floor = row.floor, start = 0;
+    for (var i = 1; i < floor.length; i++) if (floor[i][1] > floor[i - 1][1]) start = i;
+    var pts = floor.slice(start), tail = pts[pts.length - 1];
+    if (g.now - tail[0] > (tail[2] === 1 ? HOLD_AFTER : Math.max(HOLD_AFTER, sampleStep() * 1.5))) pts.push([g.now, tail[1]]);
+    var slope = Math.min(0, recentSlope(pts)), t0 = lastRun.end, v0 = last[1];
+    var out = slope < 0 ? t0 + v0 / -slope : Infinity;
+    return { t0: t0, v0: v0, end: Math.min(out, g.to), out: out <= g.to ? out : null, left: out <= g.to ? 0 : v0 + slope * (g.to - t0),
+      at: function (t) { return t < t0 || t > g.to ? null : Math.max(0, v0 + slope * (t - t0)); } };
+  }
+
+  // Detail: the selected row as a smoothed line that breaks at resets, an
+  // even-pace line for each cycle and, when the axis reaches ahead, the
+  // projection at the current rate. A pooled row adds a band from its
+  // lowest to its highest account.
   function renderDetail(row, head, box) {
     var g = chartView, limit = gapLimit();
     snapPoints = row.points;
     var group = !!row.children;
-    var lowest = Math.min.apply(null, row.points.map(function (p) { return group ? p[3] : p[1]; }));
+    var stretches = runs(row.points, limit, g.now);
+    // Hold the last value to the end of each stretch so the line reaches it.
+    // One account resetting raises a pooled total by its share; the total
+    // line breaks only when that share is a visible jump.
+    var pieces = stretches.map(function (run) {
+      var pts = run.pts.slice(), tail = pts[pts.length - 1];
+      if (run.end > tail[0]) pts.push([run.end].concat(tail.slice(1)));
+      return { pts: pts, split: splitAtResets(pts, [1]) };
+    });
+    var resets = [];
+    pieces.forEach(function (piece) { resets = resets.concat(piece.split.resets); });
+    var even = rowPace(row, resets, limit);
+    var lastRun = stretches[stretches.length - 1];
+    var ahead = projection(row, g, lastRun, limit);
+
     head.appendChild(el("span", { class: "detail-name", text: row.name + " · " + translate(historyWindow === "5h" ? "quota_5h" : "quota_7d") }));
     head.appendChild(el("span", { class: "muted", text: group ? translate("pooled_note", row.children.length) : row.sub }));
-    [[translate(group ? "stat_total" : "stat_current"), pct(row.last)], [translate(group ? "stat_min_account" : "stat_min"), pct(lowest)],
+    // The difference from the even pace: green with more left than the pace
+    // leaves, red with less.
+    var pace = even.at(g.now), diff = pace == null ? null : Math.round(row.last - pace);
+    [[translate(group ? "stat_total" : "stat_current"), pct(row.last)], [translate("stat_pace"), pct(pace)],
+      [translate("stat_diff"), diff == null ? "—" : (diff > 0 ? "+" : diff < 0 ? "−" : "") + Math.abs(diff) + "%", diff > 0 ? "ahead" : diff < 0 ? "behind" : ""],
       [translate("stat_to_reset"), row.reset ? fmtCountdown(row.reset * 1000 - Date.now()) : "—"]].forEach(function (stat) {
-      head.appendChild(el("span", { class: "detail-stat" }, [document.createTextNode(stat[0]), el("strong", { text: stat[1] })]));
+      head.appendChild(el("span", { class: "detail-stat" }, [document.createTextNode(stat[0]), el("strong", { class: stat[2] || null, text: stat[1] })]));
     });
 
     var H = 206, top = 22, bottom = 24, plotH = H - top - bottom;
@@ -1466,6 +1701,11 @@
     fade.appendChild(svg("stop", { offset: "0%", "stop-color": cssVar("--text-secondary"), "stop-opacity": 0.18 }));
     fade.appendChild(svg("stop", { offset: "100%", "stop-color": cssVar("--text-secondary"), "stop-opacity": 0 }));
     defs.appendChild(fade);
+    // Samples before the start of an axis that ends ahead of now lie left of
+    // the plot; the lines are cut at its edge.
+    var clip = svg("clipPath", { id: "chart-plot" });
+    clip.appendChild(svg("rect", { x: g.labelW, y: 0, width: g.plotW, height: H }));
+    defs.appendChild(clip);
     [0, 50, 100].forEach(function (v) {
       root.appendChild(svg("line", { x1: g.labelW, x2: g.labelW + g.plotW, y1: y(v), y2: y(v), stroke: cssVar(v ? "--border-color" : "--border-primary"), "stroke-dasharray": v ? "2 4" : "none" }));
       root.appendChild(svgText({ x: g.labelW - 8, y: y(v) + 4, "text-anchor": "end", "font-size": 11, fill: cssVar("--text-tertiary") }, v + "%"));
@@ -1481,57 +1721,54 @@
       root.appendChild(svgText({ x: g.x(t), y: H - 6, "text-anchor": "middle", "font-size": 11, fill: cssVar("--text-tertiary") }, ticks.label(t)));
     });
 
-    var stretches = runs(row.points, limit, g.to), cursor = g.from;
+    var cursor = g.from;
     stretches.forEach(function (run) {
-      if (run.start > cursor + limit) root.appendChild(svg("rect", { x: g.x(cursor), y: top, width: g.x(run.start) - g.x(cursor), height: plotH, fill: "url(#chart-hatch)" }));
+      if (run.start > cursor + limit) hatchRect(root, g, cursor, run.start, top, plotH);
       cursor = run.end;
     });
-    if (cursor < g.to - limit) root.appendChild(svg("rect", { x: g.x(cursor), y: top, width: g.x(g.to) - g.x(cursor), height: plotH, fill: "url(#chart-hatch)" }));
+    hatchRect(root, g, dataEnd(g, cursor, limit), g.to, top, plotH);
     if (stretches.length && stretches[0].start > g.from + limit) {
       root.appendChild(svgText({ x: (g.x(g.from) + g.x(stretches[0].start)) / 2, y: top + plotH / 2 + 4, "text-anchor": "middle", "font-size": 12,
         fill: cssVar("--text-tertiary"), "class": "row-name" }, translate("no_data")));
     }
 
-    // Added before the curves, so the even-pace lines drawn into it later
-    // lie beneath them.
-    var paceLayer = svg("g", {});
-    root.appendChild(paceLayer);
-    var resets = [];
-    stretches.forEach(function (run) {
-      // Hold the last value to the end of the stretch so the line reaches it.
-      var pts = run.pts.slice(), tail = pts[pts.length - 1];
-      if (run.end > tail[0]) pts.push([run.end].concat(tail.slice(1)));
-      // One account resetting raises a pooled total by its share; the total
-      // line breaks only when that share is a visible jump.
-      var split = splitAtResets(pts, [1]);
-      resets = resets.concat(split.resets);
-      if (group) splitAtResets(pts, [3, 4]).parts.forEach(function (part) {
+    var plot = svg("g", { "clip-path": "url(#chart-plot)" });
+    root.appendChild(plot);
+    // Drawn first, so the even-pace line lies beneath the curves. It is
+    // straight between two breaks, and its value just inside each end
+    // decides whether it continues from the previous piece or jumps.
+    var times = [g.from, g.to].concat(even.breaks.filter(function (t) { return t > g.from && t < g.to; })).sort(function (a, b) { return a - b; });
+    var paceD = "", paceEnd = null;
+    for (var k = 0; k + 1 < times.length; k++) {
+      var a = times[k], b = times[k + 1], inset = Math.min(1, (b - a) / 4);
+      if (b - a <= 0) continue;
+      var va = even.at(a + inset), vb = even.at(b - inset);
+      if (va == null || vb == null) { paceEnd = null; continue; }
+      if (paceEnd == null || Math.abs(paceEnd - va) > 0.5) paceD += "M" + g.x(a) + " " + y(va);
+      paceD += "L" + g.x(b) + " " + y(vb);
+      paceEnd = vb;
+    }
+    if (paceD) plot.appendChild(svg("path", { d: paceD, fill: "none", stroke: cssVar("--text-tertiary"), "stroke-opacity": 0.8, "stroke-width": 1.5, "stroke-dasharray": "6 4" }));
+    pieces.forEach(function (piece) {
+      if (group) splitAtResets(piece.pts, [3, 4]).parts.forEach(function (part) {
         if (part.length < 2) return;
         var upper = curvePoints(declining(part, 4), 4).map(function (p) { return [g.x(p[0]), y(p[4])]; });
         var lower = curvePoints(declining(part, 3), 3).map(function (p) { return [g.x(p[0]), y(p[3])]; }).reverse();
-        root.appendChild(svg("path", { d: monotonePath(upper) + monotonePath(lower).replace(/^M/, "L") + "Z", fill: cssVar("--text-secondary"), "fill-opacity": 0.13 }));
+        plot.appendChild(svg("path", { d: monotonePath(upper) + monotonePath(lower).replace(/^M/, "L") + "Z", fill: cssVar("--text-secondary"), "fill-opacity": 0.13 }));
       });
       // Each piece starts at its reset sample, so the return to full is a
       // break in the line rather than a slope that never happened.
-      split.parts.forEach(function (part) {
+      piece.split.parts.forEach(function (part) {
         var xy = curvePoints(declining(part, 1), 1).map(function (p) { return [g.x(p[0]), y(p[1])]; });
         if (xy.length === 1) xy.push([xy[0][0] + 1, xy[0][1]]);
         var d = monotonePath(xy);
-        if (!group) root.appendChild(svg("path", { d: d + "L" + xy[xy.length - 1][0] + " " + y(0) + "L" + xy[0][0] + " " + y(0) + "Z", fill: "url(#chart-fade)" }));
-        root.appendChild(svg("path", { d: d, fill: "none", stroke: cssVar("--text-primary"), "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }));
+        if (!group) plot.appendChild(svg("path", { d: d + "L" + xy[xy.length - 1][0] + " " + y(0) + "L" + xy[0][0] + " " + y(0) + "Z", fill: "url(#chart-fade)" }));
+        plot.appendChild(svg("path", { d: d, fill: "none", stroke: cssVar("--text-primary"), "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }));
       });
-    });
-    // The accounts of a pooled row reset at different times, so it has no
-    // cycles of its own.
-    var cycles = group || !WINDOW_SECONDS[historyWindow] ? [] : paceCycles(resets, row.reset, WINDOW_SECONDS[historyWindow]);
-    cycles.forEach(function (c) {
-      var a = Math.max(c[0], g.from), b = Math.min(c[1], g.to);
-      if (b <= a) return;
-      paceLayer.appendChild(svg("line", { x1: g.x(a), y1: y(paceAt([c], a)), x2: g.x(b), y2: y(paceAt([c], b)),
-        stroke: cssVar("--text-tertiary"), "stroke-opacity": 0.8, "stroke-width": 1.5, "stroke-dasharray": "6 4" }));
     });
     var lastLabel = -99;
     resets.forEach(function (t) {
+      if (t < g.from) return;
       var x = g.x(t);
       root.appendChild(svg("line", { x1: x, x2: x, y1: top - 4, y2: top + plotH, stroke: cssVar("--text-tertiary"), "stroke-opacity": 0.7, "stroke-dasharray": "3 3" }));
       if (x - lastLabel > 52) {
@@ -1540,16 +1777,32 @@
       }
     });
     var groups = group ? row.groups : [row.group];
-    ignitionEvents().forEach(function (ev) {
+    ignitionEvents(g).forEach(function (ev) {
       if (groups.indexOf(ev.group) < 0) return;
       var x = g.x(ev.t), base = top + plotH;
       if (ev.failed) root.appendChild(svg("path", { d: "M" + (x - 4) + " " + (base - 8) + "L" + (x + 4) + " " + base + "M" + (x + 4) + " " + (base - 8) + "L" + (x - 4) + " " + base,
         stroke: cssVar("--viz-failure"), "stroke-width": 2.2, "stroke-linecap": "round" }));
       else root.appendChild(svg("path", { d: "M" + x + " " + (base - 7) + "L" + (x + 4) + " " + base + "L" + (x - 4) + " " + base + "Z", fill: cssVar("--viz-success") }));
     });
+    // The projection ends where the quota runs out, marked with the time
+    // (and the date for a 7-day window), or at the reset with what is left.
+    if (ahead) {
+      var px = g.x(ahead.end), py = y(ahead.out != null ? 0 : ahead.left);
+      root.appendChild(svg("line", { x1: g.x(ahead.t0), y1: y(ahead.v0), x2: px, y2: py, stroke: cssVar("--text-primary"), "stroke-opacity": 0.75,
+        "stroke-width": 2, "stroke-dasharray": "1 4", "stroke-linecap": "round" }));
+      root.appendChild(svg("circle", { cx: px, cy: py, r: 3, fill: cssVar("--text-primary"), stroke: cssVar("--bg-primary"), "stroke-width": 1.5 }));
+      var when = ahead.out != null ? unixDate(ahead.out) : null;
+      var label = when ? translate("projected_out", historyWindow === "7d" ? fmtDateTime(when) : fmtClock(when)) : translate("projected_left", pct(ahead.left));
+      // A falling line comes from the upper left, so the label of what is
+      // left goes below its end when there is room.
+      var anchor = px > g.labelW + g.plotW - 80 ? "end" : px < g.labelW + 80 ? "start" : "middle";
+      var below = py < top + 24 || (!when && ahead.left < ahead.v0 && py + 17 < top + plotH - 2);
+      root.appendChild(svgText({ x: px + (anchor === "end" ? -4 : anchor === "start" ? 4 : 0), y: below ? py + 17 : py - 9, "text-anchor": anchor,
+        "font-size": 11, "font-weight": 600, fill: cssVar("--text-secondary"), stroke: cssVar("--bg-primary"), "stroke-width": 3,
+        "stroke-linejoin": "round", "paint-order": "stroke" }, label));
+    }
     var last = row.points[row.points.length - 1];
-    var lastRun = stretches[stretches.length - 1];
-    if (last && lastRun.end >= g.to - limit) {
+    if (last && lastRun.end >= g.now - limit) {
       root.appendChild(svg("circle", { cx: g.x(lastRun.end), cy: y(last[1]), r: 4, fill: cssVar("--text-primary"), stroke: cssVar("--bg-primary"), "stroke-width": 2 }));
     }
 
@@ -1566,10 +1819,11 @@
     var tip = el("div", { class: "tooltip", hidden: true });
     box.appendChild(tip);
 
-    // Keyboard: step through this row's samples.
-    var keyIndex = -1;
+    // Keyboard: step through the samples on the axis.
+    var keyIndex = -1, first = 0;
+    while (first < row.points.length - 1 && row.points[first][0] < g.from) first++;
     function showSample(i) {
-      if (i < 0 || i >= row.points.length) return;
+      if (i < first || i >= row.points.length) return;
       keyIndex = i;
       hoverSource = "detail";
       setHover(row.points[i][0], row.id);
@@ -1577,13 +1831,34 @@
     hit.addEventListener("focus", function () { showSample(keyIndex < 0 ? row.points.length - 1 : keyIndex); });
     hit.addEventListener("blur", function () { setHover(null); });
     hit.addEventListener("keydown", function (e) {
-      if (e.key === "ArrowLeft") { showSample(Math.max(0, keyIndex - 1)); e.preventDefault(); }
+      if (e.key === "ArrowLeft") { showSample(Math.max(first, keyIndex - 1)); e.preventDefault(); }
       if (e.key === "ArrowRight") { showSample(Math.min(row.points.length - 1, keyIndex + 1)); e.preventDefault(); }
     });
+
+    function paceRow(t) {
+      var value = even.at(t);
+      if (value != null) tip.appendChild(el("div", { class: "row pace" }, [el("span", { class: "key" }),
+        el("span", { class: "name", text: translate("pace_reference") }), el("span", { class: "value", text: pct(value) })]));
+    }
 
     hoverListeners.push(function (t) {
       if (t == null) { cross.setAttribute("visibility", "hidden"); dot.setAttribute("visibility", "hidden"); tip.hidden = true; return; }
       cross.setAttribute("x1", g.x(t)); cross.setAttribute("x2", g.x(t)); cross.setAttribute("visibility", "visible");
+      // After now: the projection and the even pace at the pointer's time.
+      if (t > g.now) {
+        var projected = ahead ? ahead.at(t) : null;
+        if (projected != null) { dot.setAttribute("cx", g.x(t)); dot.setAttribute("cy", y(projected)); dot.setAttribute("visibility", "visible"); }
+        else dot.setAttribute("visibility", "hidden");
+        if (hoverSource !== "detail") { tip.hidden = true; return; }
+        clear(tip);
+        tip.appendChild(el("div", { class: "time", text: fmtDateTime(unixDate(t)) }));
+        tip.appendChild(el("div", { class: "row projection strong" }, [el("span", { class: "key" }),
+          el("span", { class: "name", text: translate("projected_rate") }), el("span", { class: "value", text: pct(projected) })]));
+        paceRow(t);
+        tip.hidden = false;
+        placeTip(tip, box, g, t, 6);
+        return;
+      }
       var p = valueAt(row.points, t);
       if (p && t - p[0] > limit) p = null;
       if (p) { dot.setAttribute("cx", g.x(p[0])); dot.setAttribute("cy", y(p[1])); dot.setAttribute("visibility", "visible"); }
@@ -1600,10 +1875,8 @@
         if (row.children.length > 6) tip.appendChild(el("div", { class: "row muted", text: translate("more_accounts", row.children.length - 6) }));
       } else {
         tipRow(tip, row.name + (p ? translate(p[2] === 1 ? "passive_sample" : "active_sample") : ""), p ? p[1] : null, true);
-        var pace = paceAt(cycles, t);
-        if (pace != null) tip.appendChild(el("div", { class: "row pace" }, [el("span", { class: "key" }),
-          el("span", { class: "name", text: translate("pace_reference") }), el("span", { class: "value", text: pct(pace) })]));
       }
+      paceRow(t);
       var near = (g.to - g.from) / g.plotW * 8;
       resets.forEach(function (r) { if (Math.abs(r - t) <= near) tip.appendChild(el("div", { class: "note", text: fmtClock(unixDate(r)) + " " + translate("quota_reset") })); });
       tip.hidden = false;
@@ -1620,8 +1893,10 @@
   }
 
   // The nearest sample of the detail row, so the crosshair and tooltip show a
-  // measured time. Inside a data gap the pointer's own time is kept.
+  // measured time. Inside a data gap and after now the pointer's own time is
+  // kept.
   function snapTime(t) {
+    if (t > chartView.now) return t;
     var best = null;
     snapPoints.forEach(function (p) {
       if (p[0] >= chartView.from && p[0] <= chartView.to && (best == null || Math.abs(p[0] - t) < Math.abs(best - t))) best = p[0];
@@ -1654,6 +1929,7 @@
 
   function renderChart() {
     var overview = $("chart"), head = $("chart-detail-head"), detail = $("chart-detail");
+    chartBehind = false;
     overview.classList.toggle("loading", historyLoading !== "" && historyLoading !== historyKey(historyWindow, historyRange));
     clear(overview); clear(head); clear(detail);
     clear($("chart-table"));
@@ -1670,9 +1946,10 @@
       return;
     }
     if (!findRow(rows, chartSelected)) chartSelected = rows[0].id;
-    renderOverview(rows, overview);
+    var selected = findRow(rows, chartSelected);
+    renderOverview(rows, overview, axisEnd(selected));
     head.hidden = false;
-    renderDetail(findRow(rows, chartSelected), head, detail);
+    renderDetail(selected, head, detail);
     renderChartTable(rows);
     var t = quotaThresholds();
     $("legend-high").textContent = "> " + t.notice + "%";
@@ -1811,6 +2088,46 @@
       renderChart();
       return false;
     });
+  }
+
+  // The status shows a reading the drawn chart lacks: an active query after
+  // the last sample of its window, or a remaining that differs from it.
+  // Passive readings that repeat the value are not written to the history,
+  // so they do not count.
+  function historyBehind() {
+    var last = {};
+    history.series.forEach(function (s) { if (s.points && s.points.length) last[s.group + "|" + s.window] = s.points[s.points.length - 1]; });
+    var loaded = new Date(history.to).getTime() / 1000;
+    return (status.accounts || []).some(function (a) {
+      return (a.groups || []).some(function (g) {
+        return (g.windows || []).some(function (w) {
+          var seen = parseTime(w.observed_at);
+          if (w.kind !== historyWindow || !seen) return false;
+          var t = seen.getTime() / 1000, p = last[g.key + "|" + w.id];
+          if (!p) return t > loaded;
+          return t >= p[0] + 1 && (w.source === "active" || w.remaining !== p[1]);
+        });
+      });
+    });
+  }
+
+  // Loads the drawn chart again when the status shows newer readings. While
+  // the pointer is over the chart or a sample has the keyboard focus, a
+  // redraw would replace the crosshair and tooltip, or the focused element,
+  // so the new data waits until the pointer and the focus leave.
+  var chartCard = $("chart").parentNode;
+  var chartPointer = false;
+  var chartBehind = false;
+
+  function refreshHistory() {
+    if (!history || !status || historyLoading || historyWindow !== chartWindow || historyRange !== range || !historyBehind()) return;
+    var ticket = historyTicket;
+    fetchHistory(historyWindow, historyRange, true).then(function (data) {
+      if (ticket !== historyTicket || historyWindow !== chartWindow || historyRange !== range) return;
+      history = data;
+      if (chartPointer || chartCard.contains(document.activeElement)) chartBehind = true;
+      else renderChart();
+    }).catch(function () { /* tried again after the next status */ });
   }
 
   // After the first chart loads, the other window's chart is fetched so that
@@ -2147,7 +2464,7 @@
     clearInterval(refreshTimer);
     refreshTimer = setInterval(function () {
       if (document.hidden) return;
-      loadStatus().catch(function () {});
+      loadStatus().then(refreshHistory).catch(function () {});
     }, 30000);
   }
 
@@ -2219,6 +2536,14 @@
     renderChart();
   });
   renderRangeButtons();
+  chartCard.addEventListener("pointerenter", function () { chartPointer = true; });
+  chartCard.addEventListener("pointerleave", function () {
+    chartPointer = false;
+    if (chartBehind && !chartCard.contains(document.activeElement)) renderChart();
+  });
+  chartCard.addEventListener("focusout", function (e) {
+    if (chartBehind && !chartPointer && !chartCard.contains(e.relatedTarget)) renderChart();
+  });
   window.addEventListener("resize", function () { if (history) renderChart(); });
   window.addEventListener("storage", function (e) {
     if (e.key === "cli-proxy-theme") { applyTheme(); renderChart(); }

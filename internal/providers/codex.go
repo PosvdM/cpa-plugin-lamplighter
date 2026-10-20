@@ -27,6 +27,7 @@ var codex = &Provider{
 	Monitor: true,
 	Ignite:  true,
 	Fetch:   fetchCodex,
+	Plan:    codexPlan,
 	Headers: func(header http.Header, now time.Time) []quota.RawGroup {
 		if group, ok := parseCodexHeaders(header, now); ok {
 			return []quota.RawGroup{group}
@@ -134,7 +135,8 @@ func ParseCodexUsage(payload map[string]any, now time.Time) ([]quota.RawGroup, e
 	if len(windows) == 0 {
 		return nil, errors.New("Codex 未返回可识别的额度窗口")
 	}
-	return []quota.RawGroup{{Key: "codex:main", SourceLabel: codexTitle, Windows: windows}}, nil
+	plan := scalarString(field(payload, "plan_type", "planType"))
+	return []quota.RawGroup{{Key: "codex:main", SourceLabel: codexTitle, Windows: windows, Plan: plan}}, nil
 }
 
 func codexWindow(window map[string]any, id, label string, period time.Duration, now time.Time) (quota.Window, bool) {
