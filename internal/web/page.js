@@ -1774,8 +1774,11 @@
       root.appendChild(svg("circle", { cx: px, cy: py, r: 3, fill: cssVar("--text-primary"), stroke: cssVar("--bg-primary"), "stroke-width": 1.5 }));
       var when = ahead.out != null ? unixDate(ahead.out) : null;
       var label = when ? translate("projected_out", historyWindow === "7d" ? fmtDateTime(when) : fmtClock(when)) : translate("projected_left", pct(ahead.left));
+      // A falling line comes from the upper left, so the label of what is
+      // left goes below its end when there is room.
       var anchor = px > g.labelW + g.plotW - 80 ? "end" : px < g.labelW + 80 ? "start" : "middle";
-      root.appendChild(svgText({ x: px + (anchor === "end" ? -4 : anchor === "start" ? 4 : 0), y: py < top + 24 ? py + 17 : py - 9, "text-anchor": anchor,
+      var below = py < top + 24 || (!when && ahead.left < ahead.v0 && py + 17 < top + plotH - 2);
+      root.appendChild(svgText({ x: px + (anchor === "end" ? -4 : anchor === "start" ? 4 : 0), y: below ? py + 17 : py - 9, "text-anchor": anchor,
         "font-size": 11, "font-weight": 600, fill: cssVar("--text-secondary"), stroke: cssVar("--bg-primary"), "stroke-width": 3,
         "stroke-linejoin": "round", "paint-order": "stroke" }, label));
     }
