@@ -75,7 +75,7 @@ Other services and unknown plans default to 1.
 4. Restart CPA (`docker compose restart` in a Docker deployment). The plugin runs its first query about 20 seconds after CPA starts.
 5. Open **Lamplighter** in the Management Center sidebar. If you signed in to the Management Center with "remember password", the page uses that key; otherwise it asks for one.
 
-When a new version is out, a green up arrow appears to the right of the version in the management page header; clicking it opens the release page. To upgrade, update the plugin in the plugin store of the CPA Management Center; for a manual install, put the new library in the same folder, delete the old one and restart CPA.
+The plugin checks for a new version every 6 hours and whenever the management page opens. When a new version is out, a green up arrow appears to the right of the version in the management page header; clicking it opens the release page. To upgrade, update the plugin in the plugin store of the CPA Management Center; for a manual install, put the new library in the same folder, delete the old one and restart CPA.
 
 The plugin keeps its state and quota history in `data/lamplighter/` under the plugin directory. In a Docker deployment that directory is on the host, so recreating the container keeps the data.
 

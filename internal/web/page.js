@@ -2516,12 +2516,22 @@
     return api("GET", CONFIG_API).then(function (data) { rawConfig = data || {}; });
   }
 
+  // Opening the page also checks for a newer release, after the first status
+  // so that this status does not replace the result. The plugin reads GitHub
+  // at most once a minute; failures stay silent like the periodic check.
+  function checkUpdate() {
+    api("POST", API + "/check-update", {}).then(function (data) {
+      if (data.status) { status = data.status; renderStatus(); }
+    }).catch(function () {});
+  }
+
   // ---- Startup ----
 
   function start() {
     $("key-section").hidden = true;
     $("app").hidden = false;
     Promise.all([loadStatus(), loadConfig()]).then(function () {
+      checkUpdate();
       fillSettings();
       restoreChartFilters();
       return loadHistory();
