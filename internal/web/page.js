@@ -201,8 +201,8 @@
       total: "合计", total_suffix: " 合计", more_accounts: "　… 另 {0} 个账号",
       pooled_note: "{0} 个账号合计，阴影为账号间的最低到最高",
       stat_total: "合计", stat_current: "当前", stat_pace: "匀速", stat_diff: "差值", stat_to_reset: "距重置",
-      projected_rate: "按当前速度", projected_out: "{0} 用完", projected_left: "剩 {0}",
-      legend_projection: "按当前速度的延长线", legend_hatch: "无数据或尚未到来",
+      projected_5h: "按当前速度", projected_7d: "按本周期日均",
+      legend_projection_5h: "按当前速度的延长线", legend_projection_7d: "按本周期日均的延长线", legend_hatch: "无数据或尚未到来",
       detail_aria: "{0} 剩余百分比",
       detail_keys: "按左右方向键查看各时刻的数值",
       passive_sample: "（被动）", active_sample: "（主动）",
@@ -331,8 +331,8 @@
       total: "Total", total_suffix: " total", more_accounts: "　… {0} more accounts",
       pooled_note: "Total of {0} accounts; the shade spans the lowest to the highest account",
       stat_total: "Total", stat_current: "Now", stat_pace: "Even pace", stat_diff: "Difference", stat_to_reset: "Until reset",
-      projected_rate: "At the current rate", projected_out: "out at {0}", projected_left: "{0} left",
-      legend_projection: "Projection at the current rate", legend_hatch: "No data, or not yet",
+      projected_5h: "At the current rate", projected_7d: "At this cycle's daily average",
+      legend_projection_5h: "Projection at the current rate", legend_projection_7d: "Projection at this cycle's daily average", legend_hatch: "No data, or not yet",
       detail_aria: "{0} remaining percent",
       detail_keys: "Use the left and right arrow keys to step through the values",
       passive_sample: " (passive)", active_sample: " (active)",
@@ -1036,6 +1036,9 @@
   // sample steps; holding it sooner would level the projection in the
   // second half of every poll interval.
   var HOLD_AFTER = 120;
+  // The width of a character of 11px text in the monospace chart font, and
+  // the spacing of the values beside the detail chart.
+  var CHAR_W = 6.6, LABEL_H = 16;
 
   var chartView = null;
   var hoverSource = "";
@@ -1052,6 +1055,8 @@
   }
 
   function pct(v) { return v == null ? "—" : Math.round(v) + "%"; }
+
+  function fmtDiff(d) { return d == null ? "—" : (d > 0 ? "+" : d < 0 ? "−" : "") + Math.abs(d) + "%"; }
 
   function unixDate(t) { return new Date(t * 1000); }
 
@@ -1640,20 +1645,46 @@
     return lineFit(pts, last[0], last[1]).slope;
   }
 
-  // The projection at the current rate of use: from the latest sample along
-  // the rate of this cycle, taken from its lowest readings so far
-  // (cycleFloor), until the quota runs out (out) or the window resets, with
-  // what is left then (left). A rate that does not fall stays level. Null
-  // without a reset ahead on the axis, without current data or with nothing
-  // left.
-  function projection(row, g, lastRun, limit) {
-    var last = row.points[row.points.length - 1];
-    if (g.to <= g.now || !lastRun || lastRun.end < g.now - limit || !(last[1] > 0)) return null;
+  // The current rate of a 5-hour window, in points per second: the recent
+  // slope of this cycle's lowest readings so far (cycleFloor).
+  function currentRate(row, now) {
     var floor = row.floor, start = 0;
     for (var i = 1; i < floor.length; i++) if (floor[i][1] > floor[i - 1][1]) start = i;
     var pts = floor.slice(start), tail = pts[pts.length - 1];
-    if (g.now - tail[0] > (tail[2] === 1 ? HOLD_AFTER : Math.max(HOLD_AFTER, sampleStep() * 1.5))) pts.push([g.now, tail[1]]);
-    var slope = Math.min(0, recentSlope(pts)), t0 = lastRun.end, v0 = last[1];
+    if (now - tail[0] > (tail[2] === 1 ? HOLD_AFTER : Math.max(HOLD_AFTER, sampleStep() * 1.5))) pts.push([now, tail[1]]);
+    return recentSlope(pts);
+  }
+
+  // The rate of a 7-day window, in points per second: what this cycle has
+  // used so far, from its lowest reading (cycleFloor), over the time since it
+  // began, its reset less the window. The hours without use count too, so
+  // the rate follows the daily rhythm of use rather than its latest hours.
+  // A pooled row averages the rates of its accounts by their weights, each
+  // from its own reset, over the accounts with a cycle under way and a
+  // sample in it. Null when there is none.
+  function cycleRate(row, now) {
+    var length = WINDOW_SECONDS[historyWindow], sum = 0, total = 0;
+    (row.children || [row]).forEach(function (r) {
+      var start = r.reset - length, low = r.floor[r.floor.length - 1];
+      if (!r.reset || start >= now || r.reset <= now || low[0] < start) return;
+      sum += r.weight * (100 - low[1]) / (now - start);
+      total += r.weight;
+    });
+    return total ? -sum / total : null;
+  }
+
+  // The projection: from the latest sample along the rate of use until the
+  // quota runs out (out) or the window resets, with what is left then
+  // (left). A 5-hour window keeps its current rate; a 7-day window, whose
+  // use comes in daily bursts, takes the rate of its cycle so far. A rate
+  // that does not fall stays level. Null without a reset ahead on the axis,
+  // without current data, with nothing left or without a rate.
+  function projection(row, g, lastRun, limit) {
+    var last = row.points[row.points.length - 1];
+    if (g.to <= g.now || !lastRun || lastRun.end < g.now - limit || !(last[1] > 0)) return null;
+    var rate = historyWindow === "7d" ? cycleRate(row, g.now) : currentRate(row, g.now);
+    if (rate == null) return null;
+    var slope = Math.min(0, rate), t0 = lastRun.end, v0 = last[1];
     var out = slope < 0 ? t0 + v0 / -slope : Infinity;
     return { t0: t0, v0: v0, end: Math.min(out, g.to), out: out <= g.to ? out : null, left: out <= g.to ? 0 : v0 + slope * (g.to - t0),
       at: function (t) { return t < t0 || t > g.to ? null : Math.max(0, v0 + slope * (t - t0)); } };
@@ -1688,7 +1719,7 @@
     // leaves, red with less.
     var pace = even.at(g.now), diff = pace == null ? null : Math.round(row.last - pace);
     [[translate(group ? "stat_total" : "stat_current"), pct(row.last)], [translate("stat_pace"), pct(pace)],
-      [translate("stat_diff"), diff == null ? "—" : (diff > 0 ? "+" : diff < 0 ? "−" : "") + Math.abs(diff) + "%", diff > 0 ? "ahead" : diff < 0 ? "behind" : ""],
+      [translate("stat_diff"), fmtDiff(diff), diff > 0 ? "ahead" : diff < 0 ? "behind" : ""],
       [translate("stat_to_reset"), row.reset ? fmtCountdown(row.reset * 1000 - Date.now()) : "—"]].forEach(function (stat) {
       head.appendChild(el("span", { class: "detail-stat" }, [document.createTextNode(stat[0]), el("strong", { class: stat[2] || null, text: stat[1] })]));
     });
@@ -1715,10 +1746,20 @@
       root.appendChild(svg("line", { x1: g.labelW, x2: g.labelW + g.plotW, y1: y(low), y2: y(low), stroke: cssVar("--viz-failure"), "stroke-opacity": 0.5, "stroke-dasharray": "4 4" }));
       root.appendChild(svgText({ x: g.labelW - 8, y: y(low) + 4, "text-anchor": "end", "font-size": 11, fill: cssVar("--viz-failure") }, low + "%"));
     }
+    // The time the projection runs out goes on the time axis, in place of the
+    // tick labels it would cover.
+    var outLabel = null;
+    if (ahead && ahead.out != null) {
+      var outText = historyWindow === "7d" ? fmtDateTime(unixDate(ahead.out)) : fmtClock(unixDate(ahead.out));
+      var outW = outText.length * CHAR_W;
+      outLabel = { text: outText, w: outW, x: Math.max(g.labelW + outW / 2, Math.min(g.width - outW / 2, g.x(ahead.out))) };
+    }
     var ticks = chartTicks(g);
     ticks.list.forEach(function (t) {
       root.appendChild(svg("line", { x1: g.x(t), x2: g.x(t), y1: top, y2: top + plotH, stroke: cssVar("--border-color"), "stroke-dasharray": "2 4" }));
-      root.appendChild(svgText({ x: g.x(t), y: H - 6, "text-anchor": "middle", "font-size": 11, fill: cssVar("--text-tertiary") }, ticks.label(t)));
+      var text = ticks.label(t);
+      if (outLabel && Math.abs(g.x(t) - outLabel.x) < (outLabel.w + text.length * CHAR_W) / 2 + 6) return;
+      root.appendChild(svgText({ x: g.x(t), y: H - 6, "text-anchor": "middle", "font-size": 11, fill: cssVar("--text-tertiary") }, text));
     });
 
     var cursor = g.from;
@@ -1784,26 +1825,38 @@
         stroke: cssVar("--viz-failure"), "stroke-width": 2.2, "stroke-linecap": "round" }));
       else root.appendChild(svg("path", { d: "M" + x + " " + (base - 7) + "L" + (x + 4) + " " + base + "L" + (x - 4) + " " + base + "Z", fill: cssVar("--viz-success") }));
     });
-    // The projection ends where the quota runs out, marked with the time
-    // (and the date for a 7-day window), or at the reset with what is left.
+    // The projection ends where the quota runs out, with the time on the
+    // time axis, or at the reset, the right end of the plot, with what is
+    // left beside it.
+    var rightX = g.labelW + g.plotW + 10;
     if (ahead) {
       var px = g.x(ahead.end), py = y(ahead.out != null ? 0 : ahead.left);
       root.appendChild(svg("line", { x1: g.x(ahead.t0), y1: y(ahead.v0), x2: px, y2: py, stroke: cssVar("--text-primary"), "stroke-opacity": 0.75,
         "stroke-width": 2, "stroke-dasharray": "1 4", "stroke-linecap": "round" }));
       root.appendChild(svg("circle", { cx: px, cy: py, r: 3, fill: cssVar("--text-primary"), stroke: cssVar("--bg-primary"), "stroke-width": 1.5 }));
-      var when = ahead.out != null ? unixDate(ahead.out) : null;
-      var label = when ? translate("projected_out", historyWindow === "7d" ? fmtDateTime(when) : fmtClock(when)) : translate("projected_left", pct(ahead.left));
-      // A falling line comes from the upper left, so the label of what is
-      // left goes below its end when there is room.
-      var anchor = px > g.labelW + g.plotW - 80 ? "end" : px < g.labelW + 80 ? "start" : "middle";
-      var below = py < top + 24 || (!when && ahead.left < ahead.v0 && py + 17 < top + plotH - 2);
-      root.appendChild(svgText({ x: px + (anchor === "end" ? -4 : anchor === "start" ? 4 : 0), y: below ? py + 17 : py - 9, "text-anchor": anchor,
-        "font-size": 11, "font-weight": 600, fill: cssVar("--text-secondary"), stroke: cssVar("--bg-primary"), "stroke-width": 3,
-        "stroke-linejoin": "round", "paint-order": "stroke" }, label));
+      if (outLabel) root.appendChild(svgText({ x: outLabel.x, y: H - 6, "text-anchor": "middle", "font-size": 11, "font-weight": 650, fill: cssVar("--text-primary") }, outLabel.text));
+      else root.appendChild(svgText({ x: rightX, y: py + 4, "font-size": 12, "font-weight": 650, fill: cssVar("--text-secondary") }, pct(ahead.left)));
     }
     var last = row.points[row.points.length - 1];
     if (last && lastRun.end >= g.now - limit) {
       root.appendChild(svg("circle", { cx: g.x(lastRun.end), cy: y(last[1]), r: 4, fill: cssVar("--text-primary"), stroke: cssVar("--bg-primary"), "stroke-width": 2 }));
+    }
+    // An axis that ends now shows the current value and the even pace at the
+    // ends of their lines, with the difference between them. The difference
+    // sits halfway, and values too close to it move apart.
+    if (g.to <= g.now) {
+      var yNow = y(row.last), yPace = pace == null ? null : y(pace);
+      if (yPace == null) root.appendChild(svgText({ x: rightX, y: yNow + 4, "font-size": 13, "font-weight": 650, fill: cssVar("--text-primary") }, pct(row.last)));
+      else {
+        var mid = (yNow + yPace) / 2, upper = yNow <= yPace;
+        var yA = Math.min(upper ? yNow : yPace, mid - LABEL_H), yB = Math.max(upper ? yPace : yNow, mid + LABEL_H);
+        var shift = Math.max(0, top - yA) - Math.max(0, yB - (top + plotH));
+        root.appendChild(svg("line", { x1: rightX - 5, x2: rightX - 5, y1: yNow, y2: yPace, stroke: cssVar("--text-tertiary"), "stroke-opacity": 0.7 }));
+        root.appendChild(svgText({ x: rightX, y: (upper ? yA : yB) + shift + 4, "font-size": 13, "font-weight": 650, fill: cssVar("--text-primary") }, pct(row.last)));
+        root.appendChild(svgText({ x: rightX, y: (upper ? yB : yA) + shift + 4, "font-size": 12, fill: cssVar("--text-tertiary") }, pct(pace)));
+        root.appendChild(svgText({ x: rightX, y: mid + shift + 4, "font-size": 12, "font-weight": 650,
+          fill: cssVar(diff > 0 ? "--viz-success" : diff < 0 ? "--viz-failure" : "--text-secondary") }, fmtDiff(diff)));
+      }
     }
 
     var cross = svg("line", { y1: top, y2: top + plotH, stroke: cssVar("--text-tertiary"), visibility: "hidden", "pointer-events": "none" });
@@ -1853,7 +1906,7 @@
         clear(tip);
         tip.appendChild(el("div", { class: "time", text: fmtDateTime(unixDate(t)) }));
         tip.appendChild(el("div", { class: "row projection strong" }, [el("span", { class: "key" }),
-          el("span", { class: "name", text: translate("projected_rate") }), el("span", { class: "value", text: pct(projected) })]));
+          el("span", { class: "name", text: translate("projected_" + historyWindow) }), el("span", { class: "value", text: pct(projected) })]));
         paceRow(t);
         tip.hidden = false;
         placeTip(tip, box, g, t, 6);
@@ -1955,6 +2008,7 @@
     $("legend-high").textContent = "> " + t.notice + "%";
     $("legend-medium").textContent = t.low + "–" + t.notice + "%";
     $("legend-low").textContent = "≤ " + t.low + "%";
+    $("legend-projection").textContent = translate("legend_projection_" + historyWindow);
   }
 
   function renderRangeButtons() {
