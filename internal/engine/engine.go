@@ -40,6 +40,10 @@ const (
 	// releaseRetryPeriod when a read fails.
 	releaseCheckPeriod = 6 * time.Hour
 	releaseRetryPeriod = 30 * time.Minute
+	// Opening the management page reads the latest release unless a read was
+	// tried within releaseRecheckPeriod. GitHub allows 60 unauthenticated API
+	// requests an hour per address.
+	releaseRecheckPeriod = time.Minute
 )
 
 // confirmDelays are the waits between ignition confirmation checks.
@@ -86,6 +90,12 @@ type Engine struct {
 	nextModels map[string]string
 	// latest is the latest release when it is newer than this version.
 	latest release.Release
+	// releaseMu is held while the latest release is read, and guards
+	// releaseTried and releaseAt, when a read was last tried and when one last
+	// succeeded.
+	releaseMu    sync.Mutex
+	releaseTried time.Time
+	releaseAt    time.Time
 	// plans is the raw plan per auth index, a copy of state.Plans.
 	plans map[string]string
 
@@ -570,21 +580,72 @@ func (e *Engine) run() {
 }
 
 // checkRelease reads the latest release and returns when to read it again.
-// A failed read keeps the previous result and is only logged at debug level:
-// it does not affect quota monitoring.
+// It does not wait for a read the page started, and skips the read when one
+// succeeded within releaseRecheckPeriod.
 func (e *Engine) checkRelease(ctx context.Context, cfg config.Config) time.Time {
+	if !e.releaseMu.TryLock() {
+		return e.now().Add(releaseRetryPeriod)
+	}
+	defer e.releaseMu.Unlock()
+	if !e.releaseAt.IsZero() && e.now().Sub(e.releaseAt) < releaseRecheckPeriod {
+		return e.now().Add(releaseCheckPeriod)
+	}
+	if e.readRelease(ctx, cfg) != nil {
+		return e.now().Add(releaseRetryPeriod)
+	}
+	return e.now().Add(releaseCheckPeriod)
+}
+
+// CheckRelease reads the latest release when the management page opens,
+// unless a read is under way or was tried within releaseRecheckPeriod, so
+// that page loads do not queue up when GitHub does not answer. Like the
+// periodic check, it reads nothing for a development build or while the
+// plugin is disabled.
+func (e *Engine) CheckRelease() error {
+	e.mu.Lock()
+	ready := e.running && e.enabled
+	e.mu.Unlock()
+	if !ready {
+		return ErrNotRunning
+	}
+	if !release.Comparable(e.version) || !e.releaseMu.TryLock() {
+		return nil
+	}
+	defer e.releaseMu.Unlock()
+	if !e.releaseTried.IsZero() && e.now().Sub(e.releaseTried) < releaseRecheckPeriod {
+		return nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		select {
+		case <-e.stopCh:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	return e.readRelease(ctx, e.config())
+}
+
+// readRelease reads the latest release and keeps it when it is newer than
+// this version. The caller holds releaseMu. A failed read keeps the previous
+// result and is only logged at debug level: it does not affect quota
+// monitoring.
+func (e *Engine) readRelease(ctx context.Context, cfg config.Config) error {
+	e.releaseTried = e.now()
 	latest, err := release.Latest(ctx, &http.Client{Timeout: cfg.RequestTimeout()}, "cpa-plugin-lamplighter/"+e.version)
 	if err != nil {
 		e.logf("debug", "检查新版本失败：%v", err)
-		return e.now().Add(releaseRetryPeriod)
+		return err
 	}
+	e.releaseAt = e.now()
 	if !release.Newer(e.version, latest.Version) {
 		latest = release.Release{}
 	}
 	e.mu.Lock()
 	e.latest = latest
 	e.mu.Unlock()
-	return e.now().Add(releaseCheckPeriod)
+	return nil
 }
 
 // sameRuntimeConfig reports whether the settings used to build the
