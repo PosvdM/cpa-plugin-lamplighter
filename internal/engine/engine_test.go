@@ -7,6 +7,7 @@ import (
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -20,6 +21,7 @@ import (
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/providers"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/quota"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/release"
+	"github.com/PosvdM/cpa-plugin-lamplighter/internal/store"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginapi"
 )
 
@@ -744,6 +746,56 @@ func TestHistoryFiltersWindowKindAndBucketsLongSpans(t *testing.T) {
 		if len(s.Points) != 2 || int64(s.Points[0][0]) != start.Add(10*time.Minute).Unix() {
 			t.Fatalf("points %v", s.Points)
 		}
+	}
+}
+
+func TestHistoryStartsWithTheLastSampleBeforeTheSpan(t *testing.T) {
+	c := &clock{t: time.Date(2026, 10, 4, 10, 7, 0, 0, shanghai)}
+	e, _ := newTestEngine(t, standardHost(c), c)
+	sample := func(group string, at time.Time, remaining float64) store.Record {
+		return store.Record{Kind: "s", Time: at.Unix(), Group: group, Window: "five-hour", Remaining: remaining, Source: "active"}
+	}
+	pointsOf := func(span time.Duration) map[string][]int64 {
+		resp, err := e.History(span, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string][]int64{}
+		for _, s := range resp.Series {
+			for _, p := range s.Points {
+				out[s.Group] = append(out[s.Group], int64(p[0]))
+			}
+		}
+		return out
+	}
+
+	from := c.t.Add(-time.Hour)
+	if err := e.history.Append(
+		sample("a", from.Add(-historyLead-time.Minute), 90),
+		sample("a", from.Add(-3*time.Hour), 80),
+		sample("a", from.Add(-2*time.Minute), 70),
+		sample("a", from.Add(3*time.Minute), 60),
+		sample("a", from.Add(30*time.Minute), 50),
+		// A series without samples in the span is not returned.
+		sample("b", from.Add(-time.Minute), 40),
+	); err != nil {
+		t.Fatal(err)
+	}
+	got := pointsOf(time.Hour)
+	want := []int64{from.Add(-2 * time.Minute).Unix(), from.Add(3 * time.Minute).Unix(), from.Add(30 * time.Minute).Unix()}
+	if !slices.Equal(got["a"], want) || len(got) != 1 {
+		t.Fatalf("1h points %v, want a: %v", got, want)
+	}
+
+	// In a bucketed span the sample before it stays its own point, although
+	// it shares a 15-minute bucket with the first sample in the span.
+	week := c.t.Add(-8 * 24 * time.Hour)
+	if err := e.history.Append(sample("c", week.Add(-2*time.Minute), 30), sample("c", week.Add(3*time.Minute), 20)); err != nil {
+		t.Fatal(err)
+	}
+	got = pointsOf(8 * 24 * time.Hour)
+	if want := []int64{week.Add(-2 * time.Minute).Unix(), week.Add(3 * time.Minute).Unix()}; !slices.Equal(got["c"], want) {
+		t.Fatalf("8d points %v, want %v", got["c"], want)
 	}
 }
 
