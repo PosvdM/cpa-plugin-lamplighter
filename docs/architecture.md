@@ -40,6 +40,7 @@ Lamplighter 是用 Go 编写、以 `-buildmode=c-shared` 构建的 CPA 原生插
 | `POST /v0/management/lamplighter/ignite` | 立即点火，`{"target": "<额度组 key>"}` |
 | `POST /v0/management/lamplighter/test-notify` | 同时向已配置的渠道发送测试通知，`results` 中每个渠道一项：`channel`、`ok`、`error`，webhook 还有 `response`（响应的前 200 字）和 `unchecked`（没有设置 `success_json`，只检查了 HTTP 状态码） |
 | `POST /v0/management/lamplighter/language` | 记录通知语言，`{"language": "zh-CN"}`；中文的各种写法记为 `zh`，其他语言记为 `en` |
+| `POST /v0/management/lamplighter/check-update` | 检查新版本，返回状态；页面打开时调用 |
 
 页面注册为资源 `GET /v0/resource/plugins/lamplighter/page`，菜单名为 `Lamplighter`。资源本身不需要认证，页面中的数据请求都带管理密钥。页面从管理中心保存在 `localStorage` 的 `cli-proxy-auth` 中读取密钥（管理中心用主机名和 User-Agent 做了可逆混淆），读不到时让用户输入并只保存在 `sessionStorage`。设置通过 CPA 的 `PATCH /v0/management/plugins/lamplighter/config` 自动保存：表单的 `change` 事件触发保存，每次只提交改动字段所在的顶层键。该接口只合并顶层键，所以 `ignition`、`providers`、`recovery_notify` 等对象以已保存的对象为基础整体提交。保存依次进行，后一次以前一次写入的配置为基础；数字不满足输入框的范围或步长时不保存。浏览器会把为本站保存的密码（通常是管理密钥）填进密码输入框。设置中只有 `models_api_key` 是密码框，它的值按以下规则保存：输入框没有焦点时由浏览器填入（匹配 `:autofill` 或 `:-webkit-autofill`）的值来自页面加载时的自动填入，不保存也不提示；与当前管理密钥相同的值不保存，并提示这是管理密钥；其他非空值先用它请求 `GET /v1/models`（插件读取模型列表的请求），返回 401 或 403 时不保存并提示 CPA 不接受这个 key，其他结果（包括请求失败）照常保存。不保存时输入框恢复为已保存的值。该输入框还带有让 1Password、Bitwarden 和 LastPass 跳过它的属性。`models_api_key` 输入框设为 `autocomplete="one-time-code"`：Chrome 的密码管理不把这类字段当作密码，表单中没有其他密码框时只把它作为备用字段，不在页面加载时自动填入，也不在修改后弹出保存或更新密码的提示。`autocomplete="off"` 对密码框不起作用，`new-password` 会让 Chrome 提示生成强密码，所以都不使用。`webhook.headers` 和 `webhook.success_json` 在页面上以文本编辑（每行一个 `名称: 值`、JSON 对象），无法解析时不保存。状态接口只返回 webhook 的地址、请求头和请求体是否已设置，页面从 CPA 的插件配置接口读取原值填入表单。最后一次保存 3 秒后，页面重新读取状态，把保存过的字段填成插件应用后的值，正在编辑的字段不回填；保存失败时恢复为已保存的值。测试推送等待未完成的保存后再发送。
 
@@ -118,7 +119,7 @@ Lamplighter 是用 Go 编写、以 `-buildmode=c-shared` 构建的 CPA 原生插
 
 `usage.handle` 和管理接口不直接执行网络请求：前者只解析响应头并放入队列（队列满时丢弃，丢一个被动样本没有影响），后者把操作交给后台循环并等待结果，最多 3 分钟。
 
-新版本检查读取 GitHub API 的 `releases/latest`（不含草稿和预发布版本），后台循环开始工作后读一次，之后每 6 小时读一次，失败后 30 分钟重试；插件停用期间不检查，状态接口保留上一次的结果。请求使用 Did Codex Reset 相同的出口（环境变量中的代理或直连）。版本号按数字逐段比较；最新版本比当前版本新时，状态接口返回 `latest_version` 和 `release_url`，页面在版本号右边显示更新图标。失败只记 debug 日志，保留上一次的结果。当前版本不是纯数字版本时（开发版本 `dev`、`0.0.0-dev.<commit>` 和预发布版本）不检查；最新 Release 的标签不是纯数字版本时视为没有新版本。
+新版本检查读取 GitHub API 的 `releases/latest`（不含草稿和预发布版本），后台循环开始工作后读一次，之后每 6 小时读一次，失败后 30 分钟重试。页面打开时调用 `check-update` 再读一次，距上次成功读取不到 1 分钟（`releaseRecheckPeriod`）时不读：未登录的 GitHub API 每个地址每小时只能请求 60 次。这次读取在处理请求的 goroutine 中进行，不经过后台循环，以免排在查询和点火之后；它与后台循环的读取由 `releaseMu` 串行。插件停用期间不检查，状态接口保留上一次的结果。请求使用 Did Codex Reset 相同的出口（环境变量中的代理或直连）。版本号按数字逐段比较；最新版本比当前版本新时，状态接口返回 `latest_version` 和 `release_url`，页面在版本号右边显示更新图标。失败只记 debug 日志，保留上一次的结果。当前版本不是纯数字版本时（开发版本 `dev`、`0.0.0-dev.<commit>` 和预发布版本）不检查；最新 Release 的标签不是纯数字版本时视为没有新版本。
 
 后台循环崩溃时，`supervise` 记录日志并在 30 秒后重启。插件中任何未恢复的 panic 都会结束整个 CPA 进程，所以每个 goroutine 和每个 RPC 方法都有 `recover`。
 
