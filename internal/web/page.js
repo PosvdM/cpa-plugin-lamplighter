@@ -1645,14 +1645,16 @@
     return lineFit(pts, last[0], last[1]).slope;
   }
 
-  // The current rate of a 5-hour window, in points per second: the recent
-  // slope of this cycle's lowest readings so far (cycleFloor).
+  // The current rate of a 5-hour window, in points per second (rate): the
+  // recent slope of this cycle's lowest readings so far (cycleFloor). held
+  // tells whether the latest value counts until now, as a pause.
   function currentRate(row, now) {
     var floor = row.floor, start = 0;
     for (var i = 1; i < floor.length; i++) if (floor[i][1] > floor[i - 1][1]) start = i;
     var pts = floor.slice(start), tail = pts[pts.length - 1];
-    if (now - tail[0] > (tail[2] === 1 ? HOLD_AFTER : Math.max(HOLD_AFTER, sampleStep() * 1.5))) pts.push([now, tail[1]]);
-    return recentSlope(pts);
+    var held = now - tail[0] > (tail[2] === 1 ? HOLD_AFTER : Math.max(HOLD_AFTER, sampleStep() * 1.5));
+    if (held) pts.push([now, tail[1]]);
+    return { rate: recentSlope(pts), held: held };
   }
 
   // The rate of a 7-day window, in points per second: what this cycle has
@@ -1673,18 +1675,27 @@
     return total ? -sum / total : null;
   }
 
-  // The projection: from the latest sample along the rate of use until the
+  // The projection: from the latest value along the rate of use until the
   // quota runs out (out) or the window resets, with what is left then
   // (left). A 5-hour window keeps its current rate; a 7-day window, whose
   // use comes in daily bursts, takes the rate of its cycle so far. A rate
-  // that does not fall stays level. Null without a reset ahead on the axis,
-  // without current data, with nothing left or without a rate.
+  // that does not fall stays level. It starts (t0) where the line of samples
+  // ends, now; for a 5-hour window whose rate does not yet hold the latest
+  // value until now, at the latest sample, so the line does not level off
+  // before a projection that still falls. Null without a reset ahead on the
+  // axis, without current data, with nothing left or without a rate.
   function projection(row, g, lastRun, limit) {
     var last = row.points[row.points.length - 1];
     if (g.to <= g.now || !lastRun || lastRun.end < g.now - limit || !(last[1] > 0)) return null;
-    var rate = historyWindow === "7d" ? cycleRate(row, g.now) : currentRate(row, g.now);
+    var rate, t0 = lastRun.end;
+    if (historyWindow === "7d") rate = cycleRate(row, g.now);
+    else {
+      var current = currentRate(row, g.now);
+      rate = current.rate;
+      if (!current.held) t0 = last[0];
+    }
     if (rate == null) return null;
-    var slope = Math.min(0, rate), t0 = lastRun.end, v0 = last[1];
+    var slope = Math.min(0, rate), v0 = last[1];
     var out = slope < 0 ? t0 + v0 / -slope : Infinity;
     return { t0: t0, v0: v0, end: Math.min(out, g.to), out: out <= g.to ? out : null, left: out <= g.to ? 0 : v0 + slope * (g.to - t0),
       at: function (t) { return t < t0 || t > g.to ? null : Math.max(0, v0 + slope * (t - t0)); } };
@@ -1699,19 +1710,20 @@
     snapPoints = row.points;
     var group = !!row.children;
     var stretches = runs(row.points, limit, g.now);
-    // Hold the last value to the end of each stretch so the line reaches it.
-    // One account resetting raises a pooled total by its share; the total
-    // line breaks only when that share is a visible jump.
+    var lastRun = stretches[stretches.length - 1];
+    var ahead = projection(row, g, lastRun, limit);
+    // Hold the last value to the end of each stretch so the line reaches it;
+    // the last stretch only to the start of the projection. One account
+    // resetting raises a pooled total by its share; the total line breaks
+    // only when that share is a visible jump.
     var pieces = stretches.map(function (run) {
-      var pts = run.pts.slice(), tail = pts[pts.length - 1];
-      if (run.end > tail[0]) pts.push([run.end].concat(tail.slice(1)));
+      var pts = run.pts.slice(), tail = pts[pts.length - 1], end = ahead && run === lastRun ? ahead.t0 : run.end;
+      if (end > tail[0]) pts.push([end].concat(tail.slice(1)));
       return { pts: pts, split: splitAtResets(pts, [1]) };
     });
     var resets = [];
     pieces.forEach(function (piece) { resets = resets.concat(piece.split.resets); });
     var even = rowPace(row, resets, limit);
-    var lastRun = stretches[stretches.length - 1];
-    var ahead = projection(row, g, lastRun, limit);
 
     head.appendChild(el("span", { class: "detail-name", text: row.name + " · " + translate(historyWindow === "5h" ? "quota_5h" : "quota_7d") }));
     head.appendChild(el("span", { class: "muted", text: group ? translate("pooled_note", row.children.length) : row.sub }));
@@ -1767,7 +1779,8 @@
       if (run.start > cursor + limit) hatchRect(root, g, cursor, run.start, top, plotH);
       cursor = run.end;
     });
-    hatchRect(root, g, dataEnd(g, cursor, limit), g.to, top, plotH);
+    // With a projection, the hatching starts where it does, the end of the line.
+    hatchRect(root, g, ahead ? ahead.t0 : dataEnd(g, cursor, limit), g.to, top, plotH);
     if (stretches.length && stretches[0].start > g.from + limit) {
       root.appendChild(svgText({ x: (g.x(g.from) + g.x(stretches[0].start)) / 2, y: top + plotH / 2 + 4, "text-anchor": "middle", "font-size": 12,
         fill: cssVar("--text-tertiary"), "class": "row-name" }, translate("no_data")));
@@ -1839,7 +1852,7 @@
     }
     var last = row.points[row.points.length - 1];
     if (last && lastRun.end >= g.now - limit) {
-      root.appendChild(svg("circle", { cx: g.x(lastRun.end), cy: y(last[1]), r: 4, fill: cssVar("--text-primary"), stroke: cssVar("--bg-primary"), "stroke-width": 2 }));
+      root.appendChild(svg("circle", { cx: g.x(ahead ? ahead.t0 : lastRun.end), cy: y(last[1]), r: 4, fill: cssVar("--text-primary"), stroke: cssVar("--bg-primary"), "stroke-width": 2 }));
     }
     // An axis that ends now shows the current value and the even pace at the
     // ends of their lines, with the difference between them. The difference
