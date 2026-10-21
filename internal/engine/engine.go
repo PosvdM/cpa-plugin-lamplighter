@@ -40,9 +40,9 @@ const (
 	// releaseRetryPeriod when a read fails.
 	releaseCheckPeriod = 6 * time.Hour
 	releaseRetryPeriod = 30 * time.Minute
-	// Opening the management page reads the latest release unless a read
-	// succeeded within releaseRecheckPeriod. GitHub allows 60 unauthenticated
-	// API requests an hour per address.
+	// Opening the management page reads the latest release unless a read was
+	// tried within releaseRecheckPeriod. GitHub allows 60 unauthenticated API
+	// requests an hour per address.
 	releaseRecheckPeriod = time.Minute
 )
 
@@ -90,10 +90,12 @@ type Engine struct {
 	nextModels map[string]string
 	// latest is the latest release when it is newer than this version.
 	latest release.Release
-	// releaseMu serializes reads of the latest release and guards releaseAt,
-	// the time of the last successful read.
-	releaseMu sync.Mutex
-	releaseAt time.Time
+	// releaseMu is held while the latest release is read, and guards
+	// releaseTried and releaseAt, when a read was last tried and when one last
+	// succeeded.
+	releaseMu    sync.Mutex
+	releaseTried time.Time
+	releaseAt    time.Time
 	// plans is the raw plan per auth index, a copy of state.Plans.
 	plans map[string]string
 
@@ -578,9 +580,16 @@ func (e *Engine) run() {
 }
 
 // checkRelease reads the latest release and returns when to read it again.
+// It does not wait for a read the page started, and skips the read when one
+// succeeded within releaseRecheckPeriod.
 func (e *Engine) checkRelease(ctx context.Context, cfg config.Config) time.Time {
-	e.releaseMu.Lock()
+	if !e.releaseMu.TryLock() {
+		return e.now().Add(releaseRetryPeriod)
+	}
 	defer e.releaseMu.Unlock()
+	if !e.releaseAt.IsZero() && e.now().Sub(e.releaseAt) < releaseRecheckPeriod {
+		return e.now().Add(releaseCheckPeriod)
+	}
 	if e.readRelease(ctx, cfg) != nil {
 		return e.now().Add(releaseRetryPeriod)
 	}
@@ -588,9 +597,10 @@ func (e *Engine) checkRelease(ctx context.Context, cfg config.Config) time.Time 
 }
 
 // CheckRelease reads the latest release when the management page opens,
-// unless a read succeeded within releaseRecheckPeriod. Like the periodic
-// check, it reads nothing for a development build or while the plugin is
-// disabled.
+// unless a read is under way or was tried within releaseRecheckPeriod, so
+// that page loads do not queue up when GitHub does not answer. Like the
+// periodic check, it reads nothing for a development build or while the
+// plugin is disabled.
 func (e *Engine) CheckRelease() error {
 	e.mu.Lock()
 	ready := e.running && e.enabled
@@ -598,15 +608,23 @@ func (e *Engine) CheckRelease() error {
 	if !ready {
 		return ErrNotRunning
 	}
-	if !release.Comparable(e.version) {
+	if !release.Comparable(e.version) || !e.releaseMu.TryLock() {
 		return nil
 	}
-	e.releaseMu.Lock()
 	defer e.releaseMu.Unlock()
-	if !e.releaseAt.IsZero() && e.now().Sub(e.releaseAt) < releaseRecheckPeriod {
+	if !e.releaseTried.IsZero() && e.now().Sub(e.releaseTried) < releaseRecheckPeriod {
 		return nil
 	}
-	return e.readRelease(context.Background(), e.config())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		select {
+		case <-e.stopCh:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	return e.readRelease(ctx, e.config())
 }
 
 // readRelease reads the latest release and keeps it when it is newer than
@@ -614,6 +632,7 @@ func (e *Engine) CheckRelease() error {
 // result and is only logged at debug level: it does not affect quota
 // monitoring.
 func (e *Engine) readRelease(ctx context.Context, cfg config.Config) error {
+	e.releaseTried = e.now()
 	latest, err := release.Latest(ctx, &http.Client{Timeout: cfg.RequestTimeout()}, "cpa-plugin-lamplighter/"+e.version)
 	if err != nil {
 		e.logf("debug", "检查新版本失败：%v", err)

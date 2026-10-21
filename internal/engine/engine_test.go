@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -487,6 +488,7 @@ func TestStatusReportsNewerRelease(t *testing.T) {
 	}
 
 	// A failed read keeps the known release and is retried sooner.
+	c.add(time.Minute)
 	status = http.StatusForbidden
 	if next := e.checkRelease(ctx, e.config()); !next.Equal(c.t.Add(releaseRetryPeriod)) {
 		t.Fatalf("next check after failure %v", next)
@@ -496,6 +498,7 @@ func TestStatusReportsNewerRelease(t *testing.T) {
 	}
 
 	tag, status = "v0.4.0", http.StatusOK
+	c.add(time.Minute)
 	e.checkRelease(ctx, e.config())
 	if got := e.Status(); got.LatestVersion != "" || got.ReleaseURL != "" {
 		t.Fatalf("the current release is reported as newer: %q %q", got.LatestVersion, got.ReleaseURL)
@@ -503,11 +506,12 @@ func TestStatusReportsNewerRelease(t *testing.T) {
 }
 
 func TestCheckReleaseOnOpen(t *testing.T) {
-	var reads int
-	status := http.StatusOK
+	var reads atomic.Int32
+	var status atomic.Int32
+	status.Store(http.StatusOK)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		reads++
-		w.WriteHeader(status)
+		reads.Add(1)
+		w.WriteHeader(int(status.Load()))
 		w.Write([]byte(`{"tag_name":"v0.5.0","html_url":"https://github.com/PosvdM/cpa-plugin-lamplighter/releases/tag/v0.5.0"}`))
 	}))
 	t.Cleanup(server.Close)
@@ -518,33 +522,57 @@ func TestCheckReleaseOnOpen(t *testing.T) {
 	c := &clock{t: time.Date(2026, 10, 4, 10, 0, 0, 0, shanghai)}
 	e, _ := newTestEngine(t, standardHost(c), c)
 	e.version = "0.4.0"
-	if err := e.CheckRelease(); !errors.Is(err, ErrNotRunning) || reads != 0 {
-		t.Fatalf("before the loop runs: %v, %d reads", err, reads)
+	e.running = false
+	if err := e.CheckRelease(); !errors.Is(err, ErrNotRunning) || reads.Load() != 0 {
+		t.Fatalf("before the loop runs: %v, %d reads", err, reads.Load())
 	}
-	e.running, e.enabled = true, true
-	if err := e.CheckRelease(); err != nil || reads != 1 || e.Status().LatestVersion != "0.5.0" {
-		t.Fatalf("first open: %v, %d reads, latest %q", err, reads, e.Status().LatestVersion)
+	e.running, e.enabled = true, false
+	if err := e.CheckRelease(); !errors.Is(err, ErrNotRunning) || reads.Load() != 0 {
+		t.Fatalf("while disabled: %v, %d reads", err, reads.Load())
 	}
-	// Within a minute of a successful read, opening the page reads nothing.
+	e.enabled = true
+	if err := e.CheckRelease(); err != nil || reads.Load() != 1 || e.Status().LatestVersion != "0.5.0" {
+		t.Fatalf("first open: %v, %d reads, latest %q", err, reads.Load(), e.Status().LatestVersion)
+	}
+	// Within a minute of a read, opening the page reads nothing, and the
+	// loop's read is skipped as well.
 	c.add(59 * time.Second)
-	if err := e.CheckRelease(); err != nil || reads != 1 {
-		t.Fatalf("open within a minute: %v, %d reads", err, reads)
+	if err := e.CheckRelease(); err != nil || reads.Load() != 1 {
+		t.Fatalf("open within a minute: %v, %d reads", err, reads.Load())
 	}
-	// A failed read does not hold back the next one.
+	if next := e.checkRelease(context.Background(), e.config()); reads.Load() != 1 || !next.Equal(c.t.Add(releaseCheckPeriod)) {
+		t.Fatalf("loop within a minute: %d reads, next %v", reads.Load(), next)
+	}
+	// A failed read keeps the release, and also holds back the next read
+	// for a minute.
 	c.add(time.Second)
-	status = http.StatusForbidden
-	if err := e.CheckRelease(); err == nil || reads != 2 || e.Status().LatestVersion != "0.5.0" {
-		t.Fatalf("failed read: %v, %d reads, latest %q", err, reads, e.Status().LatestVersion)
+	status.Store(http.StatusForbidden)
+	if err := e.CheckRelease(); err == nil || reads.Load() != 2 || e.Status().LatestVersion != "0.5.0" {
+		t.Fatalf("failed read: %v, %d reads, latest %q", err, reads.Load(), e.Status().LatestVersion)
 	}
-	status = http.StatusOK
-	if err := e.CheckRelease(); err != nil || reads != 3 {
-		t.Fatalf("read after a failure: %v, %d reads", err, reads)
+	status.Store(http.StatusOK)
+	if err := e.CheckRelease(); err != nil || reads.Load() != 2 {
+		t.Fatalf("open after a failure: %v, %d reads", err, reads.Load())
+	}
+	c.add(time.Minute)
+	if err := e.CheckRelease(); err != nil || reads.Load() != 3 {
+		t.Fatalf("open a minute after a failure: %v, %d reads", err, reads.Load())
 	}
 
-	e.version = "0.0.0-dev.1a2b3c4"
+	// While a read is under way, neither the page nor the loop waits for it.
 	c.add(time.Hour)
-	if err := e.CheckRelease(); err != nil || reads != 3 {
-		t.Fatalf("a development build is checked: %v, %d reads", err, reads)
+	e.releaseMu.Lock()
+	if err := e.CheckRelease(); err != nil || reads.Load() != 3 {
+		t.Fatalf("open during a read: %v, %d reads", err, reads.Load())
+	}
+	if next := e.checkRelease(context.Background(), e.config()); reads.Load() != 3 || !next.Equal(c.t.Add(releaseRetryPeriod)) {
+		t.Fatalf("loop during a read: %d reads, next %v", reads.Load(), next)
+	}
+	e.releaseMu.Unlock()
+
+	e.version = "0.0.0-dev.1a2b3c4"
+	if err := e.CheckRelease(); err != nil || reads.Load() != 3 {
+		t.Fatalf("a development build is checked: %v, %d reads", err, reads.Load())
 	}
 }
 
