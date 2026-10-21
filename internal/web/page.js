@@ -1786,8 +1786,11 @@
     });
     // With a projection, the hatching starts where it does, the end of the line.
     hatchRect(root, g, ahead ? ahead.t0 : dataEnd(g, cursor, limit), g.to, top, plotH);
-    if (stretches.length && stretches[0].start > g.from + limit) {
-      root.appendChild(svgText({ x: (g.x(g.from) + g.x(stretches[0].start)) / 2, y: top + plotH / 2 + 4, "text-anchor": "middle", "font-size": 12,
+    // The first stretch on the axis: a sample before it, from before the
+    // range, can form a stretch of its own that ends left of the axis.
+    var firstIn = stretches.filter(function (run) { return run.end > g.from; })[0];
+    if (firstIn && firstIn.start > g.from + limit) {
+      root.appendChild(svgText({ x: (g.x(g.from) + g.x(firstIn.start)) / 2, y: top + plotH / 2 + 4, "text-anchor": "middle", "font-size": 12,
         fill: cssVar("--text-tertiary"), "class": "row-name" }, translate("no_data")));
     }
 
@@ -1954,7 +1957,7 @@
       }
       paceRow(t);
       var near = (g.to - g.from) / g.plotW * 8;
-      resets.forEach(function (r) { if (Math.abs(r - t) <= near) tip.appendChild(el("div", { class: "note", text: fmtClock(unixDate(r)) + " " + translate("quota_reset") })); });
+      resets.forEach(function (r) { if (r >= g.from && Math.abs(r - t) <= near) tip.appendChild(el("div", { class: "note", text: fmtClock(unixDate(r)) + " " + translate("quota_reset") })); });
       tip.hidden = false;
       placeTip(tip, box, g, t, 6);
     });
@@ -1984,12 +1987,14 @@
     hoverListeners.forEach(function (fn) { fn(t, rowId); });
   }
 
+  // The table covers the requested range, without the sample before it.
   function renderChartTable(rows) {
     var table = $("chart-table");
+    var from = new Date(history.from).getTime() / 1000;
     clear(table);
     rows.forEach(function (r) {
       (r.children || [r]).forEach(function (c) {
-        var values = c.points.map(function (p) { return p[1]; });
+        var values = c.points.filter(function (p) { return p[0] >= from; }).map(function (p) { return p[1]; });
         table.appendChild(el("tr", {}, [
           el("td", { text: c.name }),
           el("td", { text: c.sub }),
