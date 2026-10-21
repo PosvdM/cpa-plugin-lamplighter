@@ -581,9 +581,17 @@ func historyBucket(span time.Duration) int64 {
 	return 0
 }
 
+// historyLead is how far before a range History looks for the last sample
+// of each series. The page joins samples up to 3.5 poll intervals or bucket
+// lengths apart, more with passive skipping; a day covers these.
+const historyLead = 24 * time.Hour
+
 // History returns quota samples and events for the last span. Long spans are
-// reduced to the last sample per bucket. With kind "5h" or "7d" only windows
-// of that kind are returned, otherwise all windows.
+// reduced to the last sample per bucket. Each series also starts with its
+// last sample before the span, within historyLead, so that the chart line
+// reaches the left edge instead of starting at the first sample in the span.
+// With kind "5h" or "7d" only windows of that kind are returned, otherwise
+// all windows.
 func (e *Engine) History(span time.Duration, kind string) (HistoryResponse, error) {
 	e.mu.Lock()
 	dataDir := e.dataDir
@@ -598,13 +606,27 @@ func (e *Engine) History(span time.Duration, kind string) (HistoryResponse, erro
 		return resp, nil
 	}
 	history := &store.History{Dir: dataDir + "/history"}
-	records, err := history.Query(resp.From, now)
+	records, err := history.Query(resp.From.Add(-historyLead), now)
 	if err != nil {
 		return resp, err
 	}
+	from := resp.From.Unix()
 	series := map[string]*Series{}
+	before := map[string][3]float64{}
 	var order []string
 	for _, record := range records {
+		key := record.Group + "|" + record.Window
+		passive := 0.0
+		if record.Source == string(quota.SourcePassive) {
+			passive = 1
+		}
+		point := [3]float64{float64(record.Time), record.Remaining, passive}
+		if record.Time < from {
+			if record.Kind != "e" {
+				before[key] = point
+			}
+			continue
+		}
 		if record.Kind == "e" {
 			if record.Event == "ignite" || record.Event == "ignite_manual" || record.Event == "ignite_failed" || record.Event == "ignite_paused" {
 				resp.Events = append(resp.Events, Event{
@@ -614,7 +636,6 @@ func (e *Engine) History(span time.Duration, kind string) (HistoryResponse, erro
 			}
 			continue
 		}
-		key := record.Group + "|" + record.Window
 		s, ok := series[key]
 		if !ok {
 			// Windows no longer reported are known by their ID.
@@ -638,17 +659,16 @@ func (e *Engine) History(span time.Duration, kind string) (HistoryResponse, erro
 				s.Label = record.Group
 				s.SourceLabel = record.Group
 			}
+			if lead, ok := before[key]; ok {
+				s.Points = append(s.Points, lead)
+			}
 			series[key] = s
 			order = append(order, key)
 		}
-		passive := 0.0
-		if record.Source == string(quota.SourcePassive) {
-			passive = 1
-		}
-		point := [3]float64{float64(record.Time), record.Remaining, passive}
+		// The sample before the span stays its own point.
 		if resp.Bucket > 0 && len(s.Points) > 0 {
 			last := s.Points[len(s.Points)-1]
-			if int64(last[0])/resp.Bucket == record.Time/resp.Bucket {
+			if int64(last[0]) >= from && int64(last[0])/resp.Bucket == record.Time/resp.Bucket {
 				s.Points[len(s.Points)-1] = point
 				continue
 			}
