@@ -1766,9 +1766,14 @@
       var outW = outText.length * CHAR_W;
       outLabel = { text: outText, w: outW, x: Math.max(g.labelW + outW / 2, Math.min(g.width - outW / 2, g.x(ahead.out))) };
     }
+    // A tick at the edge of the plot keeps its label but not its grid line,
+    // which would run beside the edge line.
     var ticks = chartTicks(g);
     ticks.list.forEach(function (t) {
-      root.appendChild(svg("line", { x1: g.x(t), x2: g.x(t), y1: top, y2: top + plotH, stroke: cssVar("--border-color"), "stroke-dasharray": "2 4" }));
+      var tx = g.x(t);
+      if (tx > g.labelW + 4 && tx < g.labelW + g.plotW - 4) {
+        root.appendChild(svg("line", { x1: tx, x2: tx, y1: top, y2: top + plotH, stroke: cssVar("--border-color"), "stroke-dasharray": "2 4" }));
+      }
       var text = ticks.label(t);
       if (outLabel && Math.abs(g.x(t) - outLabel.x) < (outLabel.w + text.length * CHAR_W) / 2 + 6) return;
       root.appendChild(svgText({ x: g.x(t), y: H - 6, "text-anchor": "middle", "font-size": 11, fill: cssVar("--text-tertiary") }, text));
@@ -1785,6 +1790,12 @@
       root.appendChild(svgText({ x: (g.x(g.from) + g.x(stretches[0].start)) / 2, y: top + plotH / 2 + 4, "text-anchor": "middle", "font-size": 12,
         fill: cssVar("--text-tertiary"), "class": "row-name" }, translate("no_data")));
     }
+
+    // The edges of the plot, solid like the 0% line, over the hatching and
+    // beneath the lines and their marks.
+    [g.labelW, g.labelW + g.plotW].forEach(function (x) {
+      root.appendChild(svg("line", { x1: x, x2: x, y1: top, y2: top + plotH, stroke: cssVar("--border-primary") }));
+    });
 
     var plot = svg("g", { "clip-path": "url(#chart-plot)" });
     root.appendChild(plot);
@@ -1864,7 +1875,6 @@
         var mid = (yNow + yPace) / 2, upper = yNow <= yPace;
         var yA = Math.min(upper ? yNow : yPace, mid - LABEL_H), yB = Math.max(upper ? yPace : yNow, mid + LABEL_H);
         var shift = Math.max(0, top - yA) - Math.max(0, yB - (top + plotH));
-        root.appendChild(svg("line", { x1: rightX - 5, x2: rightX - 5, y1: yNow, y2: yPace, stroke: cssVar("--text-tertiary"), "stroke-opacity": 0.7 }));
         root.appendChild(svgText({ x: rightX, y: (upper ? yA : yB) + shift + 4, "font-size": 13, "font-weight": 650, fill: cssVar("--text-primary") }, pct(row.last)));
         root.appendChild(svgText({ x: rightX, y: (upper ? yB : yA) + shift + 4, "font-size": 12, fill: cssVar("--text-tertiary") }, pct(pace)));
         root.appendChild(svgText({ x: rightX, y: mid + shift + 4, "font-size": 12, "font-weight": 650,
