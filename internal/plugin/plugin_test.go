@@ -67,7 +67,7 @@ func TestManagementRoutesAndPage(t *testing.T) {
 		Resources []struct{ Path, Menu string }   `json:"resources"`
 	}
 	json.Unmarshal(result(t, p.Handle("management.register", nil)), &reg)
-	if len(reg.Routes) != 6 || reg.Resources[0].Path != "/page" || reg.Resources[0].Menu != "Lamplighter" {
+	if len(reg.Routes) != 7 || reg.Resources[0].Path != "/page" || reg.Resources[0].Menu != "Lamplighter" {
 		t.Fatalf("registration %+v", reg)
 	}
 
@@ -104,10 +104,12 @@ func TestManagementRoutesAndPage(t *testing.T) {
 		t.Fatalf("history %d %s", resp.StatusCode, resp.Body)
 	}
 
-	req, _ = json.Marshal(pluginapi.ManagementRequest{Method: "POST", Path: "/v0/management/lamplighter/refresh"})
-	json.Unmarshal(result(t, p.Handle("management.handle", req)), &resp)
-	if resp.StatusCode != 503 {
-		t.Fatalf("actions before the loop starts must answer 503, got %d", resp.StatusCode)
+	for _, path := range []string{"refresh", "check-update"} {
+		req, _ = json.Marshal(pluginapi.ManagementRequest{Method: "POST", Path: "/v0/management/lamplighter/" + path})
+		json.Unmarshal(result(t, p.Handle("management.handle", req)), &resp)
+		if resp.StatusCode != 503 {
+			t.Fatalf("%s before the loop starts must answer 503, got %d", path, resp.StatusCode)
+		}
 	}
 }
 

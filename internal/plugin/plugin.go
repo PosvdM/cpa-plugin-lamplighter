@@ -197,6 +197,7 @@ func managementRegistration() map[string]any {
 			{Method: http.MethodPost, Path: apiBase + "/ignite", Description: "Ignite one quota window now"},
 			{Method: http.MethodPost, Path: apiBase + "/test-notify", Description: "Send a test notification to every channel"},
 			{Method: http.MethodPost, Path: apiBase + "/language", Description: "Set the notification language"},
+			{Method: http.MethodPost, Path: apiBase + "/check-update", Description: "Check for a newer release"},
 		},
 		"resources": []resource{
 			{Path: pagePath, Menu: "Lamplighter", Description: "额度监控、自动点火和额度图表 / Quota monitoring, ignition and quota chart"},
@@ -269,6 +270,8 @@ func (p *Plugin) handleManagement(req pluginapi.ManagementRequest) pluginapi.Man
 		return jsonResponse(http.StatusOK, map[string]any{"ok": ok, "results": results, "status": p.engine.Status()})
 	case "POST " + apiBase + "/language":
 		return actionResponse(p.engine.SetLanguage(body.Language), p)
+	case "POST " + apiBase + "/check-update":
+		return actionResponse(p.engine.CheckRelease(), p)
 	}
 	return errorResponse(http.StatusNotFound, fmt.Errorf("unknown route %s %s", req.Method, req.Path))
 }

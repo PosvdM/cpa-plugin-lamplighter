@@ -502,6 +502,52 @@ func TestStatusReportsNewerRelease(t *testing.T) {
 	}
 }
 
+func TestCheckReleaseOnOpen(t *testing.T) {
+	var reads int
+	status := http.StatusOK
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reads++
+		w.WriteHeader(status)
+		w.Write([]byte(`{"tag_name":"v0.5.0","html_url":"https://github.com/PosvdM/cpa-plugin-lamplighter/releases/tag/v0.5.0"}`))
+	}))
+	t.Cleanup(server.Close)
+	old := release.LatestURL
+	release.LatestURL = server.URL
+	t.Cleanup(func() { release.LatestURL = old })
+
+	c := &clock{t: time.Date(2026, 10, 4, 10, 0, 0, 0, shanghai)}
+	e, _ := newTestEngine(t, standardHost(c), c)
+	e.version = "0.4.0"
+	if err := e.CheckRelease(); !errors.Is(err, ErrNotRunning) || reads != 0 {
+		t.Fatalf("before the loop runs: %v, %d reads", err, reads)
+	}
+	e.running, e.enabled = true, true
+	if err := e.CheckRelease(); err != nil || reads != 1 || e.Status().LatestVersion != "0.5.0" {
+		t.Fatalf("first open: %v, %d reads, latest %q", err, reads, e.Status().LatestVersion)
+	}
+	// Within a minute of a successful read, opening the page reads nothing.
+	c.add(59 * time.Second)
+	if err := e.CheckRelease(); err != nil || reads != 1 {
+		t.Fatalf("open within a minute: %v, %d reads", err, reads)
+	}
+	// A failed read does not hold back the next one.
+	c.add(time.Second)
+	status = http.StatusForbidden
+	if err := e.CheckRelease(); err == nil || reads != 2 || e.Status().LatestVersion != "0.5.0" {
+		t.Fatalf("failed read: %v, %d reads, latest %q", err, reads, e.Status().LatestVersion)
+	}
+	status = http.StatusOK
+	if err := e.CheckRelease(); err != nil || reads != 3 {
+		t.Fatalf("read after a failure: %v, %d reads", err, reads)
+	}
+
+	e.version = "0.0.0-dev.1a2b3c4"
+	c.add(time.Hour)
+	if err := e.CheckRelease(); err != nil || reads != 3 {
+		t.Fatalf("a development build is checked: %v, %d reads", err, reads)
+	}
+}
+
 func TestModelListIsReadAfterStartAndKeyChange(t *testing.T) {
 	c := &clock{t: time.Date(2026, 10, 4, 10, 0, 0, 0, shanghai)}
 	h := standardHost(c)
