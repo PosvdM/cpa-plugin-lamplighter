@@ -501,6 +501,18 @@ func CooldownMessage(lang, label string, until time.Time, loc *time.Location) Me
 	}
 }
 
+// PlanMessage is sent when the plan of an account changes, such as an
+// expired subscription.
+func PlanMessage(lang, label, from, to string) Message {
+	return Message{
+		Kind:  KindPlan,
+		Title: T(lang, "plan_title", label, from, to),
+		Body:  T(lang, "plan_body"),
+		Level: LevelTimeSensitive,
+		Label: label,
+	}
+}
+
 // CircuitMessage is sent once when ignition pauses until the next day.
 func CircuitMessage(lang, label string, until time.Time, reason string, loc *time.Location) Message {
 	return Message{

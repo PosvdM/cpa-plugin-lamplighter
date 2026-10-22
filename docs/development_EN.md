@@ -26,9 +26,9 @@ Coverage:
 - candidate model order and model list reading;
 - quota alerts, per-window recovery notifications and reset reminders, the Bark request format, and Did Codex Reset deduplication, filtering and schedule times;
 - webhook placeholder escaping, the built-in body, `success_json`, the settings check and hiding secrets in errors, that one successful channel delivers a message, and that no channel turns notifications off while an invalid webhook alone fails and retries;
-- the engine: account suffixes and names, the passive skip rule, that passive data adds no windows, queries around resets, ignition confirmation, retry with the next model, recognizing a Kimi alias account, that Kimi and Grok are not ignited, pause notifications, history sampling, the history window filter, bucket lengths and the last sample before the range, the provider list and newer release in the status, the release check on opening the page, its one-minute limit and not waiting for a read under way, and account plans with the Claude profile read at most once a day;
+- the engine: account suffixes and names, the passive skip rule, that passive data adds no windows, queries around resets, ignition confirmation, retry with the next model, recognizing a Kimi alias account, that Kimi and Grok are not ignited, pause notifications, history sampling, the history window filter, bucket lengths and the last sample before the range, the provider list and newer release in the status, the release check on opening the page, its one-minute limit and not waiting for a read under way, account plans with the Claude profile read at most once a day, and the immediate plan read when quota windows appear or disappear, the plan change notification and the quota alerts it replaces;
 - version comparison, and reading the latest release when it succeeds, is rate limited, returns an invalid response or has a non-numeric tag;
-- the check of `account_weights` in the config, and the plan names and default weights of Codex and Claude;
+- the check of `account_weights` in the config, and the plan names and default weights of Codex, Claude and Antigravity;
 - plugin RPC: registration, management routes, the page, and that the status contains no secrets;
 - the instance lock being exclusive, and reading the plugin directory from the CPA config.
 

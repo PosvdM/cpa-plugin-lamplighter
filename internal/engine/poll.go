@@ -366,8 +366,10 @@ func (e *Engine) refreshCred(ctx context.Context, cfg config.Config, cred *Cred)
 	}
 	now := e.now()
 	e.activeAt[cred.AuthIndex] = now
+	// The plan comes first, so that a changed plan resets the notification
+	// baselines before the new windows are compared with them.
+	e.notePlan(ctx, cfg, p, cred, credential, groups, now)
 	e.applyGroups(ctx, cfg, cred, groups, quota.SourceActive, now)
-	e.notePlan(ctx, p, cred, credential, groups, now)
 	return nil
 }
 
@@ -375,11 +377,30 @@ func (e *Engine) refreshCred(ctx context.Context, cfg config.Config, cred *Cred)
 // own, for providers whose usage response does not state it.
 const planCheckPeriod = 24 * time.Hour
 
+// windowSet lists the quota groups and windows of an active result, sorted,
+// to tell when an account starts or stops reporting a window.
+func windowSet(groups []quota.RawGroup) string {
+	var ids []string
+	for _, g := range groups {
+		for _, w := range g.Windows {
+			ids = append(ids, g.Key+"|"+w.ID)
+		}
+	}
+	sort.Strings(ids)
+	return strings.Join(ids, "\n")
+}
+
 // notePlan records the plan of cred after a successful quota query: from the
 // usage response when it states one, otherwise from the provider's own
-// request, at most once per planCheckPeriod. A failed request keeps the plan
-// read before, waits for the next period and does not affect the quota.
-func (e *Engine) notePlan(ctx context.Context, p *providers.Provider, cred *Cred, credential providers.Credential, groups []quota.RawGroup, now time.Time) {
+// request. That request is sent once per planCheckPeriod, and at once when
+// the account reports other windows than in the previous active query: an
+// expired Google AI Pro plan, for one, removes the 5-hour windows of
+// Antigravity. A failed request keeps the plan read before, waits for the
+// next period and does not affect the quota.
+func (e *Engine) notePlan(ctx context.Context, cfg config.Config, p *providers.Provider, cred *Cred, credential providers.Credential, groups []quota.RawGroup, now time.Time) {
+	windows := windowSet(groups)
+	previous, known := e.windowSets[cred.AuthIndex]
+	e.windowSets[cred.AuthIndex] = windows
 	if p.Plan == nil {
 		return
 	}
@@ -390,10 +411,11 @@ func (e *Engine) notePlan(ctx context.Context, p *providers.Provider, cred *Cred
 			raw = g.Plan
 		}
 	}
-	if raw == "" && p.Profile != nil && now.Sub(time.Unix(state.Checked, 0)) >= planCheckPeriod {
+	due := now.Sub(time.Unix(state.Checked, 0)) >= planCheckPeriod || known && windows != previous
+	if raw == "" && p.Profile != nil && due {
 		state.Checked = now.Unix()
 		e.dirty = true
-		plan, err := p.Profile(ctx, e.egress, credential)
+		plan, err := p.Profile(ctx, e.egress, credential, now)
 		if err != nil {
 			e.logf("debug", "读取套餐失败：%s：%v", labelFor(providers.Title(cred.Provider), cred), err)
 		}
@@ -402,11 +424,45 @@ func (e *Engine) notePlan(ctx context.Context, p *providers.Provider, cred *Cred
 	if raw == "" || raw == state.Plan {
 		return
 	}
+	old := state.Plan
 	state.Plan = raw
 	e.dirty = true
 	e.mu.Lock()
 	e.plans[cred.AuthIndex] = raw
 	e.mu.Unlock()
+	from, to := providers.PlanOf(cred.Provider, old).Name, providers.PlanOf(cred.Provider, raw).Name
+	if old != "" && from != to {
+		e.planChanged(ctx, cfg, cred, from, to)
+	}
+}
+
+// planChanged notifies a changed plan and drops the notification baselines
+// of the account. The quota of the new plan is unrelated to the old one: a
+// fresh 7-day quota on an expired plan is no recovery, and the quota that
+// returns with a renewal is no drop. Like a window seen for the first time,
+// each window then only records its baseline.
+func (e *Engine) planChanged(ctx context.Context, cfg config.Config, cred *Cred, from, to string) {
+	prefix := cred.Provider + ":" + cred.AuthIndex + ":"
+	for key := range e.state.Groups {
+		if strings.HasPrefix(key, prefix) {
+			delete(e.state.Groups, key)
+		}
+	}
+	label := labelFor(providers.Title(cred.Provider), cred)
+	msg := notify.PlanMessage(e.language(), label, from, to)
+	e.addEventDetail("info", "plan_change", "", label, from+" → "+to, msg.Title,
+		map[string]string{"from": from, "to": to})
+	if e.alerts == nil || e.alerts.Sender == nil {
+		return
+	}
+	switch err := e.alerts.Sender.Send(ctx, msg); {
+	case errors.Is(err, notify.ErrNotConfigured):
+		// Notifications are off.
+	case err != nil:
+		e.notifyFailed("", msg, err)
+	default:
+		e.notified("", msg)
+	}
 }
 
 // applyGroups merges new windows into the current view, records history,
