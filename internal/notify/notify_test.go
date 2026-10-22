@@ -151,6 +151,34 @@ func TestResetReminders(t *testing.T) {
 	}
 }
 
+func TestRebaseRecordsANewBaselineAndKeepsSentReminders(t *testing.T) {
+	now := time.Now()
+	window := func(remaining float64) Group {
+		return Group{Key: "g", Label: "Claude", Windows: []quota.Window{
+			{ID: quota.WindowFiveHour, Label: quota.LabelFiveHour, Remaining: remaining, Reset: now.Add(30 * time.Minute)},
+		}}
+	}
+	cfg := config.Default()
+	cfg.ResetReminder.FiveHour = config.ReminderAll
+	sender := &fakeSender{}
+	st := store.NewState()
+	a := alerts(cfg, sender)
+	a.ProcessGroup(context.Background(), st, window(90), now)
+	a.ProcessGroup(context.Background(), st, window(90), now)
+	if len(sender.sent) != 1 {
+		t.Fatalf("want the reminder, got %+v", sender.sent)
+	}
+	// After a plan change, a drop to 5% is the new baseline, and the
+	// reminder for the same reset is not sent again.
+	st.Groups["g"].Windows[quota.WindowFiveHour].Rebase = true
+	a.ProcessGroup(context.Background(), st, window(5), now)
+	a.ProcessGroup(context.Background(), st, window(5), now)
+	ws := st.Groups["g"].Windows[quota.WindowFiveHour]
+	if len(sender.sent) != 1 || ws.Rebase || ws.NotifiedSeverity != SeverityCritical {
+		t.Fatalf("sent %+v, state %+v", sender.sent, ws)
+	}
+}
+
 func TestResetReminderModesPerWindow(t *testing.T) {
 	now := time.Date(2026, 10, 4, 1, 0, 0, 0, time.UTC)
 	window := func(remaining float64, sevenDayIn time.Duration) Group {

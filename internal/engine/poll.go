@@ -145,7 +145,7 @@ func (e *Engine) applyUsage(ctx context.Context, ev usageEvent) {
 	}
 	e.passiveAt[ev.authIndex] = now
 	e.notePassiveFable(cred, groups)
-	e.applyGroups(ctx, cfg, cred, groups, quota.SourcePassive, now)
+	e.applyGroups(ctx, cfg, cred, groups, quota.SourcePassive, now, true)
 }
 
 // notePassiveFable logs the first passive Fable window seen for a credential
@@ -368,14 +368,22 @@ func (e *Engine) refreshCred(ctx context.Context, cfg config.Config, cred *Cred)
 	e.activeAt[cred.AuthIndex] = now
 	// The plan comes first, so that a changed plan resets the notification
 	// baselines before the new windows are compared with them.
-	e.notePlan(ctx, cfg, p, cred, credential, groups, now)
-	e.applyGroups(ctx, cfg, cred, groups, quota.SourceActive, now)
+	confirmed := e.notePlan(ctx, p, cred, credential, groups, now)
+	e.applyGroups(ctx, cfg, cred, groups, quota.SourceActive, now, confirmed)
 	return nil
 }
 
-// planCheckPeriod is how often the plan of an account is requested on its
-// own, for providers whose usage response does not state it.
-const planCheckPeriod = 24 * time.Hour
+const (
+	// planCheckPeriod is how often the plan of an account is requested on
+	// its own, for providers whose usage response does not state it.
+	planCheckPeriod = 24 * time.Hour
+	// planRecheckPeriod is how long the plan is requested with every active
+	// query after the windows of the account changed.
+	planRecheckPeriod = time.Hour
+	// planNoticeAge is how long an undelivered plan change notification is
+	// retried.
+	planNoticeAge = time.Hour
+)
 
 // windowSet lists the quota groups and windows of an active result, sorted,
 // to tell when an account starts or stops reporting a window.
@@ -392,88 +400,127 @@ func windowSet(groups []quota.RawGroup) string {
 
 // notePlan records the plan of cred after a successful quota query: from the
 // usage response when it states one, otherwise from the provider's own
-// request. That request is sent once per planCheckPeriod, and at once when
-// the account reports other windows than in the previous active query: an
-// expired Google AI Pro plan, for one, removes the 5-hour windows of
-// Antigravity. A failed request keeps the plan read before, waits for the
-// next period and does not affect the quota.
-func (e *Engine) notePlan(ctx context.Context, cfg config.Config, p *providers.Provider, cred *Cred, credential providers.Credential, groups []quota.RawGroup, now time.Time) {
-	windows := windowSet(groups)
-	previous, known := e.windowSets[cred.AuthIndex]
-	e.windowSets[cred.AuthIndex] = windows
+// request. That request is sent once per planCheckPeriod, and with every
+// active query for planRecheckPeriod after the account reports other
+// windows than before: an expired Google AI Pro plan, for one, removes the
+// 5-hour windows of Antigravity. Rechecking covers a failed request and a
+// plan that changes a little later than the windows. A failed request keeps
+// the plan read before and does not affect the quota. notePlan reports
+// false when a recheck failed: the quota alerts of the account then wait
+// for the next query, as the windows may belong to a plan not read yet.
+func (e *Engine) notePlan(ctx context.Context, p *providers.Provider, cred *Cred, credential providers.Credential, groups []quota.RawGroup, now time.Time) bool {
 	if p.Plan == nil {
-		return
+		return true
 	}
 	state := e.state.PlanFor(cred.AuthIndex)
+	if windows := windowSet(groups); windows != state.Windows {
+		if state.Windows != "" {
+			state.RecheckUntil = now.Add(planRecheckPeriod).Unix()
+		}
+		state.Windows = windows
+		e.dirty = true
+	}
 	raw := ""
 	for _, g := range groups {
 		if g.Plan != "" {
 			raw = g.Plan
 		}
 	}
-	due := now.Sub(time.Unix(state.Checked, 0)) >= planCheckPeriod || known && windows != previous
-	if raw == "" && p.Profile != nil && due {
+	rechecking := now.Unix() < state.RecheckUntil
+	confirmed := true
+	if raw == "" && p.Profile != nil && (rechecking || now.Sub(time.Unix(state.Checked, 0)) >= planCheckPeriod) {
 		state.Checked = now.Unix()
 		e.dirty = true
 		plan, err := p.Profile(ctx, e.egress, credential, now)
 		if err != nil {
 			e.logf("debug", "读取套餐失败：%s：%v", labelFor(providers.Title(cred.Provider), cred), err)
+			confirmed = !rechecking
 		}
 		raw = plan
 	}
-	if raw == "" || raw == state.Plan {
-		return
+	if raw != "" && raw != state.Plan {
+		old := state.Plan
+		state.Plan = raw
+		e.dirty = true
+		e.mu.Lock()
+		e.plans[cred.AuthIndex] = raw
+		e.mu.Unlock()
+		from, to := providers.PlanOf(cred.Provider, old).Name, providers.PlanOf(cred.Provider, raw).Name
+		if old != "" && from != to {
+			state.RecheckUntil = 0
+			e.planChanged(cred, state, from, to, now)
+		}
 	}
-	old := state.Plan
-	state.Plan = raw
-	e.dirty = true
-	e.mu.Lock()
-	e.plans[cred.AuthIndex] = raw
-	e.mu.Unlock()
-	from, to := providers.PlanOf(cred.Provider, old).Name, providers.PlanOf(cred.Provider, raw).Name
-	if old != "" && from != to {
-		e.planChanged(ctx, cfg, cred, from, to)
-	}
+	e.sendPlanNotice(ctx, cred, state, now)
+	return confirmed
 }
 
-// planChanged notifies a changed plan and drops the notification baselines
-// of the account. The quota of the new plan is unrelated to the old one: a
-// fresh 7-day quota on an expired plan is no recovery, and the quota that
-// returns with a renewal is no drop. Like a window seen for the first time,
-// each window then only records its baseline.
-func (e *Engine) planChanged(ctx context.Context, cfg config.Config, cred *Cred, from, to string) {
+// planChanged records a changed plan for its notification and marks the
+// notification baselines of the account for a new start. The quota of the
+// new plan is unrelated to the old one: a fresh 7-day quota on an expired
+// plan is no recovery, and the quota that returns with a renewal is no drop.
+// Like a window seen for the first time, each window then only records its
+// baseline.
+func (e *Engine) planChanged(cred *Cred, state *store.PlanState, from, to string, now time.Time) {
 	prefix := cred.Provider + ":" + cred.AuthIndex + ":"
-	for key := range e.state.Groups {
-		if strings.HasPrefix(key, prefix) {
-			delete(e.state.Groups, key)
+	for key, group := range e.state.Groups {
+		if !strings.HasPrefix(key, prefix) || group == nil {
+			continue
+		}
+		for _, ws := range group.Windows {
+			if ws != nil {
+				ws.Rebase = true
+			}
 		}
 	}
 	label := labelFor(providers.Title(cred.Provider), cred)
-	msg := notify.PlanMessage(e.language(), label, from, to)
-	e.addEventDetail("info", "plan_change", "", label, from+" → "+to, msg.Title,
+	e.addEventDetail("info", "plan_change", "", label, from+" → "+to, fmt.Sprintf("%s 套餐变化：%s → %s", label, from, to),
 		map[string]string{"from": from, "to": to})
-	if e.alerts == nil || e.alerts.Sender == nil {
+	// A change back before the first one was delivered cancels both.
+	if n := state.Notice; n != nil {
+		from = n.From
+	}
+	state.Notice = &store.PlanNotice{From: from, To: to, At: now.Unix()}
+	if from == to {
+		state.Notice = nil
+	}
+}
+
+// sendPlanNotice sends the pending plan change notification of cred, and
+// retries it with every active query for planNoticeAge after a failure.
+func (e *Engine) sendPlanNotice(ctx context.Context, cred *Cred, state *store.PlanState, now time.Time) {
+	n := state.Notice
+	if n == nil || e.alerts == nil || e.alerts.Sender == nil {
 		return
 	}
+	if now.Sub(time.Unix(n.At, 0)) > planNoticeAge {
+		state.Notice = nil
+		e.dirty = true
+		return
+	}
+	msg := notify.PlanMessage(e.language(), labelFor(providers.Title(cred.Provider), cred), n.From, n.To)
 	switch err := e.alerts.Sender.Send(ctx, msg); {
 	case errors.Is(err, notify.ErrNotConfigured):
 		// Notifications are off.
 	case err != nil:
 		e.notifyFailed("", msg, err)
+		return
 	default:
 		e.notified("", msg)
 	}
+	state.Notice = nil
+	e.dirty = true
 }
 
 // applyGroups merges new windows into the current view, records history,
-// updates the reset observation of ignition targets and runs the alerts. An
-// active result replaces the group; a passive result only updates the
+// updates the reset observation of ignition targets and, when alerts is
+// set, runs the alerts. An active result replaces the group; a passive result only updates the
 // windows it contains. Once an active query has described the group, a
 // passive result does not add windows: response headers can carry a window
 // the usage API does not report, such as a 5-hour window on a ChatGPT Pro
 // account whose usage API reports only the weekly one. A new window then
 // appears with the next active query.
-func (e *Engine) applyGroups(ctx context.Context, cfg config.Config, cred *Cred, raw []quota.RawGroup, source quota.Source, now time.Time) {
+func (e *Engine) applyGroups(ctx context.Context, cfg config.Config, cred *Cred, raw []quota.RawGroup, source quota.Source, now time.Time, alerts bool) {
 	var changed []*GroupView
 	e.mu.Lock()
 	for _, rg := range raw {
@@ -517,7 +564,7 @@ func (e *Engine) applyGroups(ctx context.Context, cfg config.Config, cred *Cred,
 			ignite.Observe(e.state.Target(group.Key), w.Reset, now, source == quota.SourcePassive)
 		}
 		e.recordSamples(group, source, now)
-		if e.alerts != nil {
+		if e.alerts != nil && alerts {
 			e.alerts.ProcessGroup(ctx, e.state, notify.Group{Key: group.Key, Label: group.Label, Windows: group.windows()}, now)
 		}
 	}

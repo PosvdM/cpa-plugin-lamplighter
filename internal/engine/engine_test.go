@@ -89,6 +89,13 @@ func (c *clock) add(d time.Duration) { c.t = c.t.Add(d) }
 
 func newTestEngine(t *testing.T, h *fakeHost, c *clock) (*Engine, *fakeSender) {
 	t.Helper()
+	return newTestEngineIn(t, h, c, t.TempDir())
+}
+
+// newTestEngineIn starts an engine on the data directory dir, to test a
+// restart.
+func newTestEngineIn(t *testing.T, h *fakeHost, c *clock, dir string) (*Engine, *fakeSender) {
+	t.Helper()
 	models := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"data":[{"id":"gpt-6-luna"},{"id":"claude-haiku-4-5-20251001"},{"id":"claude-3-5-haiku-20241022"},{"id":"claude-sonnet-4-6"},{"id":"gemini-3.8-flash-high"}]}`))
 	}))
@@ -96,7 +103,7 @@ func newTestEngine(t *testing.T, h *fakeHost, c *clock) (*Engine, *fakeSender) {
 	cfg := config.Default()
 	cfg.CPABaseURL = models.URL
 	cfg.ModelsAPIKey = "k"
-	cfg.DataDir = t.TempDir()
+	cfg.DataDir = dir
 	cfg.Timezone = "Asia/Shanghai"
 	e := New(Options{Host: h, Version: "test", Now: c.now})
 	e.Configure(cfg, nil)
@@ -1137,7 +1144,7 @@ func TestPlansComeFromTheUsageResponseAndADailyProfile(t *testing.T) {
 		t.Fatalf("claude account after a failed profile %+v", got["3"])
 	}
 	if got["4"].Plan != "" || got["4"].DefaultWeight != 1 || h.requestsTo(providers.ClaudeProfileURL) != 1 {
-		t.Fatalf("antigravity has no plan; one profile request, got %d", h.requestsTo(providers.ClaudeProfileURL))
+		t.Fatalf("the antigravity plan read fails; one Claude profile request, got %d", h.requestsTo(providers.ClaudeProfileURL))
 	}
 
 	profileStatus = 200
@@ -1176,55 +1183,99 @@ func TestPlansComeFromTheUsageResponseAndADailyProfile(t *testing.T) {
 	}
 }
 
-func TestPlanChangeIsNotifiedInsteadOfQuotaAlerts(t *testing.T) {
-	c := &clock{t: time.Date(2026, 10, 22, 15, 0, 0, 0, shanghai)}
+// planWorld is an Antigravity account whose Google AI Pro plan can expire.
+// The expired plan reports a fresh weekly quota and no 5-hour window.
+type planWorld struct {
+	paid          bool
+	profileStatus int
+}
+
+func planHost(c *clock, world *planWorld) *fakeHost {
 	h := standardHost(c)
-	h.auths = h.auths[4:]
-	paid := true
+	h.auths = []pluginapi.HostAuthFileEntry{h.auths[0], h.auths[4]}
 	weeklyReset := c.t.Add(40 * time.Hour)
+	usage := h.http
 	h.http = func(req pluginapi.HTTPRequest) pluginapi.HTTPResponse {
 		switch {
 		case req.URL == providers.AntigravityLoadCodeAssistURL:
-			if paid {
+			if world.profileStatus != 0 {
+				return pluginapi.HTTPResponse{StatusCode: world.profileStatus}
+			}
+			if world.paid {
 				return pluginapi.HTTPResponse{StatusCode: 200, Body: []byte(`{"currentTier":{"id":"free-tier"},"paidTier":{"id":"g1-pro-tier"}}`)}
 			}
 			return pluginapi.HTTPResponse{StatusCode: 200, Body: []byte(`{"currentTier":{"id":"free-tier"}}`)}
 		case strings.Contains(req.URL, "retrieveUserQuotaSummary"):
-			// An expired Google AI Pro plan reports a fresh weekly quota and
-			// no 5-hour window.
-			weekly := `{"bucketId":"gemini-weekly","window":"weekly","remainingFraction":0.4,"resetTime":"` + weeklyReset.UTC().Format(time.RFC3339) + `"}`
-			buckets := `{"bucketId":"gemini-5h","window":"5h","remainingFraction":1,"resetTime":"` + c.t.Add(2*time.Hour).UTC().Format(time.RFC3339) + `"},` + weekly
-			if !paid {
+			buckets := `{"bucketId":"gemini-5h","window":"5h","remainingFraction":1,"resetTime":"` + c.t.Add(2*time.Hour).UTC().Format(time.RFC3339) + `"},` +
+				`{"bucketId":"gemini-weekly","window":"weekly","remainingFraction":0.4,"resetTime":"` + weeklyReset.UTC().Format(time.RFC3339) + `"}`
+			if !world.paid {
 				buckets = `{"bucketId":"gemini-weekly","window":"weekly","remainingFraction":1,"resetTime":"` + c.t.Add(7*24*time.Hour).UTC().Format(time.RFC3339) + `"}`
 			}
 			return pluginapi.HTTPResponse{StatusCode: 200, Body: []byte(`{"groups":[{"displayName":"Gemini Models","buckets":[` + buckets + `]}]}`)}
 		}
-		return pluginapi.HTTPResponse{StatusCode: 404}
+		return usage(req)
 	}
-	e, sender := newTestEngine(t, h, c)
-	plan := func() string { return e.Status().Accounts[0].Plan }
-	titles := func() []string {
-		var out []string
-		for _, msg := range sender.sent {
+	return h
+}
+
+// switchSender records messages and fails while fail is set.
+type switchSender struct {
+	fakeSender
+	fail bool
+}
+
+func (s *switchSender) Send(ctx context.Context, msg notify.Message) error {
+	if s.fail {
+		return errors.New("offline")
+	}
+	return s.fakeSender.Send(ctx, msg)
+}
+
+// titles returns the Antigravity titles sent since the last call.
+func (s *switchSender) titles() []string {
+	var out []string
+	for _, msg := range s.sent {
+		if strings.Contains(msg.Title, "Antigravity") || strings.Contains(msg.Title, "Gemini") {
 			out = append(out, msg.Title)
 		}
-		sender.sent = nil
-		return out
+	}
+	s.sent = nil
+	return out
+}
+
+func agPlan(e *Engine) string {
+	for _, a := range e.Status().Accounts {
+		if a.AuthIndex == "4" {
+			return a.Plan
+		}
+	}
+	return ""
+}
+
+func TestPlanChangeIsNotifiedInsteadOfQuotaAlerts(t *testing.T) {
+	c := &clock{t: time.Date(2026, 10, 22, 15, 0, 0, 0, shanghai)}
+	world := &planWorld{paid: true}
+	h := planHost(c, world)
+	e, _ := newTestEngine(t, h, c)
+	sender := &switchSender{}
+	e.alerts.Sender = sender
+	poll := func() {
+		c.add(5 * time.Minute)
+		e.poll(context.Background(), e.config(), c.t, "", false)
 	}
 
 	// The first plan read only records the plan.
-	e.poll(context.Background(), e.config(), c.t, "", false)
-	if plan() != "Pro" || len(sender.sent) != 0 || h.requestsTo(providers.AntigravityLoadCodeAssistURL) != 1 {
-		t.Fatalf("plan %q, sent %v", plan(), titles())
+	poll()
+	if got := sender.titles(); agPlan(e) != "Pro" || len(got) != 0 || h.requestsTo(providers.AntigravityLoadCodeAssistURL) != 1 {
+		t.Fatalf("plan %q, sent %v", agPlan(e), got)
 	}
 
 	// The 5-hour window disappears: the plan is read again at once, and the
 	// fresh weekly quota of the new plan is no recovery.
-	paid = false
-	c.add(5 * time.Minute)
-	e.poll(context.Background(), e.config(), c.t, "", false)
-	if got := titles(); plan() != "Free" || len(got) != 1 || got[0] != "🎫 Antigravity · 套餐 Pro → Free" {
-		t.Fatalf("after the expiry: plan %q, sent %v", plan(), got)
+	world.paid = false
+	poll()
+	if got := sender.titles(); agPlan(e) != "Free" || len(got) != 1 || got[0] != "🎫 Antigravity · 套餐 Pro → Free" {
+		t.Fatalf("after the expiry: plan %q, sent %v", agPlan(e), got)
 	}
 	var found bool
 	for _, ev := range e.Status().Events {
@@ -1235,27 +1286,75 @@ func TestPlanChangeIsNotifiedInsteadOfQuotaAlerts(t *testing.T) {
 	if !found {
 		t.Fatalf("no plan_change event in %+v", e.Status().Events)
 	}
+	// The baselines of other accounts stay.
+	for key, group := range e.state.Groups {
+		for id, ws := range group.Windows {
+			if strings.HasPrefix(key, "codex:") && ws.Rebase {
+				t.Fatalf("%s %s marked for a new baseline", key, id)
+			}
+		}
+	}
 
 	// Unchanged windows wait a day for the next read.
-	c.add(5 * time.Minute)
-	e.poll(context.Background(), e.config(), c.t, "", false)
-	if n := h.requestsTo(providers.AntigravityLoadCodeAssistURL); n != 2 || len(sender.sent) != 0 {
-		t.Fatalf("%d plan reads, sent %v", n, titles())
+	poll()
+	if got := sender.titles(); h.requestsTo(providers.AntigravityLoadCodeAssistURL) != 2 || len(got) != 0 {
+		t.Fatalf("%d plan reads, sent %v", h.requestsTo(providers.AntigravityLoadCodeAssistURL), got)
 	}
 
 	// The renewal brings back the old weekly quota, below the notice
-	// threshold, without a drop alert.
-	paid = true
-	c.add(5 * time.Minute)
-	e.poll(context.Background(), e.config(), c.t, "", false)
-	if got := titles(); plan() != "Pro" || len(got) != 1 || got[0] != "🎫 Antigravity · 套餐 Free → Pro" {
-		t.Fatalf("after the renewal: plan %q, sent %v", plan(), got)
+	// threshold, without a drop alert. The first delivery fails and is
+	// retried with the next query.
+	world.paid = true
+	sender.fail = true
+	poll()
+	sender.fail = false
+	if got := sender.titles(); agPlan(e) != "Pro" || len(got) != 0 {
+		t.Fatalf("after the renewal: plan %q, sent %v", agPlan(e), got)
+	}
+	poll()
+	if got := sender.titles(); len(got) != 1 || got[0] != "🎫 Antigravity · 套餐 Free → Pro" {
+		t.Fatalf("retry: sent %v", got)
 	}
 
 	// Later alerts compare with the baseline of the new plan.
+	poll()
+	if got := sender.titles(); len(got) != 0 {
+		t.Fatalf("sent %v", got)
+	}
+}
+
+func TestPlanIsRecheckedAfterARestartAndAFailedRead(t *testing.T) {
+	c := &clock{t: time.Date(2026, 10, 22, 15, 0, 0, 0, shanghai)}
+	world := &planWorld{paid: true}
+	h := planHost(c, world)
+	e, _ := newTestEngine(t, h, c)
+	e.poll(context.Background(), e.config(), c.t, "", false)
+	e.dirty = true
+	e.saveState()
+
+	// The plan expires while the plugin is stopped, and the first plan read
+	// after the restart fails. The quota alerts wait for the plan.
+	world.paid = false
+	world.profileStatus = 503
+	c.add(time.Hour)
+	e, _ = newTestEngineIn(t, h, c, e.config().DataDir)
+	sender := &switchSender{}
+	e.alerts.Sender = sender
+	e.poll(context.Background(), e.config(), c.t, "", false)
+	if got := sender.titles(); agPlan(e) != "Pro" || len(got) != 0 || h.requestsTo(providers.AntigravityLoadCodeAssistURL) != 2 {
+		t.Fatalf("after the restart: plan %q, sent %v", agPlan(e), got)
+	}
+
+	// The plan is read with every query until it changes.
+	world.profileStatus = 0
 	c.add(5 * time.Minute)
 	e.poll(context.Background(), e.config(), c.t, "", false)
-	if got := titles(); len(got) != 0 {
-		t.Fatalf("sent %v", got)
+	if got := sender.titles(); agPlan(e) != "Free" || len(got) != 1 || got[0] != "🎫 Antigravity · 套餐 Pro → Free" {
+		t.Fatalf("plan %q, sent %v", agPlan(e), got)
+	}
+	c.add(5 * time.Minute)
+	e.poll(context.Background(), e.config(), c.t, "", false)
+	if n := h.requestsTo(providers.AntigravityLoadCodeAssistURL); n != 3 {
+		t.Fatalf("%d plan reads after the change was seen", n)
 	}
 }

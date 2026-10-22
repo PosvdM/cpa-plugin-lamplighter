@@ -363,7 +363,8 @@ func (a *Alerts) send(ctx context.Context, msg Message) bool {
 
 // ProcessGroup compares g with the stored baseline, sends threshold,
 // recovery and reset-reminder notifications, and updates the baseline. A
-// window seen for the first time only records its baseline.
+// window seen for the first time, or marked Rebase, only records its
+// baseline.
 func (a *Alerts) ProcessGroup(ctx context.Context, st *store.State, g Group, now time.Time) {
 	groupState := st.Group(g.Key)
 	var changes []change
@@ -375,8 +376,8 @@ func (a *Alerts) ProcessGroup(ctx context.Context, st *store.State, g Group, now
 		exhausted := w.Remaining <= ExhaustedRemaining
 		long := !w.Reset.IsZero() && w.Reset.Sub(now) > 24*time.Hour
 		old, seen := groupState.Windows[w.ID]
-		if !seen || old == nil {
-			groupState.Windows[w.ID] = &store.WindowState{
+		if !seen || old == nil || old.Rebase {
+			ws := &store.WindowState{
 				Severity:         current,
 				NotifiedSeverity: current,
 				Remaining:        w.Remaining,
@@ -385,8 +386,14 @@ func (a *Alerts) ProcessGroup(ctx context.Context, st *store.State, g Group, now
 				Exhausted:        exhausted,
 				Long:             long,
 			}
+			if old != nil {
+				// A new baseline after a plan change keeps the reminders
+				// already sent for a reset and the cycle that already ended.
+				ws.ResetNotice1hFor, ws.ResetNotice1dFor = old.ResetNotice1hFor, old.ResetNotice1dFor
+				ws.EndedReset, ws.Long = old.EndedReset, old.Long || long
+			}
+			groupState.Windows[w.ID] = ws
 			if !w.Reset.IsZero() && now.Before(w.Reset) {
-				ws := groupState.Windows[w.ID]
 				ws.CycleReset, ws.CycleRemaining, ws.CycleSeen = ws.Reset, w.Remaining, now.Unix()
 			}
 			continue
