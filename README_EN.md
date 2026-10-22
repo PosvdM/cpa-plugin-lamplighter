@@ -15,7 +15,7 @@ Lamplighter is a native plugin for [CLIProxyAPI](https://github.com/router-for-m
 ## Features
 
 - **Quota monitoring**: queries quota on a schedule and also reads the quota that upstream providers return while CPA serves real requests.
-- **Notifications** through Bark or a webhook (Feishu, ntfy, DingTalk, Telegram and others): alerts when remaining quota drops to 50%, 20%, 10% and zero; optional recovery and pre-reset reminders; optional forwarding of [Did Codex Reset](https://didcodexreset.com/) signals.
+- **Notifications** through Bark or a webhook (Feishu, ntfy, DingTalk, Telegram and others): alerts when remaining quota drops to 50%, 20%, 10% and zero, and when the plan of an account changes, for example when a subscription expires; optional recovery and pre-reset reminders; optional forwarding of [Did Codex Reset](https://didcodexreset.com/) signals.
 - **Window ignition**: from 07:00 every day, sends a minimal request 3 seconds after each 5-hour reset, until 22:30. The request goes through CPA's own model executor and is pinned to one account.
 - **Management page**: shows quota, ignition plans, events and a quota chart in the CPA Management Center, and edits the settings.
 
@@ -31,7 +31,7 @@ Kimi quota queries follow the CPA Management Center; parsing is tested with a re
 
 When a service has several accounts, notifications and the page tell them apart by the last two characters of the email user name, for example `ChatGPT#rk`. A named account shows its name instead, for example `ChatGPT#main`. To name an account, click "Name" on its card in the Lamplighter page, or edit the credential's "Note" in the CPA Management Center. The name is the first line of the note, cut at 20 characters. A service with one account also shows its name. When a name equals the name or email suffix of another account of the service, the email suffix follows the name. For a note with more lines, clearing the name in the Lamplighter page deletes the whole note. A note changed in the CPA Management Center takes effect after the next poll or a manual refresh. Recorded events keep their original label.
 
-When a service has several accounts, the total in the chart averages their remaining quota by weight; the weight says how many times the quota of the service's cheapest paid plan the account has. The default weight follows the detected plan, whose name shows at the bottom of the account card. The ChatGPT plan comes with the quota query; the Claude plan is read from the account profile once a day per account; a failed read keeps the plan read before, and the weight is 1 until a plan has been read. "Weight" on an account card sets a weight by hand, decimals allowed; leave it empty to restore the default. Weights set by hand are saved in `account_weights` and take precedence over the defaults. A weight other than 1 shows after the account title, for example `×5`.
+When a service has several accounts, the total in the chart averages their remaining quota by weight; the weight says how many times the quota of the service's cheapest paid plan the account has. The default weight follows the detected plan, whose name shows at the bottom of the account card. The ChatGPT plan comes with the quota query. The Claude and Antigravity plans are read from the account profile once a day per account, and again at once when the account starts or stops reporting a quota window, for example when the 5-hour Gemini window disappears after Google AI Pro expires. A failed read keeps the plan read before, and the weight is 1 until a plan has been read. "Weight" on an account card sets a weight by hand, decimals allowed; leave it empty to restore the default. Weights set by hand are saved in `account_weights` and take precedence over the defaults. A weight other than 1 shows after the account title, for example `×5`.
 
 | Service | Plan | Default weight |
 | --- | --- | --- |
@@ -43,8 +43,11 @@ When a service has several accounts, the total in the chart averages their remai
 | Claude | Pro, Team, Enterprise | 1 |
 | Claude | Max 5x | 5 |
 | Claude | Max 20x | 20 |
+| Antigravity | Free, Pro, Ultra | 1 |
 
 Other services and unknown plans default to 1.
+
+When the plan of an account changes, for example when Google AI Pro expires or is renewed, the plugin sends a 🎫 notification such as `🎫 Antigravity · plan Pro → Free`. Quota alerts of the account then start over with the quota of the new plan: it is only recorded, not reported as a recovery or a drop. The first plan read for an account is only recorded.
 
 ## Requirements
 
@@ -120,7 +123,7 @@ Notifications use the Management Center language from the last time the manageme
 7d: 48% | 03d | 10/07 14:00
 ```
 
-Title icons: 🟡 remaining fell to the first threshold (50% by default), 🔴 to the second threshold (20% by default) or below, ✅ recovered, ⏰ reset reminder, ⚠️ a problem that needs action, such as ignition paused or a CPA cooldown that outlasts the quota. Each body line shows the window, the remaining quota, the time until reset, and the reset time. The first time the plugin sees a quota window it only records the current level and sends nothing.
+Title icons: 🟡 remaining fell to the first threshold (50% by default), 🔴 to the second threshold (20% by default) or below, ✅ recovered, ⏰ reset reminder, 🎫 plan changed, ⚠️ a problem that needs action, such as ignition paused or a CPA cooldown that outlasts the quota. Each body line shows the window, the remaining quota, the time until reset, and the reset time. The first time the plugin sees a quota window it only records the current level and sends nothing.
 
 ## Configuration
 
@@ -234,8 +237,8 @@ The URL, headers and body can use placeholders:
 | `{{body}}` | Notification body |
 | `{{text}}` | Title and body, separated by a line break |
 | `{{url}}` | Link; only Did Codex Reset notifications have one, empty otherwise |
-| `{{priority}}` | `high` when quota drops to the third threshold or runs out, ignition pauses or a CPA cooldown is not cleared; `normal` otherwise |
-| `{{kind}}` | Notification type: `quota` quota drop, `recovery` quota recovered, `reminder` reset reminder, `cooldown` CPA cooldown not cleared, `circuit` ignition paused, `codex_reset` Did Codex Reset, `test` test notification |
+| `{{priority}}` | `high` when quota drops to the third threshold or runs out, the plan changes, ignition pauses or a CPA cooldown is not cleared; `normal` otherwise |
+| `{{kind}}` | Notification type: `quota` quota drop, `recovery` quota recovered, `reminder` reset reminder, `plan` plan changed, `cooldown` CPA cooldown not cleared, `circuit` ignition paused, `codex_reset` Did Codex Reset, `test` test notification |
 | `{{label}}` | Quota group, such as `ChatGPT#rk` or `ChatGPT#main`; empty for notifications not about a quota group |
 | `{{time}}` | Time sent, in RFC 3339 format and the plugin time zone |
 

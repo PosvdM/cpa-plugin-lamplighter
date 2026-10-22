@@ -111,6 +111,9 @@ type Engine struct {
 	// fableSeen marks credentials whose passive Fable window was logged.
 	fableSeen map[string]bool
 	activeAt  map[string]time.Time
+	// windowSets is the set of quota windows the last active query of each
+	// credential returned, see windowSet.
+	windowSets map[string]string
 	// probed holds the times around resets each credential was queried
 	// for, until probeLate after them.
 	probed      map[string][]time.Time
@@ -157,6 +160,7 @@ func New(opts Options) *Engine {
 		pollErrs:       map[string]string{},
 		passiveAt:      map[string]time.Time{},
 		activeAt:       map[string]time.Time{},
+		windowSets:     map[string]string{},
 		probed:         map[string][]time.Time{},
 		lastSample:     map[string]sampleMark{},
 		pendingSamp:    map[string]store.Record{},

@@ -166,8 +166,13 @@ CPA 的 `/api-call`（管理中心额度页使用）会忽略环境变量代理�
 状态接口的账号带 `plan`（套餐名，未识别时为空）和 `default_weight`（多账号合计中的默认权重），由 `providers.PlanOf` 按保存的原始套餐值得出。原始值按 `auth_index` 存在 `state.json` 的 `plans` 中，插件重启后不必等到下一次查询。默认权重是账号额度相对于该服务最便宜付费套餐的倍数。
 
 - Codex：取 `wham/usage` 返回的 `plan_type`，每次主动查询都更新，不另发请求。套餐名与 Codex CLI 的状态页一致（`codex-rs/tui/src/subscription.rs`），默认权重为价格除以 Plus 的 20 美元：`prolite`（Pro $100）和 `self_serve_business_prolite`（Business Premium）为 5，`pro`（Pro $200）为 10，`promax`（Pro $500）为 25，`free` 和 `go` 为 0.1，其余为 1；Business（`team`）、Enterprise 和 Edu 席位的额度与 Plus 相同。未知的 `plan_type` 以原值作为套餐名，权重为 1。
-- Claude：额度响应里没有套餐。主动查询成功后请求 `GET https://api.anthropic.com/api/oauth/profile`，请求头与额度查询相同，每个账号每 24 小时最多一次（`plans` 中的 `checked`）。请求失败时保留上次的结果，只记 debug 日志，不影响额度查询。原始值是 `organization.organization_type` 和 `organization.rate_limit_tier` 以空格连接：`claude_pro` 为 Pro（1）；`claude_max` 的 tier 含 `20x` 为 Max 20x（20），含 `5x` 为 Max 5x（5），都不含时为 Max（5）；`claude_team`、`claude_enterprise` 为 Team、Enterprise（1）。没有 `organization_type` 时按 `account.has_claude_max`、`has_claude_pro` 判断。2026-10-20 在 Pro 账号上实测为 `claude_pro` 和 `default_claude_ai`；Max 和 Team 的取值来自 Claude Code 的已知用法，未经实测。
+- Claude：额度响应里没有套餐。主动查询成功后请求 `GET https://api.anthropic.com/api/oauth/profile`，请求头与额度查询相同。请求失败时保留上次的结果，只记 debug 日志，不影响额度查询。原始值是 `organization.organization_type` 和 `organization.rate_limit_tier` 以空格连接：`claude_pro` 为 Pro（1）；`claude_max` 的 tier 含 `20x` 为 Max 20x（20），含 `5x` 为 Max 5x（5），都不含时为 Max（5）；`claude_team`、`claude_enterprise` 为 Team、Enterprise（1）。没有 `organization_type` 时按 `account.has_claude_max`、`has_claude_pro` 判断。2026-10-20 在 Pro 账号上实测为 `claude_pro` 和 `default_claude_ai`；Max 和 Team 的取值来自 Claude Code 的已知用法，未经实测。
+- Antigravity：额度响应里没有套餐。主动查询成功后请求 `POST https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist`，请求体 `{"metadata":{"ideType":"ANTIGRAVITY"}}` 和 User-Agent 与 CPA 读取 Antigravity 额度点数时相同。原始值是 `paidTier.id`，没有 `paidTier` 时为 `currentTier.id`。Google AI Pro 账号的 `currentTier.id` 也是 `free-tier`，所以以 `paidTier` 为准。`free-tier` 为 Free，`g1-<名称>-tier` 取中间的名称并大写首字母，例如 `g1-pro-tier` 为 Pro；其余以原值作为套餐名。Google 没有公布各套餐额度的倍数，权重都是 1。2026-10-23 在 Google AI Pro 账号上实测 `paidTier.id` 为 `g1-pro-tier`；没有付费套餐时不带 `paidTier` 是推测，未经实测。
 - 其他服务没有套餐，默认权重为 1。
+
+Claude 和 Antigravity 的单独请求（`Provider.Profile`）每个账号每 24 小时发一次（`plans` 中的 `checked`）。账号的主动查询结果与上一次相比有额度窗口增减时（`engine.windowSets`，只在内存中），立即再读一次：Google AI Pro 到期后，Antigravity 的接口不再返回 5 小时窗口，7 天窗口换成免费账号的新额度。
+
+**套餐变化**：`engine.notePlan` 在处理额度提醒之前读取套餐。保存的原始值变了，并且新旧套餐名不同时，`engine.planChanged` 推送 `plan` 类通知（`timeSensitive`），记录 `plan_change` 事件，并删除这个账号所有额度组在 `state.json` 中的通知基线。新套餐的额度与旧套餐无关，删除基线后它们按第一次看到的窗口处理，只记录不推送；否则到期后免费账号的新 7 天额度会被当成恢复，续订后回到原来的额度会被当成下降。第一次读到套餐（原来没有保存的值）时只保存，不推送。
 
 ### 被动数据
 
@@ -303,7 +308,7 @@ Did Codex Reset 每 `poll_seconds` 秒（最少 300 秒，对齐时间边界）�
 | `history/YYYY-MM-DD.jsonl` | 按 UTC 日期分文件的额度样本和事件 |
 | `instance.lock` | 实例锁 |
 
-历史记录每行一个 JSON：样本为 `{"k":"s","t":秒,"g":额度组,"w":窗口,"r":剩余,"x":重置,"s":"active|passive"}`，事件为 `{"k":"e","t":秒,"g":额度组,"e":类型,"v":级别,"m":文本,"l":标签,"d":详情,"p":参数}`。`m` 和 `d` 是写给 CPA 日志的中文；`p` 是页面拼出事件文字所需的值：`ignite` 和 `ignite_manual` 为 `model`、`reset`，`ignite_failed` 为 `retry_seconds`、`error` 和可选的 `cooldown`，`ignite_paused` 为 `until`、`error`，`model_refused` 为 `model`、`fallback`、`hours`，`notify` 为 `title`，`notify_failed` 为 `title`、`error`，`cooldown_stale` 为 `until`，`codex_reset` 为 `count`；时间为 RFC 3339 UTC。主动样本每次都写；被动样本只在数值或重置时间变化时写，同一窗口每分钟最多一次，期间的新值暂存在 `pendingSamp`，满一分钟后写入。历史接口对超过 2 天的范围分段，每段取最后一个样本：超过 2 天按 10 分钟，超过 4 天按 15 分钟，超过 8 天按 30 分钟，超过 15 天按 1 小时，使这些范围的每个系列不超过约 800 个点（图表约 1000 像素宽）。2 天及以内不分段。分段长度在响应的 `bucket_seconds` 中。每个系列带有 `label`（含账号后缀，例如 `ChatGPT#rk`）和 `source_label`（不含后缀），页面按服务和 `source_label` 合并同一额度的多个账号。
+历史记录每行一个 JSON：样本为 `{"k":"s","t":秒,"g":额度组,"w":窗口,"r":剩余,"x":重置,"s":"active|passive"}`，事件为 `{"k":"e","t":秒,"g":额度组,"e":类型,"v":级别,"m":文本,"l":标签,"d":详情,"p":参数}`。`m` 和 `d` 是写给 CPA 日志的中文；`p` 是页面拼出事件文字所需的值：`ignite` 和 `ignite_manual` 为 `model`、`reset`，`ignite_failed` 为 `retry_seconds`、`error` 和可选的 `cooldown`，`ignite_paused` 为 `until`、`error`，`model_refused` 为 `model`、`fallback`、`hours`，`notify` 为 `title`，`notify_failed` 为 `title`、`error`，`cooldown_stale` 为 `until`，`plan_change` 为 `from`、`to`（套餐名），`codex_reset` 为 `count`；时间为 RFC 3339 UTC。主动样本每次都写；被动样本只在数值或重置时间变化时写，同一窗口每分钟最多一次，期间的新值暂存在 `pendingSamp`，满一分钟后写入。历史接口对超过 2 天的范围分段，每段取最后一个样本：超过 2 天按 10 分钟，超过 4 天按 15 分钟，超过 8 天按 30 分钟，超过 15 天按 1 小时，使这些范围的每个系列不超过约 800 个点（图表约 1000 像素宽）。2 天及以内不分段。分段长度在响应的 `bucket_seconds` 中。每个系列带有 `label`（含账号后缀，例如 `ChatGPT#rk`）和 `source_label`（不含后缀），页面按服务和 `source_label` 合并同一额度的多个账号。
 
 额度组 key 为 `<服务>:<auth_index>:<分组>`，例如 `codex:3:codex:main`、`claude:3:claude:seven-day-fable`、`antigravity:4:antigravity:gemini-models`。它同时是点火目标 ID。
 
