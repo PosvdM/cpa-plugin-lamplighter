@@ -47,7 +47,7 @@ When a service has several accounts, the total in the chart averages their remai
 
 Other services and unknown plans default to 1.
 
-When the plan of an account changes, for example when Google AI Pro expires or is renewed, the plugin sends a 🎫 notification such as `🎫 Antigravity · plan Pro → Free`. Quota alerts of the account then start over with the quota of the new plan: it is only recorded, not reported as a recovery or a drop. The first plan read for an account is only recorded.
+When the plan of an account changes, for example when Google AI Pro expires or is renewed, the plugin sends a 🎫 notification such as `🎫 Antigravity · plan Pro → Free`. Quota alerts of the account then start over with the quota of the new plan: it is only recorded, not reported as a recovery or a drop. The first plan read for an account is only recorded. The Claude plan is read once a day; after a Claude plan changes and before the new plan is read, quota alerts still compare with the quota of the old plan.
 
 ## Requirements
 

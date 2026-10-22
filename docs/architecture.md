@@ -170,9 +170,9 @@ CPA 的 `/api-call`（管理中心额度页使用）会忽略环境变量代理�
 - Antigravity：额度响应里没有套餐。主动查询成功后请求 `POST https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist`，请求体 `{"metadata":{"ideType":"ANTIGRAVITY"}}` 和 User-Agent 与 CPA 读取 Antigravity 额度点数时相同。原始值是 `paidTier.id`，没有 `paidTier` 时为 `currentTier.id`。Google AI Pro 账号的 `currentTier.id` 也是 `free-tier`，所以以 `paidTier` 为准。`free-tier` 为 Free，`g1-<名称>-tier` 取中间的名称并大写首字母，例如 `g1-pro-tier` 为 Pro；其余以原值作为套餐名。Google 没有公布各套餐额度的倍数，权重都是 1。2026-10-23 在 Google AI Pro 账号上实测 `paidTier.id` 为 `g1-pro-tier`；没有付费套餐时不带 `paidTier` 是推测，未经实测。
 - 其他服务没有套餐，默认权重为 1。
 
-Claude 和 Antigravity 的单独请求（`Provider.Profile`）每个账号每 24 小时发一次（`plans` 中的 `checked`）。账号的主动查询结果与上一次相比有额度窗口增减时（`engine.windowSets`，只在内存中），立即再读一次：Google AI Pro 到期后，Antigravity 的接口不再返回 5 小时窗口，7 天窗口换成免费账号的新额度。
+Claude 和 Antigravity 的单独请求（`Provider.Profile`）每个账号每 24 小时发一次（`plans` 中的 `checked`）。账号的主动查询结果与上一次相比有额度窗口增减时（比较 `plans` 中的 `windows`），之后 1 小时（`planRecheckPeriod`，记在 `recheck_until`）内每次主动查询都读一次套餐，直到读到套餐变化：Google AI Pro 到期后，Antigravity 的接口不再返回 5 小时窗口，7 天窗口换成免费账号的新额度。读取可能失败，套餐也可能比窗口晚一步变化，所以不只读一次。`windows` 保存在 `state.json` 中，插件停止期间发生的变化在重启后的第一次查询就能发现。重读期间读取失败时，这一轮不处理这个账号的额度提醒（只记录样本），等下一轮读到套餐再比较，因为这时的窗口可能属于一个还没读到的新套餐。
 
-**套餐变化**：`engine.notePlan` 在处理额度提醒之前读取套餐。保存的原始值变了，并且新旧套餐名不同时，`engine.planChanged` 推送 `plan` 类通知（`timeSensitive`），记录 `plan_change` 事件，并删除这个账号所有额度组在 `state.json` 中的通知基线。新套餐的额度与旧套餐无关，删除基线后它们按第一次看到的窗口处理，只记录不推送；否则到期后免费账号的新 7 天额度会被当成恢复，续订后回到原来的额度会被当成下降。第一次读到套餐（原来没有保存的值）时只保存，不推送。
+**套餐变化**：`engine.notePlan` 在处理额度提醒之前读取套餐。保存的原始值变了，并且新旧套餐名不同时，`engine.planChanged` 记录 `plan_change` 事件，把待发送的通知记在 `plans` 的 `notice` 中，并把这个账号所有窗口的通知基线标为 `rebase`。`notify.Alerts.ProcessGroup` 遇到 `rebase` 的窗口时与第一次看到的窗口一样只记录基线，不推送，但保留已发送的重置提醒（`reset_notice_1h_for`、`reset_notice_1d_for`）和 `ended_reset`，所以同一次重置不会再提醒一次。新套餐的额度与旧套餐无关：不重新记录基线的话，到期后免费账号的新 7 天额度会被当成恢复，续订后恢复的原有额度会被当成下降。`plan` 类通知（`timeSensitive`）随每次主动查询发送，失败时重试 1 小时（`planNoticeAge`）；通知送达前套餐又变回原来的，两次变化都不推送。第一次读到套餐（原来没有保存的值）时只保存，不推送。Claude 的被动数据不经过 `notePlan`：每天读取套餐之前，套餐变化后的被动数据仍按旧基线比较。
 
 ### 被动数据
 
@@ -304,7 +304,7 @@ Did Codex Reset 每 `poll_seconds` 秒（最少 300 秒，对齐时间边界）�
 
 | 文件 | 内容 |
 | --- | --- |
-| `state.json` | `groups`：每个窗口的通知基线；`scheduler`：每个额度组的点火状态；`codex_reset_updates`：已见记录和已推送的排期；`cooldown_notices`：已提醒的过期冷却；`language`：通知语言；`plans`：各账号的原始套餐值和上次单独读取套餐的时间。写入临时文件后替换 |
+| `state.json` | `groups`：每个窗口的通知基线；`scheduler`：每个额度组的点火状态；`codex_reset_updates`：已见记录和已推送的排期；`cooldown_notices`：已提醒的过期冷却；`language`：通知语言；`plans`：各账号的原始套餐值、上次单独读取套餐的时间、上次主动查询的窗口、重读截止时间和待发送的套餐变化通知。写入临时文件后替换 |
 | `history/YYYY-MM-DD.jsonl` | 按 UTC 日期分文件的额度样本和事件 |
 | `instance.lock` | 实例锁 |
 
