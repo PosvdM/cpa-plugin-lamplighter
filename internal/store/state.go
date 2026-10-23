@@ -123,7 +123,9 @@ type State struct {
 type PlanState struct {
 	Plan string `json:"plan,omitempty"`
 	// Checked is when the plan was last requested on its own, in Unix
-	// seconds, for providers whose usage response does not state it.
+	// seconds, for providers whose usage response does not state it. A
+	// failed recheck is kept earlier than it was sent, so that the next
+	// request follows sooner than a day later.
 	Checked int64 `json:"checked,omitempty"`
 	// Windows lists the quota windows of the last active query.
 	Windows string `json:"windows,omitempty"`
