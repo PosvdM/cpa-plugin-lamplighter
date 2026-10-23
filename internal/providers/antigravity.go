@@ -123,11 +123,17 @@ var AntigravityQuotaURLs = []string{
 	"https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary",
 }
 
+// AntigravityLoadCodeAssistURL states the subscription of an account, the
+// endpoint CPA reads Antigravity credits from.
+const AntigravityLoadCodeAssistURL = "https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist"
+
 var antigravity = &Provider{
 	ID:      "antigravity",
 	Title:   "Antigravity",
 	Monitor: true,
 	Fetch:   fetchAntigravity,
+	Plan:    antigravityPlan,
+	Profile: fetchAntigravityProfile,
 	Ignition: &Ignition{
 		Protocol: "openai",
 		Body: func(model string) map[string]any {
@@ -210,6 +216,33 @@ func fetchAntigravity(ctx context.Context, doer quota.Doer, cred Credential, now
 		lastErr = errors.New("Antigravity 未返回额度组")
 	}
 	return nil, lastErr
+}
+
+// fetchAntigravityProfile reads the plan of an Antigravity account with the
+// request body and User-Agent CPA uses for loadCodeAssist.
+func fetchAntigravityProfile(ctx context.Context, doer quota.Doer, cred Credential, now time.Time) (string, error) {
+	body, _ := json.Marshal(map[string]any{"metadata": map[string]string{"ideType": "ANTIGRAVITY"}})
+	header := bearer(cred)
+	header.Set("User-Agent", antigravityUserAgent(ctx, doer, cred, now))
+	payload, err := send(ctx, doer, cred, quota.Request{Method: http.MethodPost, URL: AntigravityLoadCodeAssistURL, Header: header, Body: body})
+	if err != nil {
+		return "", err
+	}
+	return ParseAntigravityProfile(payload)
+}
+
+// ParseAntigravityProfile returns the raw plan of a loadCodeAssist response:
+// the id of paidTier, such as "g1-pro-tier", or, without a paid plan, the id
+// of currentTier, such as "free-tier". currentTier stays "free-tier" on a
+// Google AI Pro account, so paidTier decides.
+func ParseAntigravityProfile(payload map[string]any) (string, error) {
+	for _, name := range []string{"paidTier", "currentTier"} {
+		tier, _ := payload[name].(map[string]any)
+		if id := strings.TrimSpace(scalarString(tier["id"])); id != "" {
+			return id, nil
+		}
+	}
+	return "", errors.New("Antigravity 账号资料中没有套餐")
 }
 
 var nonAlnum = regexp.MustCompile(`[^a-z0-9]+`)

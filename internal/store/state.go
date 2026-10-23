@@ -37,6 +37,9 @@ type WindowState struct {
 	EndedReset string `json:"ended_reset,omitempty"`
 	// PendingRecovery is a recovery notification not delivered yet.
 	PendingRecovery *PendingRecovery `json:"pending_recovery,omitempty"`
+	// Rebase is set when the plan of the account changed: the next reading
+	// only records a new baseline, as for a window seen for the first time.
+	Rebase bool `json:"rebase,omitempty"`
 }
 
 // PendingRecovery is a detected reset of one window, kept until its
@@ -120,8 +123,25 @@ type State struct {
 type PlanState struct {
 	Plan string `json:"plan,omitempty"`
 	// Checked is when the plan was last requested on its own, in Unix
-	// seconds, for providers whose usage response does not state it.
+	// seconds, for providers whose usage response does not state it. A
+	// failed recheck is kept earlier than it was sent, so that the next
+	// request follows sooner than a day later.
 	Checked int64 `json:"checked,omitempty"`
+	// Windows lists the quota windows of the last active query.
+	Windows string `json:"windows,omitempty"`
+	// RecheckUntil is when the plan stops being requested with every active
+	// query after the windows changed, in Unix seconds.
+	RecheckUntil int64 `json:"recheck_until,omitempty"`
+	// Notice is a plan change notification not delivered yet.
+	Notice *PlanNotice `json:"notice,omitempty"`
+}
+
+// PlanNotice is a plan change, kept until its notification is delivered.
+type PlanNotice struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+	// At is when the change was seen, in Unix seconds.
+	At int64 `json:"at"`
 }
 
 // PlanFor returns the plan state of authIndex, creating it when missing.

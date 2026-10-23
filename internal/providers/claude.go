@@ -86,7 +86,7 @@ func fetchClaude(ctx context.Context, doer quota.Doer, cred Credential, _ time.T
 // fetchClaudeProfile reads the plan of a Claude account from the OAuth
 // profile, which the usage response does not state. The request carries the
 // headers of the usage query.
-func fetchClaudeProfile(ctx context.Context, doer quota.Doer, cred Credential) (string, error) {
+func fetchClaudeProfile(ctx context.Context, doer quota.Doer, cred Credential, _ time.Time) (string, error) {
 	header := bearer(cred)
 	header.Set("User-Agent", ClaudeUserAgent)
 	header.Set("anthropic-beta", "oauth-2025-04-20")
