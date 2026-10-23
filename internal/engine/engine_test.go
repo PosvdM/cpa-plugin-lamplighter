@@ -1358,3 +1358,101 @@ func TestPlanIsRecheckedAfterARestartAndAFailedRead(t *testing.T) {
 		t.Fatalf("%d plan reads after the change was seen", n)
 	}
 }
+
+func TestPlanNoticeIsCancelledByAChangeBackAndDroppedAfterAnHour(t *testing.T) {
+	c := &clock{t: time.Date(2026, 10, 22, 15, 0, 0, 0, shanghai)}
+	world := &planWorld{paid: true}
+	h := planHost(c, world)
+	e, _ := newTestEngine(t, h, c)
+	sender := &switchSender{}
+	e.alerts.Sender = sender
+	poll := func(d time.Duration) {
+		c.add(d)
+		e.poll(context.Background(), e.config(), c.t, "", false)
+	}
+	poll(5 * time.Minute)
+
+	// The plan expires and is renewed before the notification is delivered.
+	sender.fail = true
+	world.paid = false
+	poll(5 * time.Minute)
+	world.paid = true
+	poll(5 * time.Minute)
+	sender.fail = false
+	poll(5 * time.Minute)
+	if got := sender.titles(); agPlan(e) != "Pro" || len(got) != 0 || e.state.Plans["4"].Notice != nil {
+		t.Fatalf("after a change back: plan %q, sent %v, notice %+v", agPlan(e), got, e.state.Plans["4"].Notice)
+	}
+
+	// An undelivered notification is dropped after planNoticeAge.
+	sender.fail = true
+	world.paid = false
+	poll(5 * time.Minute)
+	sender.fail = false
+	poll(planNoticeAge + time.Minute)
+	if got := sender.titles(); agPlan(e) != "Free" || len(got) != 0 || e.state.Plans["4"].Notice != nil {
+		t.Fatalf("after an hour: plan %q, sent %v, notice %+v", agPlan(e), got, e.state.Plans["4"].Notice)
+	}
+}
+
+func TestQuotaAlertsResumeWhenThePlanCannotBeRead(t *testing.T) {
+	c := &clock{t: time.Date(2026, 10, 22, 15, 0, 0, 0, shanghai)}
+	world := &planWorld{paid: true}
+	h := planHost(c, world)
+	e, _ := newTestEngine(t, h, c)
+	sender := &switchSender{}
+	e.alerts.Sender = sender
+	poll := func() {
+		c.add(5 * time.Minute)
+		e.poll(context.Background(), e.config(), c.t, "", false)
+	}
+
+	// Without a plan read before, a failed recheck does not hold the alerts.
+	world.profileStatus = 503
+	poll()
+	world.paid = false
+	poll()
+	if got := sender.titles(); agPlan(e) != "" || len(got) != 1 || !strings.Contains(got[0], "已恢复") {
+		t.Fatalf("without a plan: plan %q, sent %v", agPlan(e), got)
+	}
+}
+
+func TestPlanIsReadSoonAfterARecheckThatKeptFailing(t *testing.T) {
+	c := &clock{t: time.Date(2026, 10, 22, 15, 0, 0, 0, shanghai)}
+	world := &planWorld{paid: true}
+	h := planHost(c, world)
+	e, _ := newTestEngine(t, h, c)
+	sender := &switchSender{}
+	e.alerts.Sender = sender
+	poll := func() {
+		c.add(5 * time.Minute)
+		e.poll(context.Background(), e.config(), c.t, "", false)
+	}
+	poll()
+
+	// The plan cannot be read for the whole recheck. The alerts wait for it
+	// until the recheck ends, and then compare with the old baselines.
+	world.paid = false
+	world.profileStatus = 503
+	end := c.t.Add(5*time.Minute + planRecheckPeriod)
+	for c.t.Add(5 * time.Minute).Before(end) {
+		poll()
+		if got := sender.titles(); len(got) != 0 {
+			t.Fatalf("during the recheck at %s: sent %v", c.t, got)
+		}
+	}
+	poll()
+	if got := sender.titles(); agPlan(e) != "Pro" || len(got) != 1 || !strings.Contains(got[0], "已恢复") {
+		t.Fatalf("after the recheck: plan %q, sent %v", agPlan(e), got)
+	}
+
+	// The plan is read again within planRetryPeriod of the last failure.
+	world.profileStatus = 0
+	reads := h.requestsTo(providers.AntigravityLoadCodeAssistURL)
+	for i := 0; i < 3 && agPlan(e) == "Pro"; i++ {
+		poll()
+	}
+	if got := sender.titles(); agPlan(e) != "Free" || h.requestsTo(providers.AntigravityLoadCodeAssistURL) != reads+1 || len(got) != 1 || got[0] != "🎫 Antigravity · 套餐 Pro → Free" {
+		t.Fatalf("after the retry: plan %q, sent %v", agPlan(e), got)
+	}
+}

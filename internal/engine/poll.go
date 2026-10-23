@@ -380,6 +380,9 @@ const (
 	// planRecheckPeriod is how long the plan is requested with every active
 	// query after the windows of the account changed.
 	planRecheckPeriod = time.Hour
+	// planRetryPeriod is how soon the plan is requested again after a
+	// failed recheck, also once the recheck has ended.
+	planRetryPeriod = 15 * time.Minute
 	// planNoticeAge is how long an undelivered plan change notification is
 	// retried.
 	planNoticeAge = time.Hour
@@ -404,9 +407,13 @@ func windowSet(groups []quota.RawGroup) string {
 // active query for planRecheckPeriod after the account reports other
 // windows than before: an expired Google AI Pro plan, for one, removes the
 // 5-hour windows of Antigravity. Rechecking covers a failed request and a
-// plan that changes a little later than the windows. A failed request keeps
-// the plan read before and does not affect the quota. notePlan reports
-// false when a recheck failed: the quota alerts of the account then wait
+// plan that changes a little later than the windows. In the latter case the
+// quota alerts of the queries before the change compare with the old
+// baselines, so a false recovery can still be sent once. A failed request
+// keeps the plan read before and does not affect the quota; after a failed
+// recheck, the next request follows within planRetryPeriod even when the
+// recheck has ended. notePlan reports false when a recheck failed for
+// an account with a known plan: the quota alerts of the account then wait
 // for the next query, as the windows may belong to a plan not read yet.
 func (e *Engine) notePlan(ctx context.Context, p *providers.Provider, cred *Cred, credential providers.Credential, groups []quota.RawGroup, now time.Time) bool {
 	if p.Plan == nil {
@@ -434,7 +441,14 @@ func (e *Engine) notePlan(ctx context.Context, p *providers.Provider, cred *Cred
 		plan, err := p.Profile(ctx, e.egress, credential, now)
 		if err != nil {
 			e.logf("debug", "读取套餐失败：%s：%v", labelFor(providers.Title(cred.Provider), cred), err)
-			confirmed = !rechecking
+			if rechecking {
+				// The daily request follows soon when the recheck ends
+				// without a successful read.
+				state.Checked = now.Add(planRetryPeriod - planCheckPeriod).Unix()
+			}
+			// Without a plan read before, a later read only records the plan
+			// and leaves the baselines, so waiting would gain nothing.
+			confirmed = !rechecking || state.Plan == ""
 		}
 		raw = plan
 	}
