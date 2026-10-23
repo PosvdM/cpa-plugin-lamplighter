@@ -77,3 +77,19 @@ func claudePlan(raw string) Plan {
 	}
 	return Plan{Name: kind, Weight: 1}
 }
+
+// antigravityPlan names the tier id of an Antigravity account. A Google One
+// tier "g1-<name>-tier", such as "g1-pro-tier", is named after its middle
+// part. Google publishes no multiple between the tiers, so all weigh 1.
+func antigravityPlan(raw string) Plan {
+	id := strings.ToLower(raw)
+	if id == "free-tier" {
+		return Plan{Name: "Free", Weight: 1}
+	}
+	if name, ok := strings.CutPrefix(id, "g1-"); ok {
+		if name, ok = strings.CutSuffix(name, "-tier"); ok && name != "" {
+			return Plan{Name: strings.ToUpper(name[:1]) + name[1:], Weight: 1}
+		}
+	}
+	return Plan{Name: raw, Weight: 1}
+}

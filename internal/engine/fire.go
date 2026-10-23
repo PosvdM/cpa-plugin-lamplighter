@@ -507,7 +507,7 @@ func (e *Engine) confirm(ctx context.Context, cfg config.Config, t target, start
 		now := e.now()
 		e.passiveAt[t.cred.AuthIndex] = now
 		e.notePassiveFable(t.cred, groups)
-		e.applyGroups(ctx, cfg, t.cred, groups, quota.SourcePassive, now)
+		e.applyGroups(ctx, cfg, t.cred, groups, quota.SourcePassive, now, true)
 	}
 	if e.confirmed(t.group.Key, start, e.now()) {
 		return nil

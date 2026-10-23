@@ -25,7 +25,7 @@ func TestCodexPlansAreWeightedByPrice(t *testing.T) {
 	if got := PlanOf("codex", ""); got != (Plan{Weight: 1}) {
 		t.Errorf("unknown plan: %+v", got)
 	}
-	if got := PlanOf("antigravity", "pro"); got != (Plan{Weight: 1}) {
+	if got := PlanOf("kimi", "pro"); got != (Plan{Weight: 1}) {
 		t.Errorf("provider without plans: %+v", got)
 	}
 }
@@ -60,5 +60,27 @@ func TestClaudePlansFromTheProfile(t *testing.T) {
 	}
 	if _, err := ParseClaudeProfile(decode(t, `{"account":{}}`)); err == nil {
 		t.Error("a profile without a plan is an error")
+	}
+}
+
+func TestAntigravityPlansFromLoadCodeAssist(t *testing.T) {
+	for body, want := range map[string]Plan{
+		// Measured on a Google AI Pro account on 2026-10-23; currentTier stays
+		// free-tier.
+		`{"currentTier":{"id":"free-tier","name":"Antigravity"},"paidTier":{"id":"g1-pro-tier","name":"Google AI Pro"}}`: {"Pro", 1},
+		`{"currentTier":{"id":"free-tier"},"paidTier":{"id":"g1-ultra-tier"}}`:                                           {"Ultra", 1},
+		`{"currentTier":{"id":"free-tier","name":"Antigravity"}}`:                                                        {"Free", 1},
+		`{"currentTier":{"id":"standard-tier"}}`:                                                                         {"standard-tier", 1},
+	} {
+		raw, err := ParseAntigravityProfile(decode(t, body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := PlanOf("antigravity", raw); got != want {
+			t.Errorf("%s: got %+v, want %+v", body, got, want)
+		}
+	}
+	if _, err := ParseAntigravityProfile(decode(t, `{"allowedTiers":[]}`)); err == nil {
+		t.Error("a response without a tier is an error")
 	}
 }

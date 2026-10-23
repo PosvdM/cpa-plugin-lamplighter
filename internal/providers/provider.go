@@ -42,8 +42,9 @@ type Provider struct {
 	Plan func(raw string) Plan
 	// Profile reads the raw plan value with a request of its own, for a
 	// provider whose usage response does not state the plan. The engine
-	// calls it at most once a day per account.
-	Profile func(ctx context.Context, doer quota.Doer, cred Credential) (string, error)
+	// calls it once a day per account, and again when the windows of the
+	// account change.
+	Profile func(ctx context.Context, doer quota.Doer, cred Credential, now time.Time) (string, error)
 	// Ignition is nil when the provider cannot be ignited.
 	Ignition *Ignition
 }
