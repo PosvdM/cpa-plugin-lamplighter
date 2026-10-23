@@ -380,8 +380,9 @@ const (
 	// planRecheckPeriod is how long the plan is requested with every active
 	// query after the windows of the account changed.
 	planRecheckPeriod = time.Hour
-	// planRetryPeriod is how soon the plan is requested again after a
-	// failed recheck, also once the recheck has ended.
+	// planRetryPeriod is how long the next plan request waits after a failed
+	// recheck, also once the recheck has ended. It goes out with the first
+	// active query after that.
 	planRetryPeriod = 15 * time.Minute
 	// planNoticeAge is how long an undelivered plan change notification is
 	// retried.
@@ -411,8 +412,8 @@ func windowSet(groups []quota.RawGroup) string {
 // quota alerts of the queries before the change compare with the old
 // baselines, so a false recovery can still be sent once. A failed request
 // keeps the plan read before and does not affect the quota; after a failed
-// recheck, the next request follows within planRetryPeriod even when the
-// recheck has ended. notePlan reports false when a recheck failed for
+// recheck, the next request follows with the first active query
+// planRetryPeriod later even when the recheck has ended. notePlan reports false when a recheck failed for
 // an account with a known plan: the quota alerts of the account then wait
 // for the next query, as the windows may belong to a plan not read yet.
 func (e *Engine) notePlan(ctx context.Context, p *providers.Provider, cred *Cred, credential providers.Credential, groups []quota.RawGroup, now time.Time) bool {
