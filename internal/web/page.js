@@ -2721,6 +2721,16 @@
   // Checked without reading the parent, so the layout also clears the
   // Management Center's toolbar when it is served from another origin.
   if (window.self !== window.top) document.documentElement.classList.add("embedded");
+  // A request to raw.githubusercontent.com that is dropped without a reply
+  // only fails when the browser's connection times out, so the logo also
+  // moves to the mirror when it has not loaded within 5 seconds.
+  setTimeout(function () {
+    var logo = document.querySelector("header .logo");
+    if (logo && !logo.complete && !logo.dataset.mirror) {
+      logo.dataset.mirror = "1";
+      logo.src = "https://ghfast.top/" + logo.src;
+    }
+  }, 5000);
   applyTheme();
   applyLanguage();
   watchParent();
