@@ -21,8 +21,10 @@
 
 <main id="app" hidden>
   <header>
-    <!-- Loaded from GitHub so the logo can change without a release; removed when it cannot load. -->
-    <img class="logo" src="https://raw.githubusercontent.com/PosvdM/cpa-plugin-lamplighter/main/assets/logo.png" alt="" width="30" height="30" onerror="this.remove()">
+    <!-- Loaded from GitHub so the logo can change without a release. When
+         raw.githubusercontent.com cannot be reached it is retried through the
+         ghfast.top mirror, and removed if that fails too. -->
+    <img class="logo" src="https://raw.githubusercontent.com/PosvdM/cpa-plugin-lamplighter/main/assets/logo.png" alt="" width="30" height="30" onerror="if (this.dataset.mirror) this.remove(); else { this.dataset.mirror = '1'; this.src = 'https://ghfast.top/' + this.src; }">
     <h1><a class="home" href="https://github.com/PosvdM/cpa-plugin-lamplighter" target="_blank" rel="noopener" title="在 GitHub 上查看" data-i18n-title="repo_hint">Lamplighter</a><span class="sub" data-i18n="app_sub">点灯人</span></h1>
     <span id="state" class="state"></span>
     <span id="meta" class="meta"></span>
@@ -136,26 +138,22 @@
           <span class="field-label" data-i18n="window_7d">7 天窗口</span>
           <span class="field-label mode-row" data-i18n="recovery_notify">额度恢复时通知</span>
           <div class="mode-switch" role="radiogroup" aria-label="额度恢复时通知 · 5 小时窗口" data-i18n-aria-label="recovery_notify_5h">
-            <span class="mode-thumb" aria-hidden="true"></span>
             <label class="mode-option" title="关闭" data-i18n-title="mode_off_title"><input type="radio" name="recovery_notify.five_hour" value="off"><span data-i18n="mode_off">关闭</span></label>
             <label class="mode-option" title="每次重置都通知" data-i18n-title="recovery_all_title"><input type="radio" name="recovery_notify.five_hour" value="all"><span data-i18n="recovery_all">每次</span></label>
             <label class="mode-option" title="窗口用完后，在下一次重置时通知一次" data-i18n-title="recovery_after_exhausted_title"><input type="radio" name="recovery_notify.five_hour" value="after_exhausted"><span data-i18n="recovery_after_exhausted">用完后</span></label>
           </div>
           <div class="mode-switch" role="radiogroup" aria-label="额度恢复时通知 · 7 天窗口" data-i18n-aria-label="recovery_notify_7d">
-            <span class="mode-thumb" aria-hidden="true"></span>
             <label class="mode-option" title="关闭" data-i18n-title="mode_off_title"><input type="radio" name="recovery_notify.seven_day" value="off"><span data-i18n="mode_off">关闭</span></label>
             <label class="mode-option" title="每次重置都通知" data-i18n-title="recovery_all_title"><input type="radio" name="recovery_notify.seven_day" value="all"><span data-i18n="recovery_all">每次</span></label>
             <label class="mode-option" title="窗口用完后，在下一次重置时通知一次" data-i18n-title="recovery_after_exhausted_title"><input type="radio" name="recovery_notify.seven_day" value="after_exhausted"><span data-i18n="recovery_after_exhausted">用完后</span></label>
           </div>
           <span class="field-label mode-row" data-i18n="reset_reminder">重置前提醒</span>
           <div class="mode-switch" role="radiogroup" aria-label="重置前提醒 · 5 小时窗口" data-i18n-aria-label="reset_reminder_5h">
-            <span class="mode-thumb" aria-hidden="true"></span>
             <label class="mode-option" title="关闭" data-i18n-title="mode_off_title"><input type="radio" name="reset_reminder.five_hour" value="off"><span data-i18n="mode_off">关闭</span></label>
             <label class="mode-option" title="每次重置前都提醒" data-i18n-title="reminder_all_title"><input type="radio" name="reset_reminder.five_hour" value="all"><span data-i18n="reminder_all">每次</span></label>
             <label class="mode-option" title="剩余高于第三档阈值时才提醒" data-i18n-title="reminder_has_remaining_title"><input type="radio" name="reset_reminder.five_hour" value="has_remaining"><span data-i18n="reminder_has_remaining">有余量</span></label>
           </div>
           <div class="mode-switch" role="radiogroup" aria-label="重置前提醒 · 7 天窗口" data-i18n-aria-label="reset_reminder_7d">
-            <span class="mode-thumb" aria-hidden="true"></span>
             <label class="mode-option" title="关闭" data-i18n-title="mode_off_title"><input type="radio" name="reset_reminder.seven_day" value="off"><span data-i18n="mode_off">关闭</span></label>
             <label class="mode-option" title="每次重置前都提醒" data-i18n-title="reminder_all_title"><input type="radio" name="reset_reminder.seven_day" value="all"><span data-i18n="reminder_all">每次</span></label>
             <label class="mode-option" title="剩余高于第三档阈值时才提醒" data-i18n-title="reminder_has_remaining_title"><input type="radio" name="reset_reminder.seven_day" value="has_remaining"><span data-i18n="reminder_has_remaining">有余量</span></label>
