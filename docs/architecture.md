@@ -48,7 +48,7 @@ Lamplighter 是用 Go 编写、以 `-buildmode=c-shared` 构建的 CPA 原生插
 
 页面标题旁的图标从 GitHub 加载仓库中的 `assets/logo.png`，更换图标不需要发布新版本。`raw.githubusercontent.com` 无法访问时（例如在中国大陆），改经 `ghfast.top` 镜像加载；仍然失败时不显示。
 
-图表的筛选按钮（`.segmented`）和设置中的三选一开关（`.mode-switch`）共用一套滑块：`page.js` 的 `placeThumb` 测量选中项的位置和尺寸，写入滑块的 CSS 变量。各选项宽度不同，所以按测量值定位。用户点选时滑块带回弹滑过去并挤压一下；首次显示、切换语言、窗口尺寸变化和从隐藏变为可见时直接定位，这些情况都由 `ResizeObserver` 监听控件及其选项的尺寸变化触发。时间范围按钮只在切换额度窗口或语言时重建，点选时原地更新 `aria-pressed`，滑块才能滑动。系统设置减少动态效果时，`prefers-reduced-motion` 规则关闭这些动画；该规则放在 `page.css` 末尾，以覆盖前面定义的过渡。
+图表的筛选按钮（`.segmented`）和设置中的三选一开关（`.mode-switch`）共用一套滑块：`page.js` 的 `placeThumb` 测量选中项的位置和尺寸（取不含缩放的小数值），写入滑块的 CSS 变量。各选项宽度不同，所以按测量值定位。用户点选时滑块带回弹滑过去并挤压一下；其他情况直接定位：代码改变选中项时（如首次填入设置、恢复筛选条件）直接调用 `placeThumb`，切换语言、窗口尺寸变化和从隐藏变为可见时由监听控件及其选项尺寸的 `ResizeObserver` 调用。时间范围按钮只在切换额度窗口或语言时重建，点选时原地更新 `aria-pressed`，滑块才能滑动。点击已选中的按钮不改变选择；图表读取失败时，这样的点击会重新读取。系统设置减少动态效果时，`prefers-reduced-motion` 规则关闭这些动画；该规则放在 `page.css` 末尾，以覆盖前面定义的过渡。
 
 页面文字都在 `page.js` 的 `I18N` 词典中，中文和英文各一份；`page.html` 中的静态文字用 `data-i18n`（以及 `data-i18n-placeholder`、`data-i18n-title`、`data-i18n-aria-label`）标出词条，其中的中文原文只在脚本应用语言前显示。语言跟随管理中心：先读父页面根元素的 `lang`（管理中心每次切换语言都会更新它）并监听变化，单独打开时读 `localStorage` 的 `cli-proxy-language`，再退回到浏览器语言；`zh` 开头的显示中文，其余显示英文。状态接口的 `language` 与页面语言不同时，页面调用 `POST .../language` 上报，失败时在下一次刷新状态时重试。
 

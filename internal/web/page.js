@@ -2363,10 +2363,11 @@
   // groups): a thumb sits under the selected option. Options differ in width,
   // so the thumb is measured to the option. bounce slides it there and plays
   // the squash animation; any other placement jumps without animating.
-  // thumbObserver places the thumb again whenever a control or one of its
-  // options changes size: on first display, after a language change, when the
-  // window is resized, and when a hidden control (the page before the key is
-  // entered, the closed settings) becomes visible.
+  // Code that changes the selection places the thumb itself; thumbObserver
+  // places it again whenever a control or one of its options changes size,
+  // such as after a language change, when the window is resized, and when a
+  // hidden control (the page before the key is entered, the closed settings)
+  // becomes visible.
   var thumbObserver = new ResizeObserver(function (entries) {
     entries.forEach(function (entry) {
       var box = entry.target.closest(".segmented, .mode-switch");
@@ -2390,10 +2391,16 @@
     if (thumb.hidden) bounce = false; // nothing to slide from
     thumb.hidden = false;
     if (!bounce) thumb.style.transition = "none";
-    thumb.style.setProperty("--thumb-x", option.offsetLeft + "px");
-    thumb.style.setProperty("--thumb-y", option.offsetTop + "px");
-    thumb.style.setProperty("--thumb-w", option.offsetWidth + "px");
-    thumb.style.setProperty("--thumb-h", option.offsetHeight + "px");
+    // Fractional sizes, unlike offsetWidth, so the thumb fills grid columns
+    // exactly. A pressed button is scaled around its center; the size is
+    // taken without the scale.
+    var rect = option.getBoundingClientRect(), outer = box.getBoundingClientRect();
+    var scale = parseFloat(getComputedStyle(option).scale) || 1;
+    var w = rect.width / scale, h = rect.height / scale;
+    thumb.style.setProperty("--thumb-x", (rect.left + rect.width / 2 - w / 2 - outer.left - box.clientLeft) + "px");
+    thumb.style.setProperty("--thumb-y", (rect.top + rect.height / 2 - h / 2 - outer.top - box.clientTop) + "px");
+    thumb.style.setProperty("--thumb-w", w + "px");
+    thumb.style.setProperty("--thumb-h", h + "px");
     if (bounce) thumb.classList.remove("bounce");
     void thumb.offsetWidth; // apply the jump before the transition returns, or restart the animation
     if (bounce) thumb.classList.add("bounce");
@@ -2408,7 +2415,11 @@
   }
 
   Array.prototype.forEach.call(document.querySelectorAll(".segmented, .mode-switch"), function (box) {
-    box.insertBefore(el("span", { class: "seg-thumb", "aria-hidden": "true", hidden: true }), box.firstChild);
+    // Dropping bounce once it has played keeps the squash from replaying
+    // when the thumb is displayed again.
+    var thumb = el("span", { class: "seg-thumb", "aria-hidden": "true", hidden: true });
+    thumb.addEventListener("animationend", function () { thumb.classList.remove("bounce"); });
+    box.insertBefore(thumb, box.firstChild);
     thumbObserver.observe(box);
     observeOptions(box);
   });
@@ -2657,11 +2668,15 @@
     placeThumb(box, !!bounce);
   }
   // Delegated, so it also covers buttons added later. Clicking the pressed
-  // button does nothing, like a checked radio.
+  // button only retries a chart that failed to load.
   function bindSegmented(id, onPick) {
     $(id).addEventListener("click", function (e) {
       var button = e.target.closest(".seg");
-      if (!button || button.getAttribute("aria-pressed") === "true") return;
+      if (!button) return;
+      if (button.getAttribute("aria-pressed") === "true") {
+        if (historyFailed) loadHistory();
+        return;
+      }
       var value = button.getAttribute("data-value");
       pressSegment(id, value, true);
       onPick(value);
