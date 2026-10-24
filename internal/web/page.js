@@ -2040,17 +2040,24 @@
     $("legend-projection").textContent = translate("legend_projection_" + historyWindow);
   }
 
+  // The buttons are rebuilt only when the window or the language changes;
+  // otherwise the chosen range is marked in place, so the thumb stays on its
+  // buttons. Clicks are handled by bindSegmented.
   function renderRangeButtons() {
     var box = $("range-buttons");
-    clear(box);
-    RANGES[chartWindow].forEach(function (r) {
-      box.appendChild(el("button", { type: "button", class: "seg", "aria-pressed": r[0] === range ? "true" : "false", text: translate("range_" + r[2], r[1]), onclick: function () {
-        range = r[0];
-        saveChartFilters();
-        renderRangeButtons();
-        loadHistory();
-      } }));
-    });
+    var shown = chartWindow + " " + lang;
+    if (box.getAttribute("data-shown") !== shown) {
+      box.setAttribute("data-shown", shown);
+      Array.prototype.forEach.call(box.querySelectorAll(".seg"), function (b) {
+        thumbObserver.unobserve(b);
+        box.removeChild(b);
+      });
+      RANGES[chartWindow].forEach(function (r) {
+        box.appendChild(el("button", { type: "button", class: "seg", "data-value": r[0], text: translate("range_" + r[2], r[1]) }));
+      });
+      observeOptions(box);
+    }
+    pressSegment("range-buttons", range);
   }
 
   // With remember_chart_filters on, the chart filters are kept in this
@@ -2352,20 +2359,59 @@
     $("timezone-note").textContent = timezoneText();
   }
 
-  // Mode switches: the thumb slides under the checked option. bounce plays
-  // the squash animation; filling the form places it without one.
-  function placeThumb(box, bounce) {
-    var options = box.querySelectorAll("input");
-    var index = 0;
-    Array.prototype.forEach.call(options, function (input, i) { if (input.checked) index = i; });
-    box.style.setProperty("--index", index);
-    if (!bounce) return;
-    var thumb = box.querySelector(".mode-thumb");
-    thumb.classList.remove("bounce");
-    void thumb.offsetWidth; // restart the animation
-    thumb.classList.add("bounce");
+  // Segmented controls (.segmented button groups and .mode-switch radio
+  // groups): a thumb sits under the selected option. Options differ in width,
+  // so the thumb is measured to the option. bounce slides it there and plays
+  // the squash animation; any other placement jumps without animating.
+  // thumbObserver places the thumb again whenever a control or one of its
+  // options changes size: on first display, after a language change, when the
+  // window is resized, and when a hidden control (the page before the key is
+  // entered, the closed settings) becomes visible.
+  var thumbObserver = new ResizeObserver(function (entries) {
+    entries.forEach(function (entry) {
+      var box = entry.target.closest(".segmented, .mode-switch");
+      if (box) placeThumb(box, false);
+    });
+  });
+
+  function selectedOption(box) {
+    if (box.classList.contains("mode-switch")) {
+      var input = box.querySelector("input:checked");
+      return input && input.closest(".mode-option");
+    }
+    return box.querySelector('.seg[aria-pressed="true"]:not([hidden])');
   }
 
+  function placeThumb(box, bounce) {
+    var thumb = box.querySelector(".seg-thumb");
+    var option = selectedOption(box);
+    if (!option) { thumb.hidden = true; return; }
+    if (!option.offsetWidth) return; // not displayed; the observer places it once shown
+    if (thumb.hidden) bounce = false; // nothing to slide from
+    thumb.hidden = false;
+    if (!bounce) thumb.style.transition = "none";
+    thumb.style.setProperty("--thumb-x", option.offsetLeft + "px");
+    thumb.style.setProperty("--thumb-y", option.offsetTop + "px");
+    thumb.style.setProperty("--thumb-w", option.offsetWidth + "px");
+    thumb.style.setProperty("--thumb-h", option.offsetHeight + "px");
+    if (bounce) thumb.classList.remove("bounce");
+    void thumb.offsetWidth; // apply the jump before the transition returns, or restart the animation
+    if (bounce) thumb.classList.add("bounce");
+    else thumb.style.transition = "";
+  }
+
+  // Observes the options of a control; called again after they are rebuilt.
+  function observeOptions(box) {
+    Array.prototype.forEach.call(box.querySelectorAll(".seg, .mode-option"), function (option) {
+      thumbObserver.observe(option);
+    });
+  }
+
+  Array.prototype.forEach.call(document.querySelectorAll(".segmented, .mode-switch"), function (box) {
+    box.insertBefore(el("span", { class: "seg-thumb", "aria-hidden": "true", hidden: true }), box.firstChild);
+    thumbObserver.observe(box);
+    observeOptions(box);
+  });
   Array.prototype.forEach.call(document.querySelectorAll(".mode-switch"), function (box) {
     box.addEventListener("change", function () { placeThumb(box, true); });
   });
@@ -2602,20 +2648,30 @@
     }
   });
   $("events-more").addEventListener("click", function () { eventsExpanded = !eventsExpanded; renderEvents(); });
-  function pressSegment(id, value) {
-    Array.prototype.forEach.call($(id).querySelectorAll("button"), function (b) {
+  // bounce is set when the user picks the value, so the thumb slides there.
+  function pressSegment(id, value, bounce) {
+    var box = $(id);
+    Array.prototype.forEach.call(box.querySelectorAll(".seg"), function (b) {
       b.setAttribute("aria-pressed", b.getAttribute("data-value") === value ? "true" : "false");
     });
+    placeThumb(box, !!bounce);
   }
+  // Delegated, so it also covers buttons added later. Clicking the pressed
+  // button does nothing, like a checked radio.
   function bindSegmented(id, onPick) {
-    Array.prototype.forEach.call($(id).querySelectorAll("button"), function (button) {
-      button.addEventListener("click", function () {
-        var value = button.getAttribute("data-value");
-        pressSegment(id, value);
-        onPick(value);
-      });
+    $(id).addEventListener("click", function (e) {
+      var button = e.target.closest(".seg");
+      if (!button || button.getAttribute("aria-pressed") === "true") return;
+      var value = button.getAttribute("data-value");
+      pressSegment(id, value, true);
+      onPick(value);
     });
   }
+  bindSegmented("range-buttons", function (value) {
+    range = value;
+    saveChartFilters();
+    loadHistory();
+  });
   bindSegmented("window-buttons", function (value) {
     chartWindow = value;
     range = rangeFor(value);

@@ -38,6 +38,7 @@
   --viz-failure: #c65746;
   --shadow: 0 1px 2px 0 rgb(0 0 0 / 0.08);
   --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-bounce: cubic-bezier(0.34, 1.7, 0.5, 1);
   --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", "JetBrains Mono", "Fira Code", Menlo, Consolas, "Liberation Mono", monospace;
 
   /* Provider badges use the Management Center type colors. */
@@ -293,11 +294,6 @@ input[type="checkbox"] { width: 16px; height: 16px; padding: 0; accent-color: va
   animation-delay: calc(var(--meter-index, 0) * 40ms);
 }
 @keyframes meter-fill { from { transform: scaleX(0); } }
-@media (prefers-reduced-motion: reduce) {
-  .quota-fill { animation: none; } .card.account { transition: none; }
-  .mode-thumb, .mode-option span { transition: none; } .mode-thumb.bounce { animation: none; }
-  .settings-card > summary::before { transition: none; }
-}
 .fill-high { background: var(--viz-success); }
 .fill-medium { background: var(--quota-medium-color); }
 .fill-low { background: var(--viz-failure); }
@@ -323,12 +319,6 @@ td.actions { text-align: right; }
 
 /* Chart */
 .filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 14px; }
-.segmented { display: inline-flex; padding: 3px; gap: 2px; border-radius: 9px; background: var(--bg-tertiary); border: 1px solid var(--border-color); }
-.seg {
-  font: inherit; font-size: 12.5px; font-weight: 600; padding: 4px 12px; border-radius: 6px; border: 0; cursor: pointer;
-  background: transparent; color: var(--text-secondary);
-}
-.seg[aria-pressed="true"] { background: var(--bg-secondary); color: var(--text-primary); box-shadow: var(--shadow); }
 .chart-box { position: relative; }
 .chart-box.loading svg { opacity: 0.5; }
 .chart-box svg { display: block; width: 100%; height: auto; overflow: visible; font-family: var(--font-mono); user-select: none; }
@@ -416,21 +406,25 @@ form label.inline-input { flex-direction: row; align-items: center; gap: 6px; fo
 .checks { display: flex; flex-wrap: wrap; gap: 8px 24px; }
 .notify-modes { display: grid; grid-template-columns: auto auto auto; gap: 10px 18px; align-items: center; justify-content: start; }
 
-/* Mode switches: three equal options; the thumb slides with an overshoot
-   and squashes on arrival. */
-.mode-switch {
-  --index: 0;
-  position: relative; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 3px; border-radius: 9px;
+/* Segmented controls: the chart's button groups (.segmented) and the
+   settings' radio switches with three equal options (.mode-switch). The
+   thumb is measured to the selected option by placeThumb in page.js, slides
+   there with an overshoot and squashes on arrival. Options are positioned so
+   they paint above it. */
+.segmented, .mode-switch {
+  position: relative; padding: 3px; border-radius: 9px;
   background: var(--bg-tertiary); border: 1px solid var(--border-color);
 }
-.mode-thumb {
-  position: absolute; top: 3px; bottom: 3px; left: 3px; width: calc((100% - 6px) / 3); border-radius: 6px;
+.segmented { display: inline-flex; gap: 2px; }
+.mode-switch { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.seg-thumb {
+  position: absolute; left: 0; top: 0; width: var(--thumb-w, 0); height: var(--thumb-h, 0); border-radius: 6px;
   background: var(--primary-color); box-shadow: var(--shadow);
-  translate: calc(var(--index) * 100%) 0;
-  transition: translate 480ms cubic-bezier(0.34, 1.7, 0.5, 1);
+  translate: var(--thumb-x, 0) var(--thumb-y, 0);
+  transition: translate 480ms var(--ease-bounce), width 480ms var(--ease-bounce), height 480ms var(--ease-bounce);
 }
-.mode-thumb.bounce { animation: mode-squash 520ms ease-out; }
-@keyframes mode-squash {
+.seg-thumb.bounce { animation: seg-squash 520ms ease-out; }
+@keyframes seg-squash {
   0% { scale: 1 1; }
   25% { scale: 1.14 0.86; }
   50% { scale: 0.94 1.08; }
@@ -444,9 +438,15 @@ form label.mode-option {
 .mode-option input { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; pointer-events: none; }
 .mode-option:has(input:checked) { color: var(--primary-contrast); }
 .mode-option:has(input:focus-visible) { box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-color) 25%, transparent); }
-.mode-option span { display: inline-block; transition: scale 300ms cubic-bezier(0.34, 1.7, 0.5, 1); }
+.mode-option span { display: inline-block; transition: scale 300ms var(--ease-bounce); }
 .mode-option:has(input:checked) span { scale: 1.06; }
 .mode-option:active span { scale: 0.92; }
+.seg {
+  position: relative; font: inherit; font-size: 12.5px; font-weight: 600; padding: 4px 12px; border-radius: 6px; border: 0; cursor: pointer;
+  background: transparent; color: var(--text-secondary); transition: color 200ms ease, scale 300ms var(--ease-bounce);
+}
+.seg[aria-pressed="true"] { color: var(--primary-contrast); scale: 1.06; }
+.seg:active:not([aria-pressed="true"]) { scale: 0.92; }
 .hint, form .hint { font-size: 12px; font-weight: 400; color: var(--text-tertiary); margin: 0; }
 table.services th, table.services td { padding: 8px 10px; }
 table.services td:nth-child(2), table.services td:nth-child(3), table.services th:nth-child(2), table.services th:nth-child(3) { width: 84px; text-align: center; }
@@ -480,4 +480,11 @@ table.services .sub-row td { border-bottom: none; padding-top: 4px; text-align: 
   form label.mode-option { padding: 4px 2px; }
   .event-row { grid-template-columns: 82px minmax(0, 1fr); }
   .event-label, .event-detail { grid-column: 2; }
+}
+
+/* Last, so that it overrides the transitions and animations above. */
+@media (prefers-reduced-motion: reduce) {
+  .quota-fill { animation: none; } .card.account { transition: none; }
+  .seg-thumb, .seg, .mode-option span { transition: none; } .seg-thumb.bounce { animation: none; }
+  .settings-card > summary::before { transition: none; }
 }
