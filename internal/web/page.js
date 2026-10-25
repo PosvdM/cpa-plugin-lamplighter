@@ -604,12 +604,12 @@
     if (parts.length) meta.appendChild(document.createTextNode(" · " + parts.join(" · ")));
   }
 
-  // A green circle with an up arrow after the version, linking to the newer
+  // A green ring with a green up arrow after the version, linking to the newer
   // release.
   function updateLink() {
     var hint = translate("update_hint", status.latest_version);
     var icon = svg("svg", { viewBox: "0 0 16 16", width: 14, height: 14, "aria-hidden": "true" });
-    icon.appendChild(svg("circle", { cx: 8, cy: 8, r: 8 }));
+    icon.appendChild(svg("circle", { cx: 8, cy: 8, r: 7.25 }));
     icon.appendChild(svg("path", { d: "M8 11.5V4.5M5 7.5l3-3 3 3" }));
     var link = el("a", { class: "update", href: status.release_url, target: "_blank", rel: "noopener", title: hint, "aria-label": hint });
     link.appendChild(icon);
