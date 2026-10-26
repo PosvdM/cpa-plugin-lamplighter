@@ -1,0 +1,29 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["**.md", "docs/**", "assets/**"]
+  pull_request:
+    paths-ignore: ["**.md", "docs/**", "assets/**"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.26"
+      - run: test -z "$(gofmt -l .)"
+      - run: go vet ./internal/...
+      - run: go test ./internal/...
+      - run: node --check internal/web/page.js

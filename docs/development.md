@@ -14,7 +14,9 @@ go test ./internal/...
 node --check internal/web/page.js
 ```
 
-测试使用假的宿主和 HTTP 服务器，不会发送真实请求。CI 在 Linux、macOS 和 Windows 上运行测试，并在 Linux 上检查 `gofmt -l .` 的输出为空。
+测试使用假的宿主和 HTTP 服务器，不会发送真实请求。
+
+推送到 `main` 和 PR 时，GitHub Actions（`.github/workflows/ci.yml`）在 Linux 上检查 `gofmt -l .` 的输出为空，并运行上面三条命令。只改动 Markdown、`docs/` 或 `assets/` 的提交不触发。同一分支的新提交会取消仍在运行的旧任务。macOS 和 Windows 上的测试只在发布时运行，见“发布”一节。
 
 测试覆盖：
 
@@ -42,10 +44,10 @@ sh scripts/build.sh 0.1.0
 
 ## 发布
 
-推送 `v*` 标签后，GitHub Actions（`.github/workflows/build.yml`）：
+推送 `v*` 标签后，GitHub Actions（`.github/workflows/release.yml`）：
 
-1. 运行测试；
-2. 用 `scripts/ci-build.sh` 构建五个平台：Linux amd64 和 arm64 分别在 `ubuntu-latest` 和 `ubuntu-24.04-arm` 上的 `golang:1.26-bookworm` 容器中构建；macOS amd64 和 arm64 都在 `macos-latest`（arm64）上构建，amd64 由 clang 交叉编译；Windows amd64 在 `windows-latest` 上构建；
+1. 在每个构建环境中先运行测试：Linux 的两个任务检查 gofmt、运行 vet 和测试；macOS 和 Windows 的任务运行 vet、测试和 `node --check`（Linux 构建所用的容器中没有 Node.js）；
+2. 用 `scripts/ci-build.sh` 构建五个平台：Linux amd64 和 arm64 分别在 `ubuntu-latest` 和 `ubuntu-24.04-arm` 上的 `golang:1.26-bookworm` 容器中构建；macOS amd64 和 arm64 在 `macos-latest`（arm64）上的同一个任务中构建，amd64 由 clang 交叉编译；Windows amd64 在 `windows-latest` 上构建；
 3. 每个平台打包为 `lamplighter_<版本>_<系统>_<架构>.zip`，zip 根目录只有 `lamplighter-v<版本>.<so|dylib|dll>`；
 4. 创建草稿 GitHub Release，附带五个 zip 和 `sha256sum` 格式的 `checksums.txt`，说明为自动生成的提交列表。
 
@@ -55,7 +57,7 @@ CPA 插件商店从最新的 Release 安装插件：它按上面的名称查找 
 
 版本号来自标签（`v0.1.0` 对应 `0.1.0`），通过 `-ldflags "-X main.version=..."` 写入插件，并显示在管理中心和页面上。
 
-推送到 `main` 时只构建并上传 Actions 产物（未打包的动态库），版本号为 `0.0.0-dev.<提交前 7 位>`。
+在 Actions 页面手动运行 `release` 时只测试和构建，上传 Actions 产物（未打包的动态库），不创建 Release，版本号为 `0.0.0-dev.<提交前 7 位>`。
 
 ## 修改约定
 

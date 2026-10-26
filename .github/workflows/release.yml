@@ -1,0 +1,108 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Each build job tests on its own platform before building, so there are no separate test jobs.
+# Pushes to main and PRs are checked on Linux only, by ci.yml.
+jobs:
+  build-linux:
+    strategy:
+      matrix:
+        include:
+          - { runner: ubuntu-latest, arch: amd64 }
+          - { runner: ubuntu-24.04-arm, arch: arm64 }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    # Debian 12 matches the CPA Docker image, so the plugin links against the same glibc.
+    # The image has no Node.js; page.js is checked in the macOS and Windows jobs.
+    container: golang:1.26-bookworm
+    steps:
+      - uses: actions/checkout@v7
+      - run: test -z "$(gofmt -l .)"
+      - run: go vet ./internal/...
+      - run: go test ./internal/...
+      - run: sh scripts/ci-build.sh ${{ matrix.arch }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: lamplighter-linux-${{ matrix.arch }}
+          path: dist/
+
+  # One job builds both architectures; the runner is arm64 and cross-compiles amd64.
+  build-darwin:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.26"
+      - run: go vet ./internal/...
+      - run: go test ./internal/...
+      - run: node --check internal/web/page.js
+      - run: |
+          sh scripts/ci-build.sh amd64 && mv dist dist-amd64
+          sh scripts/ci-build.sh arm64 && mv dist dist-arm64
+      - uses: actions/upload-artifact@v7
+        with:
+          name: lamplighter-darwin-amd64
+          path: dist-amd64/
+      - uses: actions/upload-artifact@v7
+        with:
+          name: lamplighter-darwin-arm64
+          path: dist-arm64/
+
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.26"
+      - run: go vet ./internal/...
+      - run: go test ./internal/...
+      - run: node --check internal/web/page.js
+      - run: sh scripts/ci-build.sh amd64
+      - uses: actions/upload-artifact@v7
+        with:
+          name: lamplighter-windows-amd64
+          path: dist/
+
+  release:
+    if: github.event_name == 'push'
+    needs: [build-linux, build-darwin, build-windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+      # The CPA plugin store expects <id>_<version>_<os>_<arch>.zip with the
+      # library at the zip root, plus checksums.txt in sha256sum format.
+      - name: Package
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          mkdir dist
+          for dir in artifacts/lamplighter-*; do
+            platform=${dir#artifacts/lamplighter-}
+            zip -j -q "dist/lamplighter_${VERSION}_${platform%-*}_${platform##*-}.zip" "$dir"/*
+          done
+          cd dist
+          sha256sum *.zip > checksums.txt
+          cat checksums.txt
+      # A draft, so the release goes public only with its final notes.
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes --draft dist/*
