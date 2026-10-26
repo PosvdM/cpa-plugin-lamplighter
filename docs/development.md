@@ -1,7 +1,5 @@
 # 开发
 
-[English](./development_EN.md)
-
 ## 环境
 
 - Go 1.26（与 CPA v8 一致）。

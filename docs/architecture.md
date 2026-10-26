@@ -1,7 +1,5 @@
 # 架构
 
-[English](./architecture_EN.md)
-
 Lamplighter 是用 Go 编写、以 `-buildmode=c-shared` 构建的 CPA 原生插件。CPA 加载动态库后调用 `cliproxy_plugin_init`，此后所有交互都是 JSON 信封形式的 RPC：CPA 调用插件的方法，插件通过宿主回调调用 CPA。
 
 ## 模块

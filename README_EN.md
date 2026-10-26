@@ -308,7 +308,7 @@ The page follows the language of the CPA Management Center: Chinese for Simplifi
 
 ## Development
 
-Plugin structure, data flow and design constraints are in [Architecture](./docs/architecture_EN.md); building, testing and releasing are in [Development](./docs/development_EN.md).
+Plugin structure, data flow and design constraints are in [Architecture (in Chinese)](./docs/architecture.md); building, testing and releasing are in [Development (in Chinese)](./docs/development.md).
 
 ## License
 
