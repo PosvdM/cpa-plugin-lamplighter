@@ -209,8 +209,10 @@
       quota_reset: "额度重置",
       loading: "加载中…", no_history: "这个范围内还没有额度数据。",
       history_failed: "读取历史失败：{0}",
-      tz_config: "配置中指定", tz_cpa: "跟随 CPA 服务器",
-      tz_note: "通知和页面中的时间使用 {0}，{1}。",
+      timezone: "时区", plugin_timezone: "插件时区",
+      timezone_hint: "用于页面、通知和每日点火时段；选择“跟随 CPA 服务器”可恢复默认。",
+      tz_config: "插件单独设置", tz_cpa: "跟随 CPA 服务器", tz_follow: "跟随 CPA 服务器",
+      tz_note: "当前使用 {0}，{1}。",
       saved: "已保存，插件会在几秒内应用新设置", save_failed: "保存失败：{0}",
       management_key_refused: "这是 CPA 管理密钥，未保存。请填写 access.api-keys 中的 key",
       api_key_refused: "CPA 不接受这个 key，未保存。请填写 access.api-keys 中的 key",
@@ -339,8 +341,10 @@
       quota_reset: "quota reset",
       loading: "Loading…", no_history: "No quota data in this range yet.",
       history_failed: "Could not read the history: {0}",
-      tz_config: "set in the config", tz_cpa: "following the CPA server",
-      tz_note: "Notifications and this page show times in {0}, {1}.",
+      timezone: "Time zone", plugin_timezone: "Plugin time zone",
+      timezone_hint: "Used for page times, notifications and the daily ignition window. Choose “Follow the CPA server” to restore the default.",
+      tz_config: "set for the plugin", tz_cpa: "following the CPA server", tz_follow: "Follow the CPA server",
+      tz_note: "Currently using {0} ({1}).",
       saved: "Saved; the plugin applies the new settings within a few seconds", save_failed: "Could not save: {0}",
       management_key_refused: "This is the CPA management key, so it was not saved. Enter a key from access.api-keys",
       api_key_refused: "CPA does not accept this key, so it was not saved. Enter a key from access.api-keys",
@@ -398,7 +402,6 @@
     renderRangeButtons();
     if (status) {
       renderStatus();
-      $("timezone-note").textContent = timezoneText();
       reportLanguage();
     }
     if (status && history) renderChart();
@@ -916,6 +919,7 @@
     renderTargets();
     renderEvents();
     renderLanguageNote();
+    $("timezone-note").textContent = timezoneText();
   }
 
   function loadStatus() {
@@ -2277,8 +2281,29 @@
     var name = status && status.timezone && status.timezone !== "Local" ? status.timezone : "";
     var sign = offset >= 0 ? "+" : "-";
     var utc = "UTC" + sign + Math.abs(offset);
-    var source = rawConfig.timezone || rawConfig.timezone_offset_hours !== undefined ? translate("tz_config") : translate("tz_cpa");
-    return translate("tz_note", name ? name + " (" + utc + ")" : utc, source);
+    var cfg = status && status.config || {};
+    var source = cfg.timezone || cfg.timezone_offset_hours != null ? translate("tz_config") : translate("tz_cpa");
+    return translate("tz_note", name && name !== utc ? name + " (" + utc + ")" : utc, source);
+  }
+
+  function fillTimezone(input, effective) {
+    var zones = ["UTC", "Asia/Shanghai", "Asia/Hong_Kong", "Asia/Taipei", "Asia/Tokyo", "Asia/Singapore", "Asia/Kolkata", "Asia/Dubai", "Australia/Sydney", "Europe/London", "Europe/Berlin", "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles", "Pacific/Honolulu"];
+    if (typeof Intl !== "undefined" && typeof Intl.supportedValuesOf === "function") {
+      zones = zones.concat(Intl.supportedValuesOf("timeZone"));
+    }
+    var configured = effective.timezone || "";
+    if (configured) zones.push(configured);
+    clear(input);
+    input.appendChild(el("option", { value: "", text: translate("tz_follow"), "data-i18n": "tz_follow" }));
+    zones.filter(function (zone, i) { return zones.indexOf(zone) === i; }).forEach(function (zone) {
+      input.appendChild(el("option", { value: zone, text: zone }));
+    });
+    if (!configured && effective.timezone_offset_hours != null) {
+      var hours = effective.timezone_offset_hours;
+      input.appendChild(el("option", { value: "__fixed_offset__", text: "UTC" + (hours >= 0 ? "+" : "") + hours, disabled: true }));
+      configured = "__fixed_offset__";
+    }
+    input.value = configured;
   }
 
   function topKey(name) { return name.split(".")[0]; }
@@ -2328,6 +2353,7 @@
   }
 
   function fillInput(input, effective) {
+    if (input.name === "timezone") { fillTimezone(input, effective); return; }
     var value = getPath(effective, input.name);
     var format = input.getAttribute("data-format");
     if (format) {
@@ -2437,6 +2463,7 @@
     if (base && typeof base === "object") patch[top] = JSON.parse(JSON.stringify(base));
     Array.prototype.forEach.call($("settings").elements, function (input) {
       if (!input.name || topKey(input.name) !== top) return;
+      if (input.name === "timezone" && input.value === "__fixed_offset__") return;
       var value;
       var format = input.getAttribute("data-format");
       if (format) {
@@ -2467,8 +2494,8 @@
         ).map(function (input) { return input.getAttribute("data-group"); });
       });
     }
-    // A fixed offset from older versions is removed so the time zone follows CPA.
-    if (rawConfig.timezone_offset_hours !== undefined) patch.timezone_offset_hours = null;
+    // Choosing a zone or following CPA replaces a saved fixed offset.
+    if (patch.timezone !== undefined && rawConfig.timezone_offset_hours != null) patch.timezone_offset_hours = null;
     // The single switches are replaced by recovery_notify and reset_reminder.
     if (top === "recovery_notify" && rawConfig.notify_recovery !== undefined) patch.notify_recovery = null;
     if (top === "reset_reminder" && rawConfig.notify_reset_reminders !== undefined) patch.notify_reset_reminders = null;

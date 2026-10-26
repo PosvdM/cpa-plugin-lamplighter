@@ -387,6 +387,7 @@ form label { display: flex; flex-direction: column; gap: 5px; font-size: 12.5px;
 form label.inline { flex-direction: row; align-items: center; gap: 8px; font-weight: 500; color: var(--text-primary); }
 .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 18px; }
 .grid-3 .span-2 { grid-column: span 2; }
+.grid-3 select { width: 100%; min-width: 0; }
 .bark-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 12px 18px; align-items: end; }
 .webhook-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 12px 18px; align-items: end; }
 .webhook-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 12px 18px; }
