@@ -4,6 +4,10 @@
 
 [中文](./README.md)
 
+> When he lights his street lamp, it is as if he brought one more star to life, or one flower. — *The Little Prince*
+>
+> The lamplighter's planet turns once a minute, so every minute he lights his lamp and puts it out again, never missing a turn. Lamplighter does the same on schedule: each time a 5-hour quota window resets, it lights the next one.
+
 Lamplighter is a native plugin for [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) (CPA). It monitors the quota of ChatGPT (Codex), Claude, Antigravity, Kimi and Grok accounts, sends alerts through [Bark](https://github.com/Finb/Bark) or a generic webhook, and sends one minimal request after each 5-hour quota window resets so that the next window starts right away.
 
 ![Management page: quota per account and ignition plans](./docs/images/overview.png)
