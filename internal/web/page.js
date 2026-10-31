@@ -419,16 +419,18 @@
     $("language-note").textContent = translate("language_note", translate("lang_" + (status.language || "zh")));
   }
 
-  // The Management Center keeps the key in localStorage, XOR-obfuscated with
-  // a key derived from the host and user agent, when "remember password" is on.
+  // With "remember password" on, the Management Center stores the key in
+  // localStorage, XOR-obfuscated with the host (v2) or host and user agent (v1).
+  // Unprefixed plaintext JSON is also supported.
   function centerKey() {
     try {
       var raw = localStorage.getItem("cli-proxy-auth");
       if (!raw) return "";
-      var prefix = "enc::v1::";
+      var legacy = raw.indexOf("enc::v1::") === 0;
+      var prefix = legacy ? "enc::v1::" : "enc::v2::";
       if (raw.indexOf(prefix) === 0) {
         var data = atob(raw.slice(prefix.length));
-        var mask = new TextEncoder().encode("cli-proxy-api-webui::secure-storage|" + location.host + "|" + navigator.userAgent);
+        var mask = new TextEncoder().encode("cli-proxy-api-webui::secure-storage|" + location.host + (legacy ? "|" + navigator.userAgent : ""));
         var bytes = new Uint8Array(data.length);
         for (var i = 0; i < data.length; i++) bytes[i] = data.charCodeAt(i) ^ mask[i % mask.length];
         raw = new TextDecoder().decode(bytes);
