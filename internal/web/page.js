@@ -698,10 +698,12 @@
         setWeight(weigh, account);
       } }) : null;
       card.appendChild(el("div", { class: "account-head" }, [
-        el("span", { class: "type-badge type-" + account.provider, text: account.title }),
-        pooledAccount && weight !== 1 ? el("span", { class: "account-weight", title: translate("weight"), text: "×" + fmtWeight(weight) }) : null,
-        el("span", { class: "account-email", title: account.email || account.name, text: account.email || account.name }),
-        rename, weigh, refresh
+        el("div", { class: "account-identity" }, [
+          el("span", { class: "type-badge type-" + account.provider, title: account.title, text: account.title }),
+          pooledAccount && weight !== 1 ? el("span", { class: "account-weight", title: translate("weight"), text: "×" + fmtWeight(weight) }) : null,
+          el("span", { class: "account-email", title: account.email || account.name, text: account.email || account.name })
+        ]),
+        el("div", { class: "account-actions" }, [rename, weigh, refresh])
       ]));
       (account.groups || []).forEach(function (group) {
         var block = el("div", { class: "quota-group" });
