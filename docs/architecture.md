@@ -212,7 +212,7 @@ Antigravity、Kimi 和 Grok 的响应头里没有额度。
 
 | 服务 | 入口协议 | 请求要点 |
 | --- | --- | --- |
-| Codex | `openai-response` | `reasoning.effort: none`，`tools: []`，`max_output_tokens: 4` |
+| Codex | `openai-response` | `reasoning.effort: none`，`tools: []`，`max_output_tokens: 16`（Responses 接口要求的最小值） |
 | Claude | `claude` | `max_tokens: 4` |
 | Antigravity | `openai` | `max_tokens: 4`，`temperature: 0`，`reasoning_effort: none` |
 

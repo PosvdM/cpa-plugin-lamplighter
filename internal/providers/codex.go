@@ -47,7 +47,7 @@ var codex = &Provider{
 				"tools":             []any{},
 				"stream":            false,
 				"store":             false,
-				"max_output_tokens": 4,
+				"max_output_tokens": 16,
 			}
 		},
 		Candidates: codexCandidates,
