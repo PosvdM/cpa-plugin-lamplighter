@@ -16,7 +16,7 @@ var union = []string{
 }
 
 func TestCodexPrefersNewestLuna(t *testing.T) {
-	got, err := Candidates(codex, "ChatGPT", "", union)
+	got, err := Candidates(codex, "GPT", "", union)
 	if err != nil {
 		t.Fatal(err)
 	}

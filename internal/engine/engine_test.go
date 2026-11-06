@@ -165,8 +165,8 @@ func TestPollBuildsAccountsWithSuffixes(t *testing.T) {
 	for _, account := range status.Accounts {
 		titles = append(titles, account.Title)
 	}
-	if strings.Join(titles, ",") != "ChatGPT#am,ChatGPT#rk,Claude,Antigravity" &&
-		strings.Join(titles, ",") != "ChatGPT#rk,ChatGPT#am,Claude,Antigravity" {
+	if strings.Join(titles, ",") != "GPT#am,GPT#rk,Claude,Antigravity" &&
+		strings.Join(titles, ",") != "GPT#rk,GPT#am,Claude,Antigravity" {
 		t.Fatalf("titles %v", titles)
 	}
 	for _, req := range h.requests {

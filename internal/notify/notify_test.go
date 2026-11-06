@@ -32,7 +32,7 @@ func alerts(cfg config.Config, sender Sender) *Alerts {
 }
 
 func group(remaining5h, remaining7d float64, now time.Time) Group {
-	return Group{Key: "codex:1:codex:main", Label: "ChatGPT#eg", Windows: []quota.Window{
+	return Group{Key: "codex:1:codex:main", Label: "GPT#eg", Windows: []quota.Window{
 		{ID: quota.WindowFiveHour, Label: quota.LabelFiveHour, Remaining: remaining5h, Reset: now.Add(5 * time.Hour)},
 		{ID: quota.WindowSevenDay, Label: quota.LabelSevenDay, Remaining: remaining7d, Reset: now.Add(6 * 24 * time.Hour)},
 	}}
@@ -61,7 +61,7 @@ func TestThresholdCrossingNotifiesWithResetHint(t *testing.T) {
 	if len(sender.sent) != 1 {
 		t.Fatalf("want one notification, got %+v", sender.sent)
 	}
-	if got := sender.sent[0].Title; got != "🟡 ChatGPT#eg · 5h 26% | 05h" {
+	if got := sender.sent[0].Title; got != "🟡 GPT#eg · 5h 26% | 05h" {
 		t.Fatalf("title %q", got)
 	}
 	if !strings.HasPrefix(sender.sent[0].Body, "5h：26% | 05h | ") {
@@ -477,7 +477,7 @@ func TestEnglishNotifications(t *testing.T) {
 	a.ProcessGroup(context.Background(), st, group(26, 80, now), now)
 	later := now.Add(5 * time.Hour)
 	a.ProcessGroup(context.Background(), st, group(100, 80, later), later)
-	if len(sender.sent) != 2 || !strings.HasPrefix(sender.sent[0].Body, "5h: 26% | 05h | ") || sender.sent[1].Title != "✅ ChatGPT#eg · 5h recovered" {
+	if len(sender.sent) != 2 || !strings.HasPrefix(sender.sent[0].Body, "5h: 26% | 05h | ") || sender.sent[1].Title != "✅ GPT#eg · 5h recovered" {
 		t.Fatalf("got %+v", sender.sent)
 	}
 	if got := CircuitMessage(LangEN, "Claude", now, "boom", time.UTC).Title; got != "⚠️ Claude ignition paused" {

@@ -31,7 +31,7 @@ func TestParseCodexUsageClassifiesWindowsByLength(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(groups) != 1 || groups[0].Key != "codex:main" || groups[0].SourceLabel != "ChatGPT" {
+	if len(groups) != 1 || groups[0].Key != "codex:main" || groups[0].SourceLabel != "GPT" {
 		t.Fatalf("unexpected groups %+v", groups)
 	}
 	w := groups[0].Windows

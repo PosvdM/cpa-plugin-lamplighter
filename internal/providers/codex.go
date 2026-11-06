@@ -19,7 +19,7 @@ const (
 )
 
 // codexTitle is also the source label of the Codex group.
-const codexTitle = "ChatGPT"
+const codexTitle = "GPT"
 
 var codex = &Provider{
 	ID:      "codex",

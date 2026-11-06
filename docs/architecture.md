@@ -62,7 +62,7 @@ Lamplighter 是用 Go 编写、以 `-buildmode=c-shared` 构建的 CPA 原生插
 - **缺数据**：相邻样本间隔超过 3.5 个查询间隔（或接口的分段长度）时视为缺数据，画成斜线纹理，不延续前一个值。启用被动跳过时，阈值至少为 `passive_skip_max_minutes` 加 1.5 个查询间隔：响应头里没有的窗口（如没在使用的 Fable）在跳过期间只能等下一次主动查询，这段间隔不算缺数据。
 - **多账号合计**：同一服务、同一 `source_label` 的多个账号合成一行，取各账号剩余百分比按权重的加权平均值（`pooled`），权重与各账号的额度大小成比例时，这等于总额度的剩余比例。合计行的当前值、曲线和延长线都用加权值；详情图的阴影仍是各账号的最低到最高。权重依次取 `account_weights` 中按凭证文件名（状态接口中账号的 `name`）设置的值、状态接口中账号的 `default_weight`，都没有时为 1（`accountWeight`）；权重全为 1 时就是简单平均。
 - **窗口种类**：图表按历史系列的 `kind` 分到“5 小时”和“7 天”两个标签页，只显示账号实际报告的种类（一个都不知道时两个都显示），默认打开第一个；其他长度的窗口不画进图表。同一额度名下有自己标签的窗口（例如 Claude 的 `7 Day Opus`）单独成行，不与主窗口合并。
-- **排序**：默认按状态接口的 `group_order`（Claude、ChatGPT、Gemini、Kimi、Grok、Fable、Claude / GPT，来自 `internal/providers/provider.go` 的 `groupOrder`）排列，其他额度按接口顺序排在后面；也可按当前剩余从低到高排列。状态接口中账号按服务的注册顺序排列，同一账号的额度组也按这个顺序排列，所以账号卡片上 Gemini 在 Claude / GPT 之前、Claude 在 Fable 之前。
+- **排序**：默认按状态接口的 `group_order`（Claude、GPT、Gemini、Kimi、Grok、Fable、Claude / GPT，来自 `internal/providers/provider.go` 的 `groupOrder`）排列，其他额度按接口顺序排在后面；也可按当前剩余从低到高排列。状态接口中账号按服务的注册顺序排列，同一账号的额度组也按这个顺序排列，所以账号卡片上 Gemini 在 Claude / GPT 之前、Claude 在 Fable 之前。
 - **记住筛选**：`remember_chart_filters` 开启时，页面把所选窗口、排序和每个窗口各自的时间范围存在 `localStorage` 的 `lamplighter-chart-filters` 中，打开页面时恢复；5 小时和 7 天的时间范围选项不同，所以分开保存。保存的值不在当前选项中时使用默认值。开关读取设置表单中的勾选状态，所以改动在保存前就生效；关闭时删除这项记录。
 - **加载**：页面按所选窗口请求历史（`window` 参数），并按窗口和时间范围缓存响应。切换到缓存过的组合时立即画出缓存的数据，同时重新请求，响应到达后重画；没有缓存时图表变灰，等响应到达。只有最近一次加载的响应会画到图上，切换后才到达的旧响应只存入缓存；同一组合已有请求在进行时，加载沿用这个请求，刷新和点火后的加载除外。请求失败且没有所选组合的数据时，图表显示错误信息，不再显示其他组合的旧图。页面打开、第一张图加载成功后，预先请求另一个窗口的时间范围，切换窗口时不用等待。页面每 30 秒读取一次状态；某个窗口的 `observed_at` 晚于图表中该窗口的最后一个样本，并且来自主动查询或剩余值与最后一个样本不同时（数值不变的被动读数不写入历史），重新请求当前图表（`refreshHistory`）。鼠标在图表卡片内时只保存新数据，移开后再重画，以免替换鼠标下的竖线和提示。
 - **重置**：相邻样本的剩余上升 5 个百分点及以上视为重置。曲线在重置处断开，前一段保持最后的值画到重置样本的时间，新的一段从重置后的值开始，图上标出重置时间；相隔一个样本的两次上升算一次重置。单个账号重置只让合计上升一部分，上升不足 5 个百分点时合计曲线不断开。
@@ -91,7 +91,7 @@ Lamplighter 是用 Go 编写、以 `-buildmode=c-shared` 构建的 CPA 原生插
 
 ## 服务
 
-`internal/providers` 中每个服务是一个 `providers.Provider`，在 `provider.go` 的 `registry` 中按显示顺序注册：ChatGPT（`codex`）、Claude、Antigravity、Kimi、Grok（`xai`）。服务定义包含：
+`internal/providers` 中每个服务是一个 `providers.Provider`，在 `provider.go` 的 `registry` 中按显示顺序注册：GPT（`codex`）、Claude、Antigravity、Kimi、Grok（`xai`）。服务定义包含：
 
 | 字段 | 内容 |
 | --- | --- |

@@ -48,11 +48,11 @@ func captureServer(t *testing.T, status int, response string) (*httptest.Server,
 
 var testMessage = Message{
 	Kind:    KindQuota,
-	Title:   `🔴 ChatGPT#eg · 5h 8% "low"`,
+	Title:   `🔴 GPT#eg · 5h 8% "low"`,
 	Body:    "5h：8% | 03h\n7d：60%",
 	Level:   LevelTimeSensitive,
 	JumpURL: "https://example.com/a?b=c",
-	Label:   "ChatGPT#eg",
+	Label:   "GPT#eg",
 }
 
 func TestWebhookEscapesPlaceholdersWhereTheyAppear(t *testing.T) {
@@ -70,7 +70,7 @@ func TestWebhookEscapesPlaceholdersWhereTheyAppear(t *testing.T) {
 	if err := w.Send(context.Background(), testMessage); err != nil {
 		t.Fatal(err)
 	}
-	if got.method != "POST" || got.path != "/hook/quota" || got.query != "label=ChatGPT%23eg" {
+	if got.method != "POST" || got.path != "/hook/quota" || got.query != "label=GPT%23eg" {
 		t.Fatalf("request %s %s?%s", got.method, got.path, got.query)
 	}
 	if ct := got.header.Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {

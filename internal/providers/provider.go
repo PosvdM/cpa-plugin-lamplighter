@@ -27,7 +27,7 @@ type Provider struct {
 	ID string
 	// Aliases are other names CPA uses for the provider of a credential.
 	Aliases []string
-	// Title is the display name, such as "ChatGPT".
+	// Title is the display name, such as "GPT".
 	Title string
 	// Monitor and Ignite are the default settings.
 	Monitor bool
@@ -130,7 +130,7 @@ func Title(provider string) string {
 // groupOrder lists quota groups in the order the page shows them: the main
 // group of each service, then the separately counted ones. Other groups
 // follow.
-var groupOrder = []string{"Claude", "ChatGPT", "Gemini", "Kimi", "Grok", "Fable", "Claude / GPT"}
+var groupOrder = []string{"Claude", "GPT", "Gemini", "Kimi", "Grok", "Fable", "Claude / GPT"}
 
 // GroupOrder returns the display order of quota groups by source label.
 func GroupOrder() []string { return groupOrder }
