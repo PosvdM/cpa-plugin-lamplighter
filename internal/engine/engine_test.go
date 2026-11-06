@@ -954,6 +954,51 @@ func TestPassiveRelativeResetCountsFromTheRequest(t *testing.T) {
 	t.Fatal("no Codex group")
 }
 
+func TestOlderPassiveReadingDoesNotRepeatAlert(t *testing.T) {
+	c := &clock{t: time.Date(2026, 10, 4, 10, 0, 0, 0, shanghai)}
+	h := standardHost(c)
+	e, sender := newTestEngine(t, h, c)
+	ctx := context.Background()
+	// The active query reads 60% of the 5-hour quota.
+	e.poll(ctx, e.config(), c.t, "", false)
+	usage := func(at time.Time, used string) {
+		e.applyUsage(ctx, usageEvent{provider: "codex", authIndex: "1", at: at, header: http.Header{
+			"X-Codex-Primary-Used-Percent":        {used},
+			"X-Codex-Primary-Reset-After-Seconds": {"10800"},
+			"X-Codex-Primary-Window-Minutes":      {"300"},
+		}})
+	}
+	fiveHour := func() float64 {
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		w, _ := e.groups["codex:1:codex:main"].fiveHour()
+		return w.Remaining
+	}
+	longRequest := c.t.Add(10 * time.Second)
+	c.add(time.Minute)
+	usage(c.t, "50")
+	// A long request started before the 50% reading completes with 58%.
+	c.add(10 * time.Second)
+	usage(longRequest, "42")
+	if got := fiveHour(); got != 50 {
+		t.Fatalf("an older reading replaced a newer one: %v", got)
+	}
+	c.add(10 * time.Second)
+	usage(c.t, "52")
+	notices := 0
+	for _, msg := range sender.sent {
+		if strings.HasPrefix(msg.Title, "🟡") {
+			notices++
+		}
+	}
+	if notices != 1 {
+		t.Fatalf("want one 50%% alert, got %+v", sender.sent)
+	}
+	if got := fiveHour(); got != 48 {
+		t.Fatalf("a newer reading was dropped: %v", got)
+	}
+}
+
 func TestStatusListsProvidersForTheSettings(t *testing.T) {
 	c := &clock{t: time.Date(2026, 10, 4, 10, 0, 0, 0, shanghai)}
 	e, _ := newTestEngine(t, standardHost(c), c)

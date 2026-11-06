@@ -46,8 +46,11 @@ type Cred struct {
 // WindowView is a quota window with its origin.
 type WindowView struct {
 	quota.Window
-	Source     quota.Source
+	Source quota.Source
+	// ObservedAt is when the reading was applied.
 	ObservedAt time.Time
+	// ReadAt is when the provider produced the reading; see applyGroups.
+	ReadAt time.Time
 }
 
 // GroupView is the current state of one quota group.
@@ -143,9 +146,13 @@ func (e *Engine) applyUsage(ctx context.Context, ev usageEvent) {
 	if !cfg.Provider(cred.Provider).Monitor {
 		return
 	}
+	readAt := ev.at
+	if readAt.IsZero() {
+		readAt = now
+	}
 	e.passiveAt[ev.authIndex] = now
 	e.notePassiveFable(cred, groups)
-	e.applyGroups(ctx, cfg, cred, groups, quota.SourcePassive, now, true)
+	e.applyGroups(ctx, cfg, cred, groups, quota.SourcePassive, now, readAt, true)
 }
 
 // notePassiveFable logs the first passive Fable window seen for a credential
@@ -360,7 +367,8 @@ func (e *Engine) refreshCred(ctx context.Context, cfg config.Config, cred *Cred)
 	}
 	credential := providers.ParseCredential(raw)
 	credential.Provider, credential.ID, credential.Name = cred.HostProvider, cred.ID, cred.Name
-	groups, err := providers.Fetch(ctx, p, e.egress, credential, e.now())
+	readAt := e.now()
+	groups, err := providers.Fetch(ctx, p, e.egress, credential, readAt)
 	if err != nil {
 		return err
 	}
@@ -369,7 +377,7 @@ func (e *Engine) refreshCred(ctx context.Context, cfg config.Config, cred *Cred)
 	// The plan comes first, so that a changed plan resets the notification
 	// baselines before the new windows are compared with them.
 	confirmed := e.notePlan(ctx, p, cred, credential, groups, now)
-	e.applyGroups(ctx, cfg, cred, groups, quota.SourceActive, now, confirmed)
+	e.applyGroups(ctx, cfg, cred, groups, quota.SourceActive, now, readAt, confirmed)
 	return nil
 }
 
@@ -535,7 +543,15 @@ func (e *Engine) sendPlanNotice(ctx context.Context, cred *Cred, state *store.Pl
 // the usage API does not report, such as a 5-hour window on a ChatGPT Pro
 // account whose usage API reports only the weekly one. A new window then
 // appears with the next active query.
-func (e *Engine) applyGroups(ctx context.Context, cfg config.Config, cred *Cred, raw []quota.RawGroup, source quota.Source, now time.Time, alerts bool) {
+//
+// readAt is when the provider produced the readings: the start of the
+// active query, or the start of the request whose response headers carry
+// them. A usage record arrives when its request completes, so with parallel
+// requests an older reading can arrive after a newer one. A passive window
+// read before the current one is dropped; its higher quota would otherwise
+// count as a recovery and repeat the threshold alert just sent. A passive
+// group whose windows are all dropped is not processed further.
+func (e *Engine) applyGroups(ctx context.Context, cfg config.Config, cred *Cred, raw []quota.RawGroup, source quota.Source, now, readAt time.Time, alerts bool) {
 	var changed []*GroupView
 	e.mu.Lock()
 	for _, rg := range raw {
@@ -551,12 +567,17 @@ func (e *Engine) applyGroups(ctx context.Context, cfg config.Config, cred *Cred,
 			group.Windows = group.Windows[:0]
 			group.active = true
 		}
+		stale := 0
 		for _, w := range rg.Windows {
-			view := WindowView{Window: w, Source: source, ObservedAt: now}
+			view := WindowView{Window: w, Source: source, ObservedAt: now, ReadAt: readAt}
 			replaced := false
 			for i := range group.Windows {
 				if group.Windows[i].ID == w.ID {
-					group.Windows[i] = view
+					if source == quota.SourcePassive && readAt.Before(group.Windows[i].ReadAt) {
+						stale++
+					} else {
+						group.Windows[i] = view
+					}
 					replaced = true
 					break
 				}
@@ -564,6 +585,9 @@ func (e *Engine) applyGroups(ctx context.Context, cfg config.Config, cred *Cred,
 			if !replaced && (source == quota.SourceActive || !group.active) {
 				group.Windows = append(group.Windows, view)
 			}
+		}
+		if stale > 0 && stale == len(rg.Windows) {
+			continue
 		}
 		sort.SliceStable(group.Windows, func(i, j int) bool {
 			return windowOrder(group.Windows[i].Window) < windowOrder(group.Windows[j].Window)
