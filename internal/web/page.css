@@ -245,20 +245,22 @@ input[type="checkbox"] { width: 16px; height: 16px; padding: 0; accent-color: va
 }
 
 /* Quota cards, following the Management Center quota page */
-.accounts { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+.accounts { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr)); gap: 14px; }
 .card.account {
-  margin: 0; padding: 15px 16px; border-radius: 14px; display: flex; flex-direction: column; gap: 12px;
+  min-width: 0; margin: 0; padding: 15px 16px; border-radius: 14px; display: flex; flex-direction: column; gap: 12px;
   background: color-mix(in srgb, var(--bg-primary) 82%, transparent); box-shadow: none;
   transition: transform 200ms var(--ease-out-strong), border-color 200ms var(--ease-out-strong), box-shadow 200ms var(--ease-out-strong);
 }
 @media (hover: hover) and (pointer: fine) {
   .card.account:hover { transform: translateY(-2px); border-color: var(--border-hover); box-shadow: 0 12px 26px -14px rgb(0 0 0 / 0.16); }
 }
-.account-head { display: flex; align-items: center; gap: 9px; min-width: 0; }
-.account-head .btn { margin-left: auto; }
-.account-head .btn + .btn { margin-left: 0; }
+.account-head { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; min-width: 0; }
+.account-identity { display: flex; align-items: center; gap: 9px; flex: 1 1 200px; min-width: 0; }
+.account-identity .type-badge { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; margin-left: auto; }
+.account-actions .btn { flex: none; }
 .account-email {
-  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: var(--text-secondary); font-size: 13px;
 }
 .account-weight { flex: none; font-family: var(--font-mono); font-size: 12px; font-weight: 650; color: var(--text-secondary); }
@@ -275,7 +277,7 @@ input[type="checkbox"] { width: 16px; height: 16px; padding: 0; accent-color: va
 .quota-group + .quota-group { padding-top: 11px; border-top: 1px solid var(--border-color); }
 .group-title { font-size: 12px; font-weight: 600; color: var(--text-tertiary); letter-spacing: 0.02em; }
 .quota-row { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
-.quota-row-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.quota-row-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; }
 .quota-name { font-size: 12.5px; font-weight: 600; color: var(--text-secondary); }
 .quota-meta {
   display: inline-flex; align-items: baseline; gap: 7px; flex-shrink: 0;

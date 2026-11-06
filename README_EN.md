@@ -288,7 +288,7 @@ plugins:
 
 The page shows:
 
-- the quota windows of each account with reset times, data sources and plan, with buttons to refresh each account, name it or set its weight in the total;
+- the quota windows of each account with reset times, data sources and plan, with buttons to refresh each account, name it or set its weight in the total. When space is limited, the buttons wrap to another line; long titles and email addresses show an ellipsis, with the full text available on hover;
 - the next ignition, last result and failure protection state of each quota group, with an "ignite now" button; hidden while ignition is off;
 - a quota chart:
   - It shows either the 5-hour quota, over 1, 3, 6, 12, 24 or 26 hours (6 by default), or the 7-day quota, over 1, 4, 8 or 15 days, one month (from this date last month) or 36 days (8 days by default). Only the window kinds the accounts have are offered; windows of other lengths only show on the account cards. With `remember_chart_filters` on, the page keeps the last choices.
