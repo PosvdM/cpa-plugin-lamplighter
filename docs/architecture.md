@@ -8,7 +8,8 @@ Lamplighter 是用 Go 编写、以 `-buildmode=c-shared` 构建的 CPA 原生插
 | --- | --- |
 | `main.go` | cgo 入口：导出 C ABI 函数，转发 RPC，实现宿主回调 |
 | `internal/plugin` | 插件 RPC 方法：注册、重新配置、暂停、管理接口、`usage.handle` |
-| `internal/engine` | 后台循环：主动查询、被动数据、点火、通知、历史和状态页数据 |
+| `internal/engine` | 后台循环：主动查询、被动数据、点火、通知、历史和状态页数据；`mcp.go` 提供模型可读 DTO 和额度预测 |
+| `internal/mcp` | 独立 HTTP 监听器、MCP Streamable HTTP 协议、Bearer 鉴权和 Origin 校验 |
 | `internal/host` | 宿主回调的 Go 封装，以及 `host.http.do` 的超时控制 |
 | `internal/config` | 插件配置解析、默认值和取值范围；读取 CPA 配置判断插件是否启用、计算默认数据目录 |
 | `internal/providers` | 每个服务一个文件：额度请求和解析、响应头解析、点火请求、候选模型、默认设置；注册表，见下文“服务” |
@@ -62,7 +63,7 @@ Lamplighter 是用 Go 编写、以 `-buildmode=c-shared` 构建的 CPA 原生插
 - **缺数据**：相邻样本间隔超过 3.5 个查询间隔（或接口的分段长度）时视为缺数据，画成斜线纹理，不延续前一个值。启用被动跳过时，阈值至少为 `passive_skip_max_minutes` 加 1.5 个查询间隔：响应头里没有的窗口（如没在使用的 Fable）在跳过期间只能等下一次主动查询，这段间隔不算缺数据。
 - **多账号合计**：同一服务、同一 `source_label` 的多个账号合成一行，取各账号剩余百分比按权重的加权平均值（`pooled`），权重与各账号的额度大小成比例时，这等于总额度的剩余比例。合计行的当前值、曲线和延长线都用加权值；详情图的阴影仍是各账号的最低到最高。权重依次取 `account_weights` 中按凭证文件名（状态接口中账号的 `name`）设置的值、状态接口中账号的 `default_weight`，都没有时为 1（`accountWeight`）；权重全为 1 时就是简单平均。
 - **窗口种类**：图表按历史系列的 `kind` 分到“5 小时”和“7 天”两个标签页，只显示账号实际报告的种类（一个都不知道时两个都显示），默认打开第一个；其他长度的窗口不画进图表。同一额度名下有自己标签的窗口（例如 Claude 的 `7 Day Opus`）单独成行，不与主窗口合并。
-- **排序**：默认按状态接口的 `group_order`（Claude、GPT、Gemini、Kimi、Grok、Fable、Claude / GPT，来自 `internal/providers/provider.go` 的 `groupOrder`）排列，其他额度按接口顺序排在后面；也可按当前剩余从低到高排列。状态接口中账号按服务的注册顺序排列，同一账号的额度组也按这个顺序排列，所以账号卡片上 Gemini 在 Claude / GPT 之前、Claude 在 Fable 之前。
+- **排序**：默认按状态接口的 `group_order`（Claude、GPT、Gemini、Kimi、Grok、Fable、Claude / GPT，来自 `internal/providers/provider.go` 的 `groupOrder`）排列，其他额度按接口顺序排在后面；也可按当前剩余从低到高排列。状态接口中账号优先按 `account_order` 的凭证文件名排列，未列出的按服务注册顺序、账号后缀排列；不存在的条目忽略，重复条目以第一次为准。同一账号的额度组按额度组注册顺序排列，所以账号卡片上 Gemini 在 Claude / GPT 之前、Claude 在 Fable 之前。
 - **记住筛选**：`remember_chart_filters` 开启时，页面把所选窗口、排序和每个窗口各自的时间范围存在 `localStorage` 的 `lamplighter-chart-filters` 中，打开页面时恢复；5 小时和 7 天的时间范围选项不同，所以分开保存。保存的值不在当前选项中时使用默认值。开关读取设置表单中的勾选状态，所以改动在保存前就生效；关闭时删除这项记录。
 - **加载**：页面按所选窗口请求历史（`window` 参数），并按窗口和时间范围缓存响应。切换到缓存过的组合时立即画出缓存的数据，同时重新请求，响应到达后重画；没有缓存时图表变灰，等响应到达。只有最近一次加载的响应会画到图上，切换后才到达的旧响应只存入缓存；同一组合已有请求在进行时，加载沿用这个请求，刷新和点火后的加载除外。请求失败且没有所选组合的数据时，图表显示错误信息，不再显示其他组合的旧图。页面打开、第一张图加载成功后，预先请求另一个窗口的时间范围，切换窗口时不用等待。页面每 30 秒读取一次状态；某个窗口的 `observed_at` 晚于图表中该窗口的最后一个样本，并且来自主动查询或剩余值与最后一个样本不同时（数值不变的被动读数不写入历史），重新请求当前图表（`refreshHistory`）。鼠标在图表卡片内时只保存新数据，移开后再重画，以免替换鼠标下的竖线和提示。
 - **重置**：相邻样本的剩余上升 5 个百分点及以上视为重置。曲线在重置处断开，前一段保持最后的值画到重置样本的时间，新的一段从重置后的值开始，图上标出重置时间；相隔一个样本的两次上升算一次重置。单个账号重置只让合计上升一部分，上升不足 5 个百分点时合计曲线不断开。
@@ -88,6 +89,29 @@ Lamplighter 是用 Go 编写、以 `-buildmode=c-shared` 构建的 CPA 原生插
 宿主回调绑定在插件实例上，不依赖某次 RPC，所以后台循环可以随时调用。
 
 每轮主动查询开始时，`engine.loadCreds` 读取凭证列表，重新计算每个账号的后缀（`Cred.Suffix`）：备注第一行（`accountName`，最长 `maxNameRunes` 个字符）不为空时为 `#` 加名称，与同一服务另一个账号的后缀相同时（例如名称重复）再加邮箱后缀；没有名称时，同一服务有多个账号才加邮箱后缀（`maskedSuffix`）。额度组的 `Label` 随之更新。告警状态按额度组 key 记录，改名不会重新发送通知。
+
+## MCP
+
+CPA 在转发插件管理请求之前用管理密钥鉴权，并一次性写回响应。MCP 使用插件自己的 `net.Listen` 和 `http.Server`，监听 `mcp_listen`（默认 `127.0.0.1:8318`），路径固定为 `/mcp`，与管理路由和密钥独立。连接及 HTTPS 代理示例见 [README](../README.md#mcp)。
+
+`plugin.Plugin` 持有 `mcp.Server` 和生命周期互斥锁。注册及重新配置成功时根据 `mcp_enabled`、`mcp_listen`、`mcp_key` 应用监听配置，先关闭旧监听器再绑定新地址；配置无法解析时保留有效配置。空密钥阻止启动。绑定失败记录状态并每 2 秒重试，以便热重载中先注册的新实例在旧实例释放端口后接管。`plugin.quiesce`、`plugin.shutdown` 和 C ABI shutdown 均关闭监听器、取消连接并等待 HTTP 工具调用退出，再停止引擎；停止的实例不重启。监听状态由插件填入管理响应的 `mcp`：`enabled`、`listen`、`running`、`error`、`path`。`status.config` 清除 `mcp_key`，仅提供 `mcp_key_set`；宿主的配置 GET/PATCH 保留原值。
+
+### 协议与鉴权
+
+服务采用无会话状态的 Streamable HTTP，支持 `initialize`、`notifications/initialized`、`ping`、`tools/list`、`tools/call`。请求版本为 `2025-03-26` 或 `2025-06-18` 时原样协商，不支持时建议 `2025-06-18`；后续 `MCP-Protocol-Version` 若存在必须受支持。POST 请求只返回 `application/json`，不建立 SSE；通知返回 202 且无正文，GET 返回 405。`2025-03-26` 接受最多 50 项的 JSON-RPC 批次，`2025-06-18` 拒绝批次。请求体最多 1 MiB，读取和写入有超时限制。
+
+每次请求验证 `Authorization: Bearer <mcp_key>`，先对双方求 SHA-256，再常量时间比较，避免泄露密钥长度和前缀。出现 `Origin` 时只接受 http/https 的 `localhost` 或回环 IP，不解析任意主机名，拒绝其他来源和多个 Origin。代理不能把外部 Origin 改写成本机来源。鉴权及 HTTP 传输错误使用对应状态码；JSON-RPC 解析、请求、参数和方法错误使用标准错误码，工具执行错误使用 `isError` 结果。
+
+### 工具数据
+
+`engine.MCPBackend` 使用管理状态的内存快照，但只输出专用 DTO。账号以备注第一行或邮箱标识，没有两者时使用 `account-序号`；不返回凭证文件名、auth index、额度组内部 key、数据目录、配置和通知凭据。上游错误仅映射为查询失败、认证失败或限流，事件不转发原始错误及任意文本。时间对象包含 `iso`（RFC 3339 UTC）和 `relative`。
+
+- `list_quotas` 仅返回当前窗口，按服务及额度组汇总；每个窗口的合计只计入拥有该窗口的账号，权重依次取 `account_weights`、套餐默认权重、1。给出每个窗口最先预计耗尽的账号。5 小时速度采用当前周期累计最低读数的分段最小二乘拟合，最大偏差 2 个百分点，最多 256 个输入点；7 天速度采用本周期累计使用量除以周期已过时间。缺失周期或样本时预测为空；超过 15 分钟或 3 个查询间隔（取较长者）未更新时标记过旧并停止预测。7 天匀速剩余为距重置占整个周期的比例，每日匀速预算为 `100/7`，同时给出实剩、差值和剩余每天可用量。滑动占位观测通过受锁保护的副本提供；不能确认窗口是否开始时返回空值。
+- `get_quota_history` 包装 `HistoryRange`，保留消失的窗口，按服务、账号、窗口筛选后每个系列最多 200 点、单次最多 2000 点，采样保留首尾。已删除账号的历史使用匿名的 `retired account` 标识。
+- `refresh_quotas` 将请求交给原有引擎命令队列，全局每 60 秒一次（失败也计入），超限给出等待秒数和时间。等待上限 180 秒；连接关闭或超时结束等待，已进入引擎的查询可能继续完成。
+- `get_quota_events` 从最近保留的最多 200 条引擎事件中筛选重置、耗尽及点火成功/失败，支持 `since` 和最多 100 条的 `limit`。重置和耗尽事件独立于通知渠道记录，窗口消失或首次返回不产生事件。
+
+CPA 的 `sdk/cliproxy/auth` 在请求执行中应用模型别名、会话亲和、可用凭据、模型冷却及选择器。插件 SDK 不提供完整的模型到凭据路由快照，因此 `model` 查询保守地保留候选额度组并标记 `certain: false`；不根据模型名称猜测唯一账号。
 
 ## 服务
 
@@ -186,7 +210,7 @@ CPA 在用量记录的 `ResponseHeaders` 中提供上游响应头：
 
 Antigravity、Kimi 和 Grok 的响应头里没有额度。
 
-被动数据只更新响应头里有的窗口，主动查询结果替换整个额度组。额度组有过主动查询结果后，被动数据只更新那次结果中出现过的窗口，不新增窗口：ChatGPT Pro 账号的额度接口只返回 7 天窗口，页面上却出现过一个没有重置时间、一直是 100% 的 5 小时窗口，它只能来自响应头。从来没有主动查询结果的额度组（刚启动或查询一直失败）仍接受响应头中的所有窗口。服务新开的窗口要到下一次主动查询才出现。`-Reset-After-Seconds` 从用量记录的 `RequestedAt` 起算：用量记录在请求结束时才到达，从处理时刻起算会把长请求带回的上一周期重置时间推到重置之后。
+被动数据只更新响应头里有的窗口，主动查询结果替换整个凭证的额度组及窗口；未返回的额度组保留空组，避免被动响应头重新补回。主动结果缺席的持久化窗口基线标记 `Rebase`，跨重启保留；窗口重新出现后的第一次读数只作为新起点，不触发恢复或重置前提醒。窗口消失本身不发送通知；没有 5 小时窗口时 `collectTargets` 跳过点火，恢复后自动继续。管理历史仍包含过去出现的所有窗口，由页面决定显示哪些窗口。额度组有过主动查询结果后，被动数据只更新那次结果中出现过的窗口，不新增窗口：ChatGPT Pro 账号的额度接口只返回 7 天窗口，页面上却出现过一个没有重置时间、一直是 100% 的 5 小时窗口，它只能来自响应头。从来没有主动查询结果的额度组（刚启动或查询一直失败）仍接受响应头中的所有窗口。服务新开的窗口要到下一次主动查询才出现。`-Reset-After-Seconds` 从用量记录的 `RequestedAt` 起算：用量记录在请求结束时才到达，从处理时刻起算会把长请求带回的上一周期重置时间推到重置之后。
 
 每个窗口记下当前读数的读取时间（`WindowView.ReadAt`）：主动查询为查询开始的时刻，被动数据为用量记录的 `RequestedAt`，点火确认为点火请求开始的时刻。被动数据的读取时间早于窗口当前读数时，`applyGroups` 丢弃这个窗口的读数；一组窗口全部被丢弃时，不写历史样本，也不处理通知。多个请求并发时，先开始、后结束的长请求会在较新的读数之后带回较高的额度；额度下降较快时，两者相差可能达到 `RecoveryJump`，会被当成恢复，同一档提醒会再推送一次。主动查询结果不受这条规则限制。
 
@@ -268,6 +292,7 @@ CPA 本地冷却带有 `reset_seconds` 且不超过 10 分钟时（`ignite.Coold
 
 `notify.Alerts.ProcessGroup` 比较每个窗口当前剩余额度和已通知等级：
 
+- `config.Parse` 将阈值限幅到 0–100，依次约束 `low_threshold ≤ notice_threshold`、`critical_threshold ≤ low_threshold`；NaN 使用对应默认值，调整写入标准日志。有效配置始终满足 `notice ≥ low ≥ critical`。
 - 等级为 normal、notice（≤50%）、low（≤20%）、critical（≤10%）、exhausted（≤0.01%）。等级变差时推送；critical 和 exhausted 使用 `timeSensitive`。
 - 只有真正恢复才算等级变好：重置时间换到了新窗口，或者比上次读数高出 5 个百分点及以上（`RecoveryJump`）。主动查询和响应头的数值可能差 1 个百分点，同一窗口内的小幅回升不改变已通知等级，所以读数在阈值附近来回跳时只提醒一次。等级变好时只静默更新基线，否则下一轮的下降不会再提醒。
 - 恢复通知和重置前提醒按窗口类别取 `recovery_notify`、`reset_reminder` 中的模式。`notify.SevenDayClass` 按窗口种类（`quota.Kind`）识别 5 小时和 7 天窗口；其他窗口在距离重置超过 1 天时被看到过（`state.json` 的 `long`）就算 7 天窗口，否则算 5 小时窗口。
@@ -310,7 +335,7 @@ Did Codex Reset 每 `poll_seconds` 秒（最少 300 秒，对齐时间边界）�
 | `history/YYYY-MM-DD.jsonl` | 按 UTC 日期分文件的额度样本和事件 |
 | `instance.lock` | 实例锁 |
 
-历史记录每行一个 JSON：样本为 `{"k":"s","t":秒,"g":额度组,"w":窗口,"r":剩余,"x":重置,"s":"active|passive"}`，事件为 `{"k":"e","t":秒,"g":额度组,"e":类型,"v":级别,"m":文本,"l":标签,"d":详情,"p":参数}`。`m` 和 `d` 是写给 CPA 日志的中文；`p` 是页面拼出事件文字所需的值：`ignite` 和 `ignite_manual` 为 `model`、`reset`，`ignite_failed` 为 `retry_seconds`、`error` 和可选的 `cooldown`，`ignite_paused` 为 `until`、`error`，`model_refused` 为 `model`、`fallback`、`hours`，`notify` 为 `title`，`notify_failed` 为 `title`、`error`，`cooldown_stale` 为 `until`，`plan_change` 为 `from`、`to`（套餐名），`codex_reset` 为 `count`；时间为 RFC 3339 UTC。主动样本每次都写；被动样本只在数值或重置时间变化时写，同一窗口每分钟最多一次，期间的新值暂存在 `pendingSamp`，满一分钟后写入。历史接口对超过 2 天的范围分段，每段取最后一个样本：超过 2 天按 10 分钟，超过 4 天按 15 分钟，超过 8 天按 30 分钟，超过 15 天按 1 小时，使这些范围的每个系列不超过约 800 个点（图表约 1000 像素宽）。2 天及以内不分段。分段长度在响应的 `bucket_seconds` 中。每个系列带有 `label`（含账号后缀，例如 `ChatGPT#rk`）和 `source_label`（不含后缀），页面按服务和 `source_label` 合并同一额度的多个账号。
+历史记录每行一个 JSON：样本为 `{"k":"s","t":秒,"g":额度组,"w":窗口,"r":剩余,"x":重置,"s":"active|passive"}`，事件为 `{"k":"e","t":秒,"g":额度组,"e":类型,"v":级别,"m":文本,"l":标签,"d":详情,"p":参数}`。`m` 和 `d` 是写给 CPA 日志的中文；`p` 是页面拼出事件文字所需的值：`ignite` 和 `ignite_manual` 为 `model`、`reset`，`ignite_failed` 为 `retry_seconds`、`error` 和可选的 `cooldown`，`ignite_paused` 为 `until`、`error`，`model_refused` 为 `model`、`fallback`、`hours`，`notify` 为 `title`，`notify_failed` 为 `title`、`error`，`cooldown_stale` 为 `until`，`plan_change` 为 `from`、`to`（套餐名），`codex_reset` 为 `count`；`reset` 和 `exhausted` 为 `window`、`remaining` 及可选的 `reset`；时间为 RFC 3339 UTC。主动样本每次都写；被动样本只在数值或重置时间变化时写，同一窗口每分钟最多一次，期间的新值暂存在 `pendingSamp`，满一分钟后写入。历史接口对超过 2 天的范围分段，每段取最后一个样本：超过 2 天按 10 分钟，超过 4 天按 15 分钟，超过 8 天按 30 分钟，超过 15 天按 1 小时，使这些范围的每个系列不超过约 800 个点（图表约 1000 像素宽）。2 天及以内不分段。分段长度在响应的 `bucket_seconds` 中。每个系列带有 `label`（含账号后缀，例如 `ChatGPT#rk`）和 `source_label`（不含后缀），页面按服务和 `source_label` 合并同一额度的多个账号。
 
 额度组 key 为 `<服务>:<auth_index>:<分组>`，例如 `codex:3:codex:main`、`claude:3:claude:seven-day-fable`、`antigravity:4:antigravity:gemini-models`。它同时是点火目标 ID。
 
@@ -318,6 +343,6 @@ Did Codex Reset 每 `poll_seconds` 秒（最少 300 秒，对齐时间边界）�
 
 - 点火只通过 `host.model.execute` 发送，并锁定到具体凭证；不要在插件中拼装服务的模型请求。
 - 额度请求的出口必须与 CPA 模型请求一致；出口无法确定时跳过请求，不能退回直连。
-- 不在日志、事件、状态接口或磁盘中输出 access token、`bark_url`、`webhook` 的地址、请求头和请求体，以及 `models_api_key`。
+- 不在日志、事件、状态接口或磁盘中输出 access token、`bark_url`、`webhook` 的地址、请求头和请求体，以及 `models_api_key`、`mcp_key`。
 - 宿主回调的 JSON 字段以 CPA v8.0.4 的 `sdk/pluginapi` 和 `internal/pluginhost` 为准；修改前对照 CPA 源码。
 - 修改 `state.json` 结构时保持向后兼容：新字段使用缺省值，旧字段缺失时继续运行。

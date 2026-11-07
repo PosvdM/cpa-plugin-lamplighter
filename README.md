@@ -96,6 +96,8 @@ Kimi 的额度查询按 CPA 管理中心的实现编写，解析用一位用户�
 
 Claude 和 Codex 的额度无论主动还是被动获取，都精确到 1%；Antigravity 的主动查询结果带小数；Kimi 按已用量和上限换算，可能带小数。
 
+窗口在套餐升级时消失、降级后重新出现时，首次返回只记录新的提醒基线，不发送恢复通知或重置前提醒。窗口消失不通知；没有 5 小时窗口时跳过点火，恢复后自动继续。历史记录保留消失的窗口。
+
 **网络出口**：主动查询和 CPA 发送模型请求时使用同一个出口，依次是：账号自己的 `proxy_url`、全局 `proxy-url`、环境变量中的代理、直连。账号配置的 `proxy_url` 无法解析时，插件跳过这次查询，不会改用直连。
 
 ## 自动点火
@@ -155,7 +157,13 @@ Claude 和 Codex 的额度无论主动还是被动获取，都精确到 1%；Ant
 | `history_retention_days` | `40` | 额度历史保留天数 |
 | `remember_chart_filters` | `false` | 管理页面在当前浏览器中记住“额度变化”上次选择的额度窗口、时间范围和排序；关闭时每次打开页面都使用默认选择 |
 | `account_weights` | 空 | 多账号合计中各账号的权重，键为凭证文件名，值为大于 0 的数字；未设置的账号使用套餐的默认权重，见上文 |
+| `account_order` | 空 | 账号顺序，按凭证文件名排列；未列出的账号按默认顺序排在后面，不存在的条目忽略 |
+| `mcp_enabled` | `false` | 启用独立 MCP 服务，见 [MCP](#mcp) |
+| `mcp_listen` | `127.0.0.1:8318` | MCP 监听地址 |
+| `mcp_key` | 空 | MCP 专用 Bearer 密钥；为空时不启动监听 |
 | `data_dir` | 插件目录下的 `data/lamplighter` | 状态和历史目录 |
+
+提醒阈值按 `100 ≥ notice_threshold ≥ low_threshold ≥ critical_threshold ≥ 0` 规整，后两档不能高于前一档；规整后的值生效，并写入日志。
 
 `bark_url` 和 `webhook.url` 都为空时通知关闭：不发送任何通知，也不在事件中记录推送失败。之后再填上地址，关闭期间的额度提醒不会补发；Did Codex Reset 的信号还没过期的会照常推送。
 
@@ -220,6 +228,93 @@ plugins:
       codex_reset_updates:
         enabled: true
 ```
+
+## MCP
+
+MCP 让编码 Agent 通过标准 Streamable HTTP 查询额度，不依赖具体客户端。插件独立监听 `127.0.0.1:8318`，路径为 `/mcp`，使用专用 Bearer 密钥；CPA 管理密钥不能用于此接口。支持协议版本 `2025-03-26` 和 `2025-06-18`，只返回 JSON，不提供 SSE。
+
+在设置中生成并保存 MCP 密钥，再开启 MCP；也可以在 `plugins.configs.lamplighter` 下配置：
+
+```yaml
+mcp_enabled: true
+mcp_listen: "127.0.0.1:8318"
+mcp_key: "<MCP 专用密钥>"
+```
+
+密钥应使用密码学随机数生成器生成，例如 32 字节随机数的 base64url 编码加上 `llmcp_` 前缀。留空时不启动服务，管理状态显示原因。开关、监听地址和密钥修改后自动应用。状态接口只返回 `mcp_key_set`；密钥原文保存在 CPA 配置中，拥有管理密钥的人可以读取。Docker 中该地址位于 CPA 容器内；同机 Agent 可以共享网络，其他部署应通过受限容器网络连接反向代理，避免发布未加密的 MCP 端口。
+
+### 客户端连接
+
+同一网络命名空间中的默认地址为 `http://127.0.0.1:8318/mcp`。远程连接请替换为 HTTPS 地址。以下示例中的 `<key>` 是 MCP 专用密钥。
+
+Claude Code：
+
+```sh
+claude mcp add --transport http lamplighter http://127.0.0.1:8318/mcp --header "Authorization: Bearer <key>"
+```
+
+Codex CLI（密钥通过环境变量提供）：
+
+```sh
+export LAMPLIGHTER_MCP_KEY='<key>'
+codex mcp add lamplighter --url http://127.0.0.1:8318/mcp --bearer-token-env-var LAMPLIGHTER_MCP_KEY
+```
+
+通用客户端配置示例（字段格式以客户端文档为准）：
+
+```json
+{"mcpServers":{"lamplighter":{"type":"http","url":"http://127.0.0.1:8318/mcp","headers":{"Authorization":"Bearer <key>"}}}}
+```
+
+只支持 stdio 的客户端可以通过 `mcp-remote` 连接：
+
+```sh
+npx mcp-remote http://127.0.0.1:8318/mcp --header "Authorization: Bearer <key>"
+```
+
+### HTTPS 反向代理
+
+不建议直接监听公网。远程使用时，保持 MCP 监听回环地址，由同机反向代理终止 TLS，并按需增加防火墙或访问白名单。代理需要保留 `Authorization` 和 `MCP-Protocol-Version` 请求头；带非本机 `Origin` 的浏览器请求会被拒绝，普通 MCP Agent 通常不发送这个头。
+
+Nginx 示例（替换域名和证书路径）：
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name quotas.example.com;
+    ssl_certificate /etc/letsencrypt/live/quotas.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/quotas.example.com/privkey.pem;
+    location = /mcp {
+        proxy_pass http://127.0.0.1:8318/mcp;
+        proxy_set_header Authorization $http_authorization;
+        proxy_set_header MCP-Protocol-Version $http_mcp_protocol_version;
+        proxy_read_timeout 190s;
+    }
+}
+```
+
+Caddy 示例（域名解析到代理，Caddy 自动申请 HTTPS 证书）：
+
+```caddyfile
+quotas.example.com {
+    reverse_proxy /mcp 127.0.0.1:8318 {
+        transport http {
+            response_header_timeout 190s
+        }
+    }
+}
+```
+
+### 工具
+
+| 工具 | 用途 |
+| --- | --- |
+| `list_quotas(provider?, account?, model?)` | 当前窗口、各账号套餐和权重、加权剩余、最早耗尽账号、重置和预计耗尽时间、每小时消耗、7 天匀速预算、数据来源与新鲜度、凭据认证错误及下次点火时间 |
+| `get_quota_history(provider?, account?, window?, range?)` | 历史额度，包括已消失的窗口；每个系列最多 200 点，单次最多 2000 点 |
+| `refresh_quotas(account?)` | 主动查询；全局每 60 秒最多一次，超限返回等待秒数，等待结果最多 180 秒 |
+| `get_quota_events(since?, limit?)` | 最近的重置、耗尽、点火成功和失败；`since` 为带时区的 RFC 3339 时间，`limit` 为 1–100 的整数 |
+
+`account` 按备注第一行或邮箱精确匹配，重名刷新时需改用唯一邮箱。没有备注和邮箱的账号使用 `account-序号`。时间同时包含带时区的 ISO 时间和相对时间。预测取决于使用速度，不能保证准确；数据过旧或无法判断时相应字段为 `null`。`model` 查询返回候选额度组并标记 `certain: false`：CPA 在实际请求中还会应用模型别名、凭据可用性、冷却和会话路由，插件不能保证最终选中哪个账号。遇到 429 时先主动刷新，再结合实际重置时间和 CPA 冷却时间安排重试，不应只依据预计耗尽时间。事件从最近保留的最多 200 条引擎事件中筛选。
 
 ## Webhook
 
@@ -307,7 +402,7 @@ plugins:
 ## 安全与风险
 
 - 插件只在内存中读取凭证文件里的 access token 用于查询额度，不写入日志或磁盘。管理页面和接口都需要 CPA 管理密钥。
-- `bark_url`、`webhook` 和 `models_api_key` 以明文保存在 CPA 的 `config.yaml` 中，有管理密钥的人可以看到。
+- `bark_url`、`webhook`、`models_api_key` 和 `mcp_key` 以明文保存在 CPA 的 `config.yaml` 中，有管理密钥的人可以看到。
 - 各服务对第三方工具使用订阅账号有不同限制。通过 CPA 使用账号、定时发送点火请求和查询额度，都可能带来账号风险，请自行判断。
 
 ## 开发

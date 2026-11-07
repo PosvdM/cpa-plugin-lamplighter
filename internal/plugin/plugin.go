@@ -14,6 +14,7 @@ import (
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/config"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/engine"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/host"
+	"github.com/PosvdM/cpa-plugin-lamplighter/internal/mcp"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/providers"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/web"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginabi"
@@ -29,15 +30,18 @@ const (
 
 // Plugin handles the RPC methods of one loaded plugin instance.
 type Plugin struct {
-	version string
-	engine  *engine.Engine
-	once    sync.Once
+	version     string
+	engine      *engine.Engine
+	once        sync.Once
+	mcp         *mcp.Server
+	lifecycleMu sync.Mutex
+	stopped     bool
 }
 
 // New creates the plugin. dataDir is the default data directory derived from
 // the plugin file location; hostConfigPath is the CPA config file.
 func New(h host.Host, version, dataDir, hostConfigPath string) *Plugin {
-	return &Plugin{
+	p := &Plugin{
 		version: version,
 		engine: engine.New(engine.Options{
 			Host:           h,
@@ -46,6 +50,8 @@ func New(h host.Host, version, dataDir, hostConfigPath string) *Plugin {
 			HostConfigPath: hostConfigPath,
 		}),
 	}
+	p.mcp = mcp.New(engine.NewMCPBackend(p.engine), version)
+	return p
 }
 
 type envelope struct {
@@ -90,7 +96,18 @@ func (p *Plugin) Handle(method string, request []byte) (out []byte) {
 
 // Shutdown stops the engine.
 func (p *Plugin) Shutdown() {
+	p.lifecycleMu.Lock()
+	defer p.lifecycleMu.Unlock()
+	p.stopped = true
+	// Close MCP connections before the engine and host callbacks are released.
+	p.mcp.Close()
 	p.engine.Stop(stopTimeout)
+}
+
+func (p *Plugin) status() engine.Status {
+	status := p.engine.Status()
+	status.MCP = p.mcp.State()
+	return status
 }
 
 func (p *Plugin) handle(method string, request []byte) ([]byte, error) {
@@ -105,11 +122,18 @@ func (p *Plugin) handle(method string, request []byte) ([]byte, error) {
 			}
 		}
 		cfg, err := config.Parse(req.ConfigYAML)
-		p.engine.Configure(cfg, err)
-		p.once.Do(p.engine.Start)
+		p.lifecycleMu.Lock()
+		if !p.stopped {
+			p.engine.Configure(cfg, err)
+			if err == nil {
+				p.mcp.Configure(cfg.MCPEnabled, cfg.MCPListen, cfg.MCPKey)
+			}
+			p.once.Do(p.engine.Start)
+		}
+		p.lifecycleMu.Unlock()
 		return ok(p.registration())
 	case pluginabi.MethodPluginQuiesce, pluginabi.MethodPluginShutdown:
-		p.engine.Stop(stopTimeout)
+		p.Shutdown()
 		return ok(struct{}{})
 	case pluginabi.MethodManagementRegister:
 		return ok(managementRegistration())
@@ -151,6 +175,9 @@ func (p *Plugin) registration() registration {
 				field("bark_url", pluginapi.ConfigFieldTypeString, "Bark 推送地址，到 device key 为止；为空时不通过 Bark 推送 / Bark push URL up to the device key; empty disables Bark"),
 				field("bark_group", pluginapi.ConfigFieldTypeString, "Bark 通知分组 / Bark notification group"),
 				field("webhook", pluginapi.ConfigFieldTypeObject, "自定义 webhook：url、method、headers、body、success_json；url 为空时不启用 / Custom webhook: url, method, headers, body, success_json; empty url disables it"),
+				field("mcp_enabled", pluginapi.ConfigFieldTypeBoolean, "启用独立 MCP HTTP 服务 / Enable the independent MCP HTTP server"),
+				field("mcp_listen", pluginapi.ConfigFieldTypeString, "MCP 监听地址，默认 127.0.0.1:8318 / MCP listen address, default 127.0.0.1:8318"),
+				field("mcp_key", pluginapi.ConfigFieldTypeString, "MCP 专用 Bearer 密钥 / Dedicated MCP Bearer key"),
 				field("models_api_key", pluginapi.ConfigFieldTypeString, "读取 /v1/models 用的专用 CPA API key / Dedicated CPA API key for reading /v1/models"),
 				field("cpa_base_url", pluginapi.ConfigFieldTypeString, "插件访问 CPA 自身的地址 / Address the plugin uses to reach CPA"),
 				field("notice_threshold", pluginapi.ConfigFieldTypeNumber, "第一档提醒阈值（剩余百分比） / First alert threshold (percent remaining)"),
@@ -244,7 +271,7 @@ func (p *Plugin) handleManagement(req pluginapi.ManagementRequest) pluginapi.Man
 	}
 	switch strings.ToUpper(req.Method) + " " + path {
 	case "GET " + apiBase + "/status":
-		return jsonResponse(http.StatusOK, p.engine.Status())
+		return jsonResponse(http.StatusOK, p.status())
 	case "GET " + apiBase + "/history":
 		resp, err := p.engine.HistoryRange(req.Query.Get("range"), req.Query.Get("window"))
 		if err != nil {
@@ -267,7 +294,7 @@ func (p *Plugin) handleManagement(req pluginapi.ManagementRequest) pluginapi.Man
 		for _, result := range results {
 			ok = ok && result.OK
 		}
-		return jsonResponse(http.StatusOK, map[string]any{"ok": ok, "results": results, "status": p.engine.Status()})
+		return jsonResponse(http.StatusOK, map[string]any{"ok": ok, "results": results, "status": p.status()})
 	case "POST " + apiBase + "/language":
 		return actionResponse(p.engine.SetLanguage(body.Language), p)
 	case "POST " + apiBase + "/check-update":
@@ -281,9 +308,9 @@ func actionResponse(err error, p *Plugin) pluginapi.ManagementResponse {
 		return errorResponse(http.StatusServiceUnavailable, err)
 	}
 	if err != nil {
-		return jsonResponse(http.StatusOK, map[string]any{"ok": false, "error": err.Error(), "status": p.engine.Status()})
+		return jsonResponse(http.StatusOK, map[string]any{"ok": false, "error": err.Error(), "status": p.status()})
 	}
-	return jsonResponse(http.StatusOK, map[string]any{"ok": true, "status": p.engine.Status()})
+	return jsonResponse(http.StatusOK, map[string]any{"ok": true, "status": p.status()})
 }
 
 // providersDescription describes the providers key with the provider IDs,
