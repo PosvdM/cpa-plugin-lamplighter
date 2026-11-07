@@ -744,11 +744,10 @@
     return !!(window.ClipboardItem && navigator.clipboard && navigator.clipboard.write && window.isSecureContext);
   }
 
-  var SNAPSHOT_CSS = ".snapshot-frame{padding:12px;background:var(--bg-secondary);color:var(--text-primary);-webkit-font-smoothing:antialiased}" +
-    ".snapshot-frame,.snapshot-frame *,.snapshot-frame *::before,.snapshot-frame *::after{animation:none!important;transition:none!important}" +
-    ".snapshot-frame .detail-head{margin-top:0;padding-top:0;border-top:0}";
-
-  // A PNG blob of the nodes side by side in a frame width pixels wide.
+  // A PNG blob of the nodes side by side in a frame width pixels wide. The
+  // frame's style (.snapshot-frame in page.css) is part of the page's style
+  // sheet, so the frame is measured off screen with the same style the
+  // image is drawn with.
   function snapshotPng(nodes, width) {
     var body = getComputedStyle(document.body);
     var frame = el("div", { class: "snapshot-frame" });
@@ -770,7 +769,7 @@
     var w = Math.ceil(frame.getBoundingClientRect().width), h = Math.ceil(frame.getBoundingClientRect().height);
     document.body.removeChild(host);
     var scale = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
-    var css = Array.prototype.map.call(document.querySelectorAll("style"), function (s) { return s.textContent; }).join("\n") + SNAPSHOT_CSS;
+    var css = Array.prototype.map.call(document.querySelectorAll("style"), function (s) { return s.textContent; }).join("\n");
     var root = document.documentElement, theme = root.getAttribute("data-theme");
     var markup = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" + w * scale + "\" height=\"" + h * scale + "\" viewBox=\"0 0 " + w + " " + h + "\"" +
       (theme ? " data-theme=\"" + theme + "\"" : "") + " class=\"" + root.className + "\" lang=\"" + root.lang + "\">" +
