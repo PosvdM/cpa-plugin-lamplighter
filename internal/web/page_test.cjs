@@ -66,7 +66,7 @@ test("an early reset cuts the even pace where the new reset appears", () => {
   assert.equal(segs.length, 2);
   // The old line starts where its window began and stops at the early reset
   // at the share an even pace leaves there, not at 0%.
-  assert.deepEqual(plain(segs[0]), [x1 - WEEK, early, x1]);
+  assert.deepEqual(plain(segs[0]), [x1 - WEEK, early, x1, false]);
   assert.ok(Math.abs(ctx.paceAt(segs, WEEK, early - 1) - 100 * 2 / 7) < 0.01);
   // From the early reset on, the new window runs from 100% over a full week.
   assert.ok(Math.abs(ctx.paceAt(segs, WEEK, early) - 100) < 1e-9);
@@ -91,6 +91,9 @@ test("no even pace while the reset is unknown, and a new status reset applies fr
   const segs = ctx.paceSegments([[x - 4 * HOUR, x], [x - HOUR, 0]], L, x + 4 * HOUR, now);
   assert.equal(ctx.paceAt(segs, L, x - 2 * HOUR) > 0, true);
   assert.equal(ctx.paceAt(segs, L, x - 30 * 60), null);
+  // From the moment the reset is unknown, not only after it.
+  assert.equal(ctx.paceAt(segs, L, x - HOUR), null);
+  assert.ok(ctx.paceAt(segs, L, x - HOUR - 1) > 0);
   assert.equal(ctx.paceAt(segs, L, now - 60), null);
   assert.ok(Math.abs(ctx.paceAt(segs, L, now) - 40) < 1e-9);
   assert.ok(Math.abs(ctx.paceAt(segs, L, x + 3 * HOUR) - 20) < 1e-9);
@@ -207,6 +210,7 @@ test("a current window whose reset became unknown ends the even pace now", () =>
   // Reset unknown in the status: the line stops now, including the future.
   let segs = ctx.paceSegments(history, L, 0, now);
   assert.ok(ctx.paceAt(segs, L, now - 1) > 0);
+  assert.equal(ctx.paceAt(segs, L, now), null);
   assert.equal(ctx.paceAt(segs, L, now + HOUR), null);
   assert.equal(ctx.paceAt(segs, L, x - 1), null);
   // Without the window in the status, the history holds.
@@ -220,5 +224,6 @@ test("a current window whose reset became unknown ends the even pace now", () =>
   const a = { weight: 1, segments: ctx.paceSegments(history, L, 0, now) };
   const b = { weight: 1, segments: ctx.paceSegments([[now - DAY, now + 6 * DAY]], L, now + 6 * DAY, now) };
   assert.ok(ctx.pooledPace([a, b], L, now - 1) > 0);
+  assert.equal(ctx.pooledPace([a, b], L, now), null);
   assert.equal(ctx.pooledPace([a, b], L, now + HOUR), null);
 });

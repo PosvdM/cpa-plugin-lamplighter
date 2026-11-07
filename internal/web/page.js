@@ -693,7 +693,15 @@
     });
     var past = [];
     ((status && status.events) || []).concat((history && history.events) || []).forEach(function (ev) { past.push(ev.label); });
-    ((history && history.series) || []).forEach(function (s) { if (s.label !== s.source_label) past.push(s.label); });
+    // A series of a quota group no current account has lost its metadata:
+    // the history names it by the internal group key, which identifies the
+    // account, so its names count whatever they look like.
+    var groups = {};
+    accounts.forEach(function (a) { (a.groups || []).forEach(function (g) { groups[g.key] = true; }); });
+    ((history && history.series) || []).forEach(function (s) {
+      if (s.label !== s.source_label) past.push(s.label);
+      if (!groups[s.group]) past.push(s.label, s.source_label, s.group);
+    });
     past.forEach(function (name) {
       name = typeof name === "string" ? name.trim() : "";
       if (name.length >= 2 && !common[name]) found[name] = true;
@@ -1677,7 +1685,10 @@
         sub: meta ? meta.email : emailOf[s.auth_index] || s.auth_index || "", group: s.group, inactive: !meta, lastAt: lastPoint ? lastPoint[0] : null,
         points: s.points, floor: cycleFloor(s.points), resets: Array.isArray(s.resets) ? s.resets : [],
         reset: meta ? meta.reset : null, weight: meta ? meta.weight : 1, last: lastPoint ? lastPoint[1] : meta.remaining,
-        account: account === undefined ? status.accounts.length + seq : account, seq: seq });
+        account: account === undefined ? status.accounts.length + seq : account, seq: seq,
+        // No current account: the name, often the internal group key, is
+        // sensitive as a whole.
+        orphan: account === undefined });
     });
     var lowFirst = chartSort === "low";
     var groupOrder = status.group_order || [];
@@ -1900,7 +1911,7 @@
       var maxChars = Math.floor((g.labelW - nameX - (r.children ? 30 : 8)) / 7);
       if (name.length > maxChars) name = name.slice(0, Math.max(1, maxChars - 1)) + "…";
       root.appendChild(svgSensitive(svgText({ x: nameX, y: y0 + 15, "font-size": f.depth ? 12 : 13, "font-weight": f.depth ? 400 : 600,
-        fill: cssVar(f.depth ? "--text-secondary" : "--text-primary"), "class": "row-name" }, name), f.depth || hasSecret(f.depth ? r.sub : r.name)));
+        fill: cssVar(f.depth ? "--text-secondary" : "--text-primary"), "class": "row-name" }, name), f.depth || r.orphan || hasSecret(f.depth ? r.sub : r.name)));
       if (r.children) root.appendChild(svgText({ x: nameX + name.length * 8 + 8, y: y0 + 15, "font-size": 11, fill: cssVar("--text-tertiary") }, "×" + r.children.length));
       root.appendChild(svg("rect", { x: g.labelW, y: y0, width: g.plotW, height: LANE, rx: 4, fill: cssVar("--chart-lane") }));
       drawBand(root, g, r.floor, y0, limit, r.inactive);
@@ -2094,21 +2105,25 @@
     }
     var out = [];
     if (!(length > 0)) return out;
+    // A segment cut by an unknown reset leaves out its end, the time from
+    // which the reset is unknown, as the 4th element.
     list.forEach(function (r, i) {
       var x = r[1];
       if (!(x > 0)) return;
-      var a = Math.max(r[0], x - length), b = i + 1 < list.length ? Math.min(list[i + 1][0], x) : x;
-      if (b > a) out.push([a, b, x]);
+      var next = list[i + 1];
+      var a = Math.max(r[0], x - length), b = next ? Math.min(next[0], x) : x;
+      if (b > a) out.push([a, b, x, !!next && !(next[1] > 0) && next[0] <= x]);
     });
     return out;
   }
 
   // The even pace at t, or null outside the segments. Where two segments
-  // meet, the later one counts.
+  // meet, the later one counts, and where the reset becomes unknown there
+  // is none.
   function paceAt(segments, length, t) {
     var value = null;
     segments.forEach(function (s) {
-      if (t >= s[0] && t <= s[1]) value = 100 * (s[2] - t) / length;
+      if (t >= s[0] && (s[3] ? t < s[1] : t <= s[1])) value = 100 * (s[2] - t) / length;
     });
     return value;
   }
@@ -2260,7 +2275,7 @@
     pieces.forEach(function (piece) { resets = resets.concat(piece.split.resets); });
     var even = row.inactive ? { breaks: [], at: function () { return null; } } : rowPace(row, g.now);
 
-    head.appendChild(el("span", { class: "detail-name" }, maskedNodes(row.name).concat([" · " + translate(historyWindow === "5h" ? "quota_5h" : "quota_7d")])));
+    head.appendChild(el("span", { class: "detail-name" }, (row.orphan ? [el("span", { class: SENSITIVE, text: row.name })] : maskedNodes(row.name)).concat([" · " + translate(historyWindow === "5h" ? "quota_5h" : "quota_7d")])));
     if (row.inactive) head.appendChild(badge("muted", translate("inactive")));
     head.appendChild(el("span", { class: "muted" + (group ? "" : " " + SENSITIVE), text: group ? translate("pooled_note", row.children.length) : row.sub }));
     head.appendChild(snapshotButton("snapshot_detail", function () { return [head, box]; }));
@@ -2279,7 +2294,7 @@
 
     var H = 206, top = 22, bottom = 24, plotH = H - top - bottom;
     function y(v) { return top + (1 - v / 100) * plotH; }
-    var spoken = masked && hasSecret(row.name) ? accountAlias(row.account) : row.name;
+    var spoken = masked && (row.orphan || hasSecret(row.name)) ? accountAlias(row.account) : row.name;
     var root = svg("svg", { viewBox: "0 0 " + g.width + " " + H, role: "img", "aria-label": translate("detail_aria", spoken) });
     var defs = hatchPattern(root);
     var fade = svg("linearGradient", { id: "chart-fade", x1: 0, x2: 0, y1: 0, y2: 1 });
@@ -2539,7 +2554,7 @@
       (r.children || [r]).forEach(function (c) {
         var values = c.points.filter(function (p) { return p[0] >= from; }).map(function (p) { return p[1]; });
         table.appendChild(el("tr", {}, [
-          el("td", {}, maskedNodes(c.name)),
+          c.orphan ? el("td", { class: SENSITIVE, text: c.name }) : el("td", {}, maskedNodes(c.name)),
           el("td", { class: SENSITIVE, text: c.sub }),
           el("td", { class: "num", text: pct(c.last) }),
           el("td", { class: "num", text: pct(values.length ? Math.min.apply(null, values) : null) }),
@@ -3177,7 +3192,7 @@
       }
     }
     if (input.name === "ignition.enabled") renderIgnitionOff();
-    setSaveState(host, "saving", translate("save_saving"));
+    var say = claimState(host);
     var gens = {};
     tops.forEach(function (name) { gens[name] = noteEdit(name); });
     var intent = captureIntent(tops);
@@ -3192,8 +3207,7 @@
       // A key edited again during the check is checked by its own change event.
       if (input.type === "password" && input.value.trim() !== value) return;
       if (check && check.refused) {
-        setSaveState(host, "failed", translate("api_key_refused"));
-        fillInput(input, effectiveConfig());
+        if (say("failed", translate("api_key_refused"))) fillInput(input, effectiveConfig());
         return;
       }
       var patch = {};
@@ -3203,11 +3217,11 @@
       });
       return patchConfig(patch).then(function (token) {
         // Once applied, the fields show the values the plugin uses.
-        showApplied(host, token, check, /^mcp_/.test(top)).then(function (applied) { if (applied) refill(); });
+        showApplied(say, token, check, /^mcp_/.test(top)).then(function (applied) { if (applied) refill(); });
         return loadConfig();
       }).catch(function (err) {
         if (err.message === "unauthorized") return;
-        setSaveState(host, "failed", translate("save_failed_short", err.message));
+        say("failed", translate("save_failed_short", err.message));
         refill();
       });
     });
@@ -3314,23 +3328,37 @@
     }, 1000);
   }
 
-  // The save state of a field after CPA saved it: waiting until the plugin
-  // applies it, then applied, or unconfirmed after the timeout. A change of
-  // MCP settings shows the MCP error instead when the endpoint does not
-  // start. check is the result of checkKey for an API key. A newer state of
-  // the field replaces this one.
-  function showApplied(host, token, check, mcp) {
-    var node = setSaveState(host, "waiting", translate("save_waiting"));
-    var owner = {};
+  // Shows "saving" beside a field for a save made now, and returns the
+  // function that shows the later states of this save. Once a newer save or
+  // edit of the field shows a state of its own, or clears it, the function
+  // shows nothing and returns false, so an older save that completes late
+  // does not label the newer value.
+  function claimState(host) {
+    var node = setSaveState(host, "saving", translate("save_saving")), owner = {};
     if (node) node.owner = owner;
+    return function (state, text) {
+      if (!node || node.owner !== owner) return false;
+      setSaveState(host, state, text);
+      node.owner = owner;
+      return true;
+    };
+  }
+
+  // The save state of a field after CPA saved it, through say from
+  // claimState: waiting until the plugin applies it, then applied, or
+  // unconfirmed after the timeout. A change of MCP settings shows the MCP
+  // error instead when the endpoint does not start. check is the result of
+  // checkKey for an API key. The save waits for its token even when a newer
+  // save owns the field's state.
+  function showApplied(say, token, check, mcp) {
+    say("waiting", translate("save_waiting"));
     return whenApplied(token).then(function (applied) {
-      if (!node || node.owner !== owner) return applied;
       var error = mcp && status && status.mcp && status.mcp.enabled && status.mcp.error;
-      if (!applied) setSaveState(host, "unverified", translate("save_unconfirmed"));
-      else if (error) setSaveState(host, "failed", translate("mcp_error", error));
-      else if (check && check.ok) setSaveState(host, "verified", translate("save_applied_verified"));
-      else if (check) setSaveState(host, "unverified", translate("save_applied_unverified", check.reason));
-      else setSaveState(host, "saved", translate("save_applied"));
+      if (!applied) say("unverified", translate("save_unconfirmed"));
+      else if (error) say("failed", translate("mcp_error", error));
+      else if (check && check.ok) say("verified", translate("save_applied_verified"));
+      else if (check) say("unverified", translate("save_applied_unverified", check.reason));
+      else say("saved", translate("save_applied"));
       return applied;
     });
   }
@@ -3448,14 +3476,13 @@
   // A new key replaces the old one at once; replacing a key asks first.
   function generateMcpKey() {
     if (mcpKey() && !confirm(translate("mcp_regenerate_confirm"))) return;
-    var host = $("mcp-key-field"), secret = newMcpKey();
-    setSaveState(host, "saving", translate("save_saving"));
+    var say = claimState($("mcp-key-field")), secret = newMcpKey();
     saveQueue = saveQueue.then(function () {
       return patchConfig({ mcp_key: secret }).then(function (token) {
-        showApplied(host, token, null, true);
+        showApplied(say, token, null, true);
         return loadConfig();
       }).catch(function (err) {
-        if (err.message !== "unauthorized") setSaveState(host, "failed", translate("save_failed_short", err.message));
+        if (err.message !== "unauthorized") say("failed", translate("save_failed_short", err.message));
       });
     });
   }
