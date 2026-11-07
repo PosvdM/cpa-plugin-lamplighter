@@ -96,6 +96,8 @@ If an account produced passive data in the 60 seconds before a scheduled query, 
 
 Claude and Codex quotas have 1% precision, whether queried or read passively. Antigravity queries return decimals, and so can Kimi, whose percentage is computed from used and limit counts.
 
+When an upgrade removes a window and a downgrade brings it back, its first returning reading only establishes a new alert baseline, without recovery or pre-reset notifications. Disappearance sends no notification. An absent 5-hour window is not ignited; ignition resumes automatically when it returns. History retains retired windows.
+
 **Network exit**: active queries leave through the same exit that CPA uses for model requests of the account: the account's `proxy_url`, then the global `proxy-url`, then proxies from environment variables, then a direct connection. When an account's `proxy_url` cannot be parsed, the plugin skips the query instead of connecting directly.
 
 ## Window ignition
@@ -155,7 +157,13 @@ All settings live under `plugins.configs.lamplighter` in `config.yaml`, and can 
 | `history_retention_days` | `40` | Days of quota history to keep |
 | `remember_chart_filters` | `false` | The management page remembers, in the current browser, the quota window, time range and order last chosen in the quota chart; when off, the page opens with the defaults |
 | `account_weights` | empty | The weight of each account in the total of several accounts, keyed by credential file name, a number above 0; accounts without one use the default of their plan, see above |
+| `account_order` | empty | Account order by credential file name; unlisted accounts follow in default order and missing entries are ignored |
+| `mcp_enabled` | `false` | Enable the independent MCP server, see [MCP](#mcp) |
+| `mcp_listen` | `127.0.0.1:8318` | MCP listen address |
+| `mcp_key` | empty | Dedicated MCP Bearer key; empty prevents listening |
 | `data_dir` | `data/lamplighter` in the plugin directory | State and history directory |
+
+Alert thresholds are normalized to `100 ≥ notice_threshold ≥ low_threshold ≥ critical_threshold ≥ 0`: later levels cannot exceed earlier ones. The normalized values take effect and the adjustment is logged.
 
 With both `bark_url` and `webhook.url` empty, notifications are off: nothing is sent and no failed notifications are logged as events. Quota alerts from that time are not sent once a URL is set; Did Codex Reset signals that have not expired are still sent.
 
@@ -220,6 +228,93 @@ plugins:
       codex_reset_updates:
         enabled: true
 ```
+
+## MCP
+
+MCP lets coding agents query quota through standard Streamable HTTP, independently of the client. The plugin listens on `127.0.0.1:8318` at `/mcp` and requires a dedicated Bearer key. The CPA management key does not authenticate this endpoint. Protocol versions `2025-03-26` and `2025-06-18` are supported; responses are JSON only, without SSE.
+
+Generate and save an MCP key in the settings, then enable MCP. Alternatively, configure these keys under `plugins.configs.lamplighter`:
+
+```yaml
+mcp_enabled: true
+mcp_listen: "127.0.0.1:8318"
+mcp_key: "<dedicated MCP key>"
+```
+
+Use a cryptographic random generator for the key, for example 32 random bytes encoded as base64url with an `llmcp_` prefix. An empty key prevents the listener from starting and reports the reason in management status. Changes to the switch, address or key apply automatically. Status exposes only `mcp_key_set`; the original key is stored in CPA configuration and can be read by anyone with the management key. In Docker, the loopback address belongs to the CPA container. A local agent can share that network namespace; other deployments should connect a reverse proxy through a restricted container network without publishing an unencrypted MCP port.
+
+### Client connections
+
+The default URL within the same network namespace is `http://127.0.0.1:8318/mcp`. Replace it with an HTTPS URL for remote access. `<key>` below is the dedicated MCP key.
+
+Claude Code:
+
+```sh
+claude mcp add --transport http lamplighter http://127.0.0.1:8318/mcp --header "Authorization: Bearer <key>"
+```
+
+Codex CLI, with the key provided through an environment variable:
+
+```sh
+export LAMPLIGHTER_MCP_KEY='<key>'
+codex mcp add lamplighter --url http://127.0.0.1:8318/mcp --bearer-token-env-var LAMPLIGHTER_MCP_KEY
+```
+
+Generic client configuration example; check the client's documentation for its configuration format:
+
+```json
+{"mcpServers":{"lamplighter":{"type":"http","url":"http://127.0.0.1:8318/mcp","headers":{"Authorization":"Bearer <key>"}}}}
+```
+
+Clients that only support stdio can connect through `mcp-remote`:
+
+```sh
+npx mcp-remote http://127.0.0.1:8318/mcp --header "Authorization: Bearer <key>"
+```
+
+### HTTPS reverse proxy
+
+Do not expose the listener directly to the public Internet. For remote use, keep MCP on loopback and terminate TLS with a reverse proxy on the same host. Add firewall restrictions or an allowlist as needed. Preserve the `Authorization` and `MCP-Protocol-Version` headers. Browser requests with a non-local `Origin` are rejected; ordinary MCP agents usually omit this header.
+
+Nginx example; replace the domain and certificate paths:
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name quotas.example.com;
+    ssl_certificate /etc/letsencrypt/live/quotas.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/quotas.example.com/privkey.pem;
+    location = /mcp {
+        proxy_pass http://127.0.0.1:8318/mcp;
+        proxy_set_header Authorization $http_authorization;
+        proxy_set_header MCP-Protocol-Version $http_mcp_protocol_version;
+        proxy_read_timeout 190s;
+    }
+}
+```
+
+Caddy example; point the domain at the proxy and let Caddy obtain the HTTPS certificate:
+
+```caddyfile
+quotas.example.com {
+    reverse_proxy /mcp 127.0.0.1:8318 {
+        transport http {
+            response_header_timeout 190s
+        }
+    }
+}
+```
+
+### Tools
+
+| Tool | Purpose |
+| --- | --- |
+| `list_quotas(provider?, account?, model?)` | Current windows, account plans and weights, weighted remaining quota, earliest account exhaustion, resets, forecasts, hourly consumption, seven-day even-pace budgets, freshness and source, credential authentication errors and next ignition |
+| `get_quota_history(provider?, account?, window?, range?)` | Quota history including retired windows; at most 200 points per series and 2000 points per response |
+| `refresh_quotas(account?)` | Active query, globally limited to once per 60 seconds; returns remaining wait seconds when throttled and waits at most 180 seconds for results |
+| `get_quota_events(since?, limit?)` | Recent reset, exhaustion and ignition success/failure events; `since` is an RFC3339 timestamp with timezone and `limit` an integer from 1 to 100 |
+
+`account` matches the first line of the note or the email exactly. Use a unique email for refresh when names are ambiguous. Accounts without either use `account-number`. Times include both ISO timestamps with timezone and relative descriptions. Forecasts depend on continued use at the measured rate and are not guarantees; stale or unknown predictions are `null`. A `model` query returns candidate quota pools with `certain: false`: CPA also applies model aliases, credential availability, cooldowns and session routing during actual requests, so the plugin cannot guarantee which account will be selected. After a 429, refresh first and use the actual reset and CPA cooldown times to schedule a retry rather than relying only on a forecast. Events are filtered from at most 200 retained engine events of all kinds.
 
 ## Webhook
 
@@ -307,7 +402,7 @@ The page follows the language of the CPA Management Center: Chinese for Simplifi
 ## Security and risk
 
 - The plugin reads the access token from the credential file into memory only to query quota, and never writes it to logs or disk. The page and its API require the CPA management key.
-- `bark_url`, `webhook` and `models_api_key` are stored in plain text in CPA's `config.yaml`, visible to anyone with the management key.
+- `bark_url`, `webhook`, `models_api_key` and `mcp_key` are stored in plain text in CPA's `config.yaml`, visible to anyone with the management key.
 - Each service restricts the use of subscription accounts through third-party tools in its own way. Using accounts through CPA, sending scheduled ignition requests and querying quota may all put accounts at risk. Use it at your own discretion.
 
 ## Development

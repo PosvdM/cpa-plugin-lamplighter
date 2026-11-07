@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/config"
+	"github.com/PosvdM/cpa-plugin-lamplighter/internal/mcp"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/notify"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/providers"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/quota"
@@ -271,11 +272,12 @@ type WindowStatus struct {
 	Label string `json:"label"`
 	Short string `json:"short"`
 	// Kind is "5h", "7d" or empty for a window of another length.
-	Kind       string    `json:"kind,omitempty"`
-	Remaining  float64   `json:"remaining"`
-	Reset      time.Time `json:"reset,omitempty"`
-	Source     string    `json:"source"`
-	ObservedAt time.Time `json:"observed_at"`
+	Kind          string    `json:"kind,omitempty"`
+	PeriodSeconds float64   `json:"period_seconds,omitempty"`
+	Remaining     float64   `json:"remaining"`
+	Reset         time.Time `json:"reset,omitempty"`
+	Source        string    `json:"source"`
+	ObservedAt    time.Time `json:"observed_at"`
 }
 
 // GroupStatus is one quota group on the status page.
@@ -311,13 +313,14 @@ type AccountStatus struct {
 
 // Status is the response of the status endpoint.
 type Status struct {
-	Version     string `json:"version"`
-	Running     bool   `json:"running"`
-	Enabled     bool   `json:"enabled"`
-	ConfigError string `json:"config_error,omitempty"`
-	LockError   string `json:"lock_error,omitempty"`
-	ModelsError string `json:"models_error,omitempty"`
-	ListError   string `json:"list_error,omitempty"`
+	MCP         mcp.State `json:"mcp"`
+	Version     string    `json:"version"`
+	Running     bool      `json:"running"`
+	Enabled     bool      `json:"enabled"`
+	ConfigError string    `json:"config_error,omitempty"`
+	LockError   string    `json:"lock_error,omitempty"`
+	ModelsError string    `json:"models_error,omitempty"`
+	ListError   string    `json:"list_error,omitempty"`
 	// NotifyError is the reason the webhook settings were not applied.
 	NotifyError string `json:"notify_error,omitempty"`
 	DataDir     string `json:"data_dir"`
@@ -383,6 +386,9 @@ func (e *Engine) Status() Status {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	cfg := e.cfg
+	cfg.MCPKeySet = cfg.MCPKey != ""
+	cfg.MCPKey = ""
+	cfg.AccountOrder = append([]string(nil), cfg.AccountOrder...)
 	if cfg.BarkURL != "" {
 		cfg.BarkURL = "已设置"
 	}
@@ -430,11 +436,28 @@ func (e *Engine) Status() Status {
 	for _, cred := range e.creds {
 		creds = append(creds, cred)
 	}
+	order := make(map[string]int, len(cfg.AccountOrder))
+	for i, name := range cfg.AccountOrder {
+		if _, exists := order[name]; !exists {
+			order[name] = i
+		}
+	}
 	sort.SliceStable(creds, func(i, j int) bool {
+		ri, listedI := order[creds[i].Name]
+		rj, listedJ := order[creds[j].Name]
+		if listedI != listedJ {
+			return listedI
+		}
+		if listedI && ri != rj {
+			return ri < rj
+		}
 		if creds[i].Provider != creds[j].Provider {
 			return providers.Rank(creds[i].Provider) < providers.Rank(creds[j].Provider)
 		}
-		return creds[i].Suffix < creds[j].Suffix
+		if creds[i].Suffix != creds[j].Suffix {
+			return creds[i].Suffix < creds[j].Suffix
+		}
+		return creds[i].Name < creds[j].Name
 	})
 	for _, cred := range creds {
 		account := AccountStatus{
@@ -469,14 +492,15 @@ func (e *Engine) Status() Status {
 			gs := GroupStatus{Key: group.Key, Label: group.Label, SourceLabel: group.SourceLabel}
 			for _, w := range group.Windows {
 				gs.Windows = append(gs.Windows, WindowStatus{
-					ID:         w.ID,
-					Label:      w.Label,
-					Short:      quota.ShortLabel(w.Label),
-					Kind:       quota.Kind(w.Window),
-					Remaining:  w.Remaining,
-					Reset:      w.Reset,
-					Source:     string(w.Source),
-					ObservedAt: w.ObservedAt,
+					ID:            w.ID,
+					Label:         w.Label,
+					Short:         quota.ShortLabel(w.Label),
+					Kind:          quota.Kind(w.Window),
+					PeriodSeconds: w.Period.Seconds(),
+					Remaining:     w.Remaining,
+					Reset:         w.Reset,
+					Source:        string(w.Source),
+					ObservedAt:    w.ObservedAt,
 				})
 			}
 			account.Groups = append(account.Groups, gs)
@@ -597,7 +621,7 @@ func (e *Engine) History(span time.Duration, kind string) (HistoryResponse, erro
 	dataDir := e.dataDir
 	labels := map[string]GroupView{}
 	for key, group := range e.groups {
-		labels[key] = GroupView{Key: key, Provider: group.Provider, AuthIndex: group.AuthIndex, SourceLabel: group.SourceLabel, Label: group.Label, Windows: group.Windows}
+		labels[key] = GroupView{Key: key, Provider: group.Provider, AuthIndex: group.AuthIndex, SourceLabel: group.SourceLabel, Label: group.Label, Windows: append([]WindowView(nil), group.Windows...)}
 	}
 	e.mu.Unlock()
 	now := e.now().UTC()
