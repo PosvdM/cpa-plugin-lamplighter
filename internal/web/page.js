@@ -3593,13 +3593,17 @@
   $("settings").addEventListener("change", saveField);
   // Editing a field clears its last save state.
   $("settings").addEventListener("input", function (e) {
+    // The state beside a field describes the value it shows, so any edit,
+    // also while an earlier value is being saved, clears it and takes it
+    // from the earlier save until the new value is saved itself. Typing,
+    // pasting, checkboxes, radios and selects all fire input.
     var top = inputTop(e.target);
     if (top) noteEdit(top);
     var host = top ? saveHost(e.target) : null;
     if (host) Array.prototype.forEach.call(host.children, function (child) {
-      if (child.classList.contains("save-state") && child.getAttribute("data-state") !== "saving") {
-        child.textContent = ""; child.removeAttribute("data-state"); child.owner = null;
-      }
+      if (!child.classList.contains("save-state")) return;
+      clearTimeout(child.timer);
+      child.textContent = ""; child.removeAttribute("data-state"); child.owner = null;
     });
     if (e.target.name === "mcp_listen") renderMcp();
   });
