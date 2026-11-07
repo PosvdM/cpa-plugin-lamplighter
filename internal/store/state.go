@@ -9,6 +9,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"sync"
 )
 
@@ -57,10 +59,12 @@ type PendingRecovery struct {
 // GroupState holds the notification baselines of one quota group.
 type GroupState struct {
 	// ActiveWindows 保存最近一次成功主动查询确认的窗口；nil 表示尚未确认。
-	ActiveWindows []string                `json:"active_windows"`
-	Label         string                  `json:"label,omitempty"`
-	LastSeen      int64                   `json:"last_seen,omitempty"`
-	Windows       map[string]*WindowState `json:"windows"`
+	ActiveWindows []string `json:"active_windows"`
+	// LegacyUnconfirmed 限制磁盘中已有但缺少可靠主动确认信息的组；不持久化。
+	LegacyUnconfirmed bool                    `json:"-"`
+	Label             string                  `json:"label,omitempty"`
+	LastSeen          int64                   `json:"last_seen,omitempty"`
+	Windows           map[string]*WindowState `json:"windows"`
 }
 
 // Observation is the last observed 5-hour reset of an ignition target.
@@ -241,7 +245,48 @@ func (f *StateFile) Load() (state *State, fresh bool, err error) {
 		return NewState(), true, fmt.Errorf("状态文件损坏，已重建: %w", err)
 	}
 	state.ensure()
+	state.restoreActiveWindows()
 	return state, false, nil
+}
+
+// restoreActiveWindows 只信任成功主动查询写入的非空 plans.windows。
+// 通知基线、Rebase 和点火观测都不能证明当前窗口仍然存在。
+func (s *State) restoreActiveWindows() {
+	for key, group := range s.Groups {
+		if group.ActiveWindows != nil {
+			continue
+		}
+		group.LegacyUnconfirmed = true
+		parts := strings.SplitN(key, ":", 3)
+		if len(parts) != 3 {
+			continue
+		}
+		plan := s.Plans[parts[1]]
+		if plan == nil || plan.Windows == "" {
+			continue
+		}
+		windows := []string{}
+		valid := true
+		for _, entry := range strings.Split(plan.Windows, "\n") {
+			name, id, ok := strings.Cut(entry, "|")
+			if !ok || name == "" || id == "" || strings.Contains(id, "|") {
+				valid = false
+				break
+			}
+			if name == parts[2] {
+				windows = append(windows, id)
+			}
+		}
+		if valid {
+			group.ActiveWindows = windows
+			group.LegacyUnconfirmed = false
+			for id, ws := range group.Windows {
+				if ws != nil && !slices.Contains(windows, id) {
+					ws.Rebase = true
+				}
+			}
+		}
+	}
 }
 
 // Save writes state atomically.
