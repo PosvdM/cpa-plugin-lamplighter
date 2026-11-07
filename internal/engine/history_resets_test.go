@@ -40,16 +40,16 @@ func TestHistoryResetsPreserveRawChangesAndRangePredecessor(t *testing.T) {
 			t.Fatalf("unknown resets must be an empty array: %+v", series)
 		}
 	}
-	want := [][2]int64{{times[0], reset}, {times[3], reset - 3600}, {times[5], 0}, {times[7], reset + 7200}}
+	want := [][2]int64{{times[1], reset + 30}, {times[3], reset - 3600}, {times[5], 0}, {times[7], reset + 7200}}
 	if !slices.Equal(got.Resets, want) {
 		t.Fatalf("resets=%v want=%v", got.Resets, want)
 	}
 	if len(got.Points) != 2 || int64(got.Points[1][0]) != times[7] {
 		t.Fatalf("point downsampling changed: %v", got.Points)
 	}
-	// 最早重置事件比 points 的一天前导范围更早，仍需保留其实际生效时间。
-	if got.Resets[0][0] >= from.Add(-24*time.Hour).Unix() {
-		t.Fatal("reset predecessor was replaced with point lead time")
+	// 范围前使用最后一个样本的时间和值，不追溯该 x 首次出现的时间。
+	if got.Resets[0][0] != times[1] {
+		t.Fatal("reset predecessor must use the last pre-range sample")
 	}
 }
 

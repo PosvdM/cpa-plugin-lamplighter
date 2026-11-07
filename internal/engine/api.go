@@ -645,11 +645,15 @@ func (e *Engine) historyContext(ctx context.Context, span time.Duration, kind st
 	}
 	history := &store.History{Dir: dataDir + "/history"}
 	var records []store.Record
+	var window store.HistoryWindow
 	var err error
 	if bounded {
 		// MCP 保留有限桶用于预测及响应，不构造管理图表的重置事件。
 		bucket := max(resp.Bucket, max(1, int64(span.Seconds())/2000))
 		records, err = history.QuerySampled(ctx, resp.From.Add(-historyLead), now, bucket, accept)
+	} else {
+		window, err = history.QueryWindow(ctx, resp.From, now)
+		records = window.Records
 	}
 	if err != nil {
 		return resp, err
@@ -659,7 +663,7 @@ func (e *Engine) historyContext(ctx context.Context, span time.Duration, kind st
 	before := map[string][3]float64{}
 	var order []string
 	resetEvents := map[string][][2]int64{}
-	knownReset := map[string]bool{}
+	knownReset := window.KnownReset
 	previousReset := map[string]int64{}
 	visit := func(record store.Record) error {
 		if err := ctx.Err(); err != nil {
@@ -746,35 +750,14 @@ func (e *Engine) historyContext(ctx context.Context, span time.Duration, kind st
 		s.Points = append(s.Points, point)
 		return nil
 	}
-	if bounded {
-		for _, record := range records {
-			if err := visit(record); err != nil {
-				return resp, err
-			}
-		}
-	} else {
-		// 先确定范围内出现的系列，范围外的退役系列不进入排序和摘要。
-		needed := map[string]bool{}
-		err := history.Scan(ctx, resp.From, now, func(record store.Record) error {
-			if record.Kind != "e" {
-				needed[record.Group+"|"+record.Window] = true
-			}
-			return nil
-		})
-		if err != nil {
+	// 范围前只用最后一个样本初始化重置状态；其时间无需是 x 首次出现的时间。
+	for _, predecessor := range window.Before {
+		if err := visit(predecessor); err != nil {
 			return resp, err
 		}
-		scanFrom := time.Time{}
-		if len(needed) == 0 {
-			scanFrom = resp.From
-		}
-		err = history.ScanOrdered(ctx, scanFrom, now, func(record store.Record) bool {
-			if record.Kind == "e" {
-				return record.Time >= from && (record.Event == "ignite" || record.Event == "ignite_manual" || record.Event == "ignite_failed" || record.Event == "ignite_paused")
-			}
-			return needed[record.Group+"|"+record.Window]
-		}, visit)
-		if err != nil {
+	}
+	for _, record := range records {
+		if err := visit(record); err != nil {
 			return resp, err
 		}
 	}
