@@ -187,7 +187,21 @@ header .update path { fill: none; stroke: currentColor; stroke-width: 1.8; strok
 .block { margin-bottom: 18px; }
 
 /* The switch between the quota and settings views, below the header. */
-.view-nav { margin: -4px 0 16px; }
+.view-nav { margin: -4px 0 16px; display: flex; align-items: center; gap: 8px; }
+
+/* Account masking: the eye button beside the view switch blurs the text
+   that names accounts (.account-sensitive). */
+.mask-toggle { padding: 6px 8px; color: var(--text-secondary); }
+.mask-toggle svg { display: block; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.mask-toggle[aria-pressed="true"] { background: var(--bg-tertiary); border-color: var(--border-color); color: var(--text-primary); }
+.mask-accounts .account-sensitive { filter: blur(5px); }
+
+/* Screenshot buttons, and the off-screen copy measured for a screenshot. */
+.btn.snapshot { padding: 4px 6px; }
+.btn.snapshot svg { display: block; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linejoin: round; }
+.block-head .btn.snapshot { margin-left: auto; }
+.detail-head .btn.snapshot { order: 1; margin-left: auto; align-self: center; }
+.snapshot-host { position: fixed; left: -100000px; top: 0; pointer-events: none; }
 .hint.settings-note { margin: 0 0 14px; }
 .settings-section { display: flex; flex-direction: column; gap: 14px; }
 .settings-section > .card-title { margin: 0; }
@@ -428,6 +442,7 @@ details.advanced > summary { margin-top: 0; }
 .save-state[data-state="saved"], .save-state[data-state="verified"] { color: var(--success-badge-text); }
 .save-state[data-state="saved"]::before, .save-state[data-state="verified"]::before { content: "✓ "; }
 .save-state[data-state="unverified"] { color: var(--amber-text); }
+.save-state[data-state="waiting"] { color: var(--text-secondary); }
 .save-state[data-state="failed"] { color: var(--error-color); }
 label.inline .save-state, td .save-state, .mode-row .save-state, .snippet-head .save-state, .key-row .save-state { margin-left: 8px; }
 td .save-state { display: inline-block; }

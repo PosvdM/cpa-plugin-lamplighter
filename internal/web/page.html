@@ -37,6 +37,8 @@
       <button type="button" class="seg" data-value="quota" aria-pressed="true" data-i18n="quota">额度</button>
       <button type="button" class="seg" data-value="settings" aria-pressed="false" data-i18n="settings">设置</button>
     </div>
+    <!-- Blurs the account names for screenshots; page.js draws the icon. -->
+    <button id="mask-toggle" class="btn btn-ghost btn-icon mask-toggle" type="button" aria-pressed="false" title="打码账号" aria-label="打码账号"></button>
   </nav>
 
   <div id="notices"></div>
@@ -137,7 +139,7 @@
         <p class="hint" data-i18n="webhook_hint">地址、请求头和请求体中可以使用占位符：{{title}} {{body}} {{text}} {{url}} {{priority}} {{kind}} {{label}} {{time}}。各服务的写法见 README。</p>
         <p class="hint" id="notify-off" data-i18n="notify_off" hidden>未设置 Bark 推送地址或 Webhook 地址，通知已关闭。</p>
         <div class="test-row">
-          <button id="test-notify" class="btn btn-secondary" type="button" title="发送到所有已配置的渠道；刚修改的设置会等插件应用后再发送" data-i18n="test_notify" data-i18n-title="test_notify_hint">测试推送</button>
+          <button id="test-notify" class="btn btn-secondary" type="button" title="发送到所有已配置的渠道；刚修改的设置生效后才发送" data-i18n="test_notify" data-i18n-title="test_notify_hint">测试推送</button>
           <div id="test-results" class="test-results" aria-live="polite"></div>
         </div>
       </section>

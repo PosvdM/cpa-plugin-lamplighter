@@ -118,8 +118,8 @@
       webhook_success: "成功条件（可选）", webhook_success_hint: "JSON 响应必须包含这些字段和值才算发送成功；留空时只检查 HTTP 状态码",
       webhook_hint: "地址、请求头和请求体中可以使用占位符：{{title}} {{body}} {{text}} {{url}} {{priority}} {{kind}} {{label}} {{time}}。各服务的写法见 README。",
       headers_invalid: "每行写一个请求头，格式为 名称: 值", json_invalid: "请填写 JSON 对象，例如 {\"code\":0}",
-      test_notify: "测试推送", test_notify_hint: "发送到所有已配置的渠道；刚修改的设置会等插件应用后再发送",
-      test_waiting: "等待插件应用新设置…", test_stale: "新设置可能尚未生效，这次测试按插件当前的设置发送。",
+      test_notify: "测试推送", test_notify_hint: "发送到所有已配置的渠道；刚修改的设置生效后才发送",
+      test_waiting: "等待插件应用新设置…", test_not_applied: "配置尚未生效，未发送测试",
       test_ok: "{0}：已发送", test_failed: "{0}：失败，{1}", test_response: "响应：{0}",
       test_unchecked: "只检查了 HTTP 状态码。飞书、钉钉、企业微信等服务失败时也返回 200，请到客户端确认是否收到，或设置成功条件。",
       test_some_failed: "部分渠道测试失败", test_all_failed: "测试推送失败",
@@ -227,8 +227,12 @@
       ignition_off: "自动点火已关闭，这些设置暂不生效。",
       ignition_models_hint: "选择点火模型需要“高级”中的模型列表 API key。",
       monitor_hint: "勾选要监控额度的服务。",
-      save_saving: "保存中…", save_saved: "已保存", save_failed_short: "失败：{0}",
-      key_verified: "已保存，验证通过", key_unverified: "已保存，未能验证：{0}", network_error: "网络错误",
+      save_saving: "保存中…", save_failed_short: "失败：{0}",
+      save_waiting: "已保存，等待生效", save_applied: "已生效", save_unconfirmed: "未确认生效",
+      save_applied_verified: "已生效，验证通过", save_applied_unverified: "已生效，未能验证：{0}", network_error: "网络错误",
+      mask_on: "打码账号", mask_off: "显示账号", account_n: "账号 {0}",
+      snapshot_card: "复制这张卡片的截图", snapshot_cards: "复制所有卡片的截图", snapshot_detail: "复制曲线详情图的截图",
+      snapshot_copied: "已复制截图", snapshot_failed: "截图复制失败：{0}", snapshot_unsupported: "当前浏览器不支持复制图片",
       mcp_hint: "AI 客户端（如 Claude Code）可以通过 MCP 查询额度、历史和事件，并刷新额度。",
       mcp_enabled: "启用 MCP 接口", mcp_listen: "监听地址", mcp_key: "密钥", mcp_key_unset: "未设置",
       mcp_show: "显示", mcp_hide: "隐藏", copy: "复制", copied: "已复制", copy_failed: "无法复制，请手动选择文本复制",
@@ -270,8 +274,8 @@
       webhook_success: "Success condition (optional)", webhook_success_hint: "The JSON response must contain these fields and values for the delivery to count; empty checks only the HTTP status",
       webhook_hint: "The URL, headers and body can use placeholders: {{title}} {{body}} {{text}} {{url}} {{priority}} {{kind}} {{label}} {{time}}. See the README for each service.",
       headers_invalid: "One header per line, as Name: value", json_invalid: "Enter a JSON object, such as {\"code\":0}",
-      test_notify: "Send test", test_notify_hint: "Sends to every configured channel; settings just changed are applied first",
-      test_waiting: "Waiting for the plugin to apply the new settings…", test_stale: "The new settings may not be in effect yet; this test used the settings the plugin has applied.",
+      test_notify: "Send test", test_notify_hint: "Sends to every configured channel once the settings just changed are in effect",
+      test_waiting: "Waiting for the plugin to apply the new settings…", test_not_applied: "The new settings are not in effect yet, so the test was not sent",
       test_ok: "{0}: sent", test_failed: "{0}: failed, {1}", test_response: "Response: {0}",
       test_unchecked: "Only the HTTP status was checked. Feishu, DingTalk, WeCom and similar services answer 200 on failure too, so check that the message arrived or set a success condition.",
       test_some_failed: "Some channels failed the test", test_all_failed: "The test notification failed",
@@ -379,8 +383,12 @@
       ignition_off: "Ignition is off, so these settings do not apply for now.",
       ignition_models_hint: "Picking ignition models needs the model list API key under Advanced.",
       monitor_hint: "Check the services whose quota to monitor.",
-      save_saving: "Saving…", save_saved: "Saved", save_failed_short: "Failed: {0}",
-      key_verified: "Saved; CPA accepts the key", key_unverified: "Saved, but could not verify: {0}", network_error: "network error",
+      save_saving: "Saving…", save_failed_short: "Failed: {0}",
+      save_waiting: "Saved; waiting to take effect", save_applied: "In effect", save_unconfirmed: "Not confirmed in effect",
+      save_applied_verified: "In effect; CPA accepts the key", save_applied_unverified: "In effect, but could not verify: {0}", network_error: "network error",
+      mask_on: "Blur accounts", mask_off: "Show accounts", account_n: "Account {0}",
+      snapshot_card: "Copy a screenshot of this card", snapshot_cards: "Copy a screenshot of all cards", snapshot_detail: "Copy a screenshot of the detail chart",
+      snapshot_copied: "Screenshot copied", snapshot_failed: "Could not copy the screenshot: {0}", snapshot_unsupported: "This browser cannot copy images",
       mcp_hint: "AI clients such as Claude Code can read quota, history and events and refresh quota over MCP.",
       mcp_enabled: "Enable the MCP endpoint", mcp_listen: "Listen address", mcp_key: "Key", mcp_key_unset: "Not set",
       mcp_show: "Show", mcp_hide: "Hide", copy: "Copy", copied: "Copied", copy_failed: "Could not copy; select the text and copy it",
@@ -440,6 +448,8 @@
     languageApplied = true;
     applyStaticText();
     renderRangeButtons();
+    renderMaskButton();
+    renderCardsSnapshot();
     if (status) {
       renderStatus();
       $("timezone-note").textContent = timezoneText();
@@ -517,7 +527,8 @@
   var toastTimer = null;
   function toast(message) {
     var node = $("toast");
-    node.textContent = message;
+    clear(node);
+    maskedNodes(message).forEach(function (child) { node.appendChild(child); });
     node.hidden = false;
     clearTimeout(toastTimer);
     toastTimer = setTimeout(function () { node.hidden = true; }, 5000);
@@ -637,6 +648,183 @@
     return el("span", { class: "badge badge-" + kind }, [el("span", { class: "badge-dot" }), document.createTextNode(text)]);
   }
 
+  // ---- Account masking ----
+
+  // The eye button in the header blurs every text that names an account,
+  // for screenshots to share. The page shows accounts again when reloaded.
+  // Text that names accounts carries SENSITIVE, which .mask-accounts
+  // blurs; chart text in SVG gets the mask-blur filter instead. Masked,
+  // title tooltips that name accounts are left out and labels for screen
+  // readers number the accounts. Prompts and confirmations keep the names.
+  var SENSITIVE = "account-sensitive";
+  var masked = false;
+
+  function accountAlias(index) { return translate("account_n", index + 1); }
+
+  // The names that tell accounts apart: titles, emails, credential file
+  // names and group labels, without the provider and group names they
+  // share. Longest first, so an email wins over a part of it.
+  function accountSecrets() {
+    var common = {}, found = {};
+    providerList().forEach(function (p) { common[p.title] = true; common[p.id] = true; });
+    var accounts = (status && status.accounts) || [];
+    accounts.forEach(function (a) { (a.groups || []).forEach(function (g) { common[g.source_label] = true; }); });
+    accounts.forEach(function (a) {
+      var names = [a.title, a.email, a.name];
+      (a.groups || []).forEach(function (g) { names.push(g.label); });
+      names.forEach(function (name) {
+        name = typeof name === "string" ? name.trim() : "";
+        if (name.length >= 2 && !common[name]) found[name] = true;
+      });
+    });
+    return Object.keys(found).sort(function (a, b) { return b.length - a.length; });
+  }
+
+  function hasSecret(text) {
+    text = String(text == null ? "" : text);
+    return accountSecrets().some(function (name) { return text.indexOf(name) >= 0; });
+  }
+
+  // The text as nodes, with each account name in a SENSITIVE span.
+  function maskedNodes(text) {
+    var rest = String(text == null ? "" : text), secrets = accountSecrets(), out = [];
+    while (rest) {
+      var at = -1, hit = "";
+      secrets.forEach(function (name) {
+        var i = rest.indexOf(name);
+        if (i >= 0 && (at < 0 || i < at)) { at = i; hit = name; }
+      });
+      if (at < 0) { out.push(document.createTextNode(rest)); break; }
+      if (at) out.push(document.createTextNode(rest.slice(0, at)));
+      out.push(el("span", { class: SENSITIVE, text: hit }));
+      rest = rest.slice(at + hit.length);
+    }
+    return out;
+  }
+
+  // An SVG text that names an account, blurred while masked.
+  function svgSensitive(node, always) {
+    if (masked && (always || hasSecret(node.textContent))) node.setAttribute("filter", "url(#mask-blur)");
+    return node;
+  }
+
+  function renderMaskButton() {
+    var button = $("mask-toggle");
+    var label = translate(masked ? "mask_off" : "mask_on");
+    button.setAttribute("aria-pressed", masked ? "true" : "false");
+    button.setAttribute("title", label);
+    button.setAttribute("aria-label", label);
+    clear(button);
+    var icon = svg("svg", { viewBox: "0 0 16 16", width: 16, height: 16, "aria-hidden": "true" });
+    icon.appendChild(svg("path", { d: "M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8s-2.4 4.5-6.5 4.5S1.5 8 1.5 8z" }));
+    icon.appendChild(svg("circle", { cx: 8, cy: 8, r: 2.1 }));
+    if (masked) icon.appendChild(svg("path", { d: "M2.5 2.5l11 11" }));
+    button.appendChild(icon);
+  }
+
+  function toggleMask() {
+    masked = !masked;
+    document.documentElement.classList.toggle("mask-accounts", masked);
+    renderMaskButton();
+    if (!status) return;
+    renderStatus();
+    if (history) renderChart();
+  }
+
+  // ---- Screenshots ----
+
+  // The camera buttons copy a PNG of an account card, of all cards or of
+  // the detail chart to the clipboard, as the page shows it, masking
+  // included. The nodes are cloned without the .no-snapshot buttons and
+  // drawn with the page's style sheet through an SVG foreignObject on a
+  // canvas, at the screen's pixel ratio. Animations, transitions and hover
+  // styles are left out. Nothing outside the page is loaded, so the canvas
+  // stays readable.
+  function canCopyImage() {
+    return !!(window.ClipboardItem && navigator.clipboard && navigator.clipboard.write && window.isSecureContext);
+  }
+
+  var SNAPSHOT_CSS = ".snapshot-frame{padding:12px;background:var(--bg-secondary);color:var(--text-primary);-webkit-font-smoothing:antialiased}" +
+    ".snapshot-frame,.snapshot-frame *,.snapshot-frame *::before,.snapshot-frame *::after{animation:none!important;transition:none!important}" +
+    ".snapshot-frame .detail-head{margin-top:0;padding-top:0;border-top:0}";
+
+  // A PNG blob of the nodes side by side in a frame width pixels wide.
+  function snapshotPng(nodes, width) {
+    var body = getComputedStyle(document.body);
+    var frame = el("div", { class: "snapshot-frame" });
+    frame.style.width = width + "px";
+    frame.style.fontFamily = body.fontFamily;
+    frame.style.fontSize = body.fontSize;
+    frame.style.lineHeight = body.lineHeight;
+    nodes.forEach(function (node) {
+      var copy = node.cloneNode(true);
+      Array.prototype.forEach.call(copy.querySelectorAll(".no-snapshot, .tooltip, [visibility='visible'][pointer-events='none']"), function (n) {
+        n.parentNode.removeChild(n);
+      });
+      if (copy.classList) copy.classList.remove("dragging");
+      frame.appendChild(copy);
+    });
+    // Measured off screen, with the page's layout.
+    var host = el("div", { class: "snapshot-host", "aria-hidden": "true" }, [frame]);
+    document.body.appendChild(host);
+    var w = Math.ceil(frame.getBoundingClientRect().width), h = Math.ceil(frame.getBoundingClientRect().height);
+    document.body.removeChild(host);
+    var scale = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+    var css = Array.prototype.map.call(document.querySelectorAll("style"), function (s) { return s.textContent; }).join("\n") + SNAPSHOT_CSS;
+    var root = document.documentElement, theme = root.getAttribute("data-theme");
+    var markup = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" + w * scale + "\" height=\"" + h * scale + "\" viewBox=\"0 0 " + w + " " + h + "\"" +
+      (theme ? " data-theme=\"" + theme + "\"" : "") + " class=\"" + root.className + "\" lang=\"" + root.lang + "\">" +
+      "<style><![CDATA[" + css.split("]]>").join("]]]]><![CDATA[>") + "]]></style>" +
+      "<foreignObject x=\"0\" y=\"0\" width=\"" + w + "\" height=\"" + h + "\">" + new XMLSerializer().serializeToString(frame) + "</foreignObject></svg>";
+    return new Promise(function (resolve, reject) {
+      var img = new Image();
+      img.onload = function () {
+        var canvas = document.createElement("canvas");
+        canvas.width = w * scale;
+        canvas.height = h * scale;
+        try {
+          canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+          canvas.toBlob(function (blob) { if (blob) resolve(blob); else reject(new Error("canvas")); }, "image/png");
+        } catch (err) { reject(err); }
+      };
+      img.onerror = function () { reject(new Error("image")); };
+      img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(markup);
+    });
+  }
+
+  // Writes the PNG to the clipboard within the click, which the browser
+  // requires, while the image is still being drawn.
+  function copySnapshot(nodes) {
+    var width = nodes.reduce(function (max, n) { return Math.max(max, n.getBoundingClientRect().width); }, 0);
+    var png;
+    try { png = snapshotPng(nodes, Math.ceil(width) + 24); } catch (err) { png = Promise.reject(err); }
+    var write;
+    try { write = navigator.clipboard.write([new ClipboardItem({ "image/png": png })]); } catch (err) { write = Promise.reject(err); }
+    png.catch(function () {});
+    write.then(function () { toast(translate("snapshot_copied")); }, function (err) {
+      toast(translate("snapshot_failed", (err && (err.message || err.name)) || String(err)));
+    });
+  }
+
+  // The button for all cards, beside "Refresh all".
+  function renderCardsSnapshot() {
+    var old = $("snapshot-cards"), button = snapshotButton("snapshot_cards", function () { return [$("accounts")]; });
+    button.id = "snapshot-cards";
+    if (old) old.parentNode.replaceChild(button, old);
+    else $("refresh-all").parentNode.insertBefore(button, $("refresh-all"));
+  }
+
+  // A camera button that copies a screenshot of the nodes nodesOf returns.
+  function snapshotButton(label, nodesOf) {
+    var ok = canCopyImage();
+    var icon = svg("svg", { viewBox: "0 0 16 16", width: 15, height: 15, "aria-hidden": "true" });
+    icon.appendChild(svg("path", { d: "M2 5.5A1.5 1.5 0 0 1 3.5 4h1.6l1.1-1.5h3.6L10.9 4h1.6A1.5 1.5 0 0 1 14 5.5v6a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5z" }));
+    icon.appendChild(svg("circle", { cx: 8, cy: 8.5, r: 2.4 }));
+    var text = ok ? translate(label) : translate("snapshot_unsupported");
+    return el("button", { type: "button", class: "btn btn-ghost btn-icon snapshot no-snapshot", title: text, "aria-label": text, disabled: !ok,
+      onclick: function () { copySnapshot(nodesOf()); } }, [icon]);
+  }
+
   // ---- Status rendering ----
 
   function renderHeader() {
@@ -669,7 +857,7 @@
   }
 
   function notice(text) {
-    return el("div", { class: "notice" }, [el("span", { class: "notice-icon", text: "!" }), el("span", { text: text })]);
+    return el("div", { class: "notice" }, [el("span", { class: "notice-icon", text: "!" }), el("span", {}, maskedNodes(text))]);
   }
 
   function renderNotices() {
@@ -691,7 +879,7 @@
 
   // An empty window shows no fill: its whole track turns dark red and
   // striped instead.
-  function quotaRow(group, w, index) {
+  function quotaRow(group, w, index, account) {
     var remaining = Math.max(0, Math.min(100, w.remaining));
     var level = quotaLevel(w.remaining);
     var reset = parseTime(w.reset);
@@ -707,7 +895,7 @@
         el("span", { class: "quota-meta" }, meta)
       ]),
       el("div", { class: "quota-bar" + (level === "empty" ? " bar-empty" : ""), role: "meter", "aria-valuemin": "0", "aria-valuemax": "100",
-        "aria-valuenow": String(Math.round(remaining)), "aria-label": translate("remaining_aria", group.label, windowName(w)) }, [
+        "aria-valuenow": String(Math.round(remaining)), "aria-label": translate("remaining_aria", masked ? accountAlias(account) : group.label, windowName(w)) }, [
         level === "empty" ? null : el("span", { class: "quota-fill fill-" + level, style: "width:" + remaining + "%;--meter-index:" + index })
       ])
     ]);
@@ -757,8 +945,7 @@
     renderAccounts();
     if (history) renderChart();
     saveQueue = saveQueue.then(function () {
-      return api("PATCH", CONFIG_API, { account_order: names }).then(function () {
-        noteSaved({ account_order: names });
+      return patchConfig({ account_order: names }).then(function () {
         if (pendingOrder && pendingOrder.join("\n") === names.join("\n")) pendingOrder = null;
         return loadConfig();
       }).catch(function (err) {
@@ -854,40 +1041,43 @@
     status.accounts.forEach(function (a) { counts[a.provider] = (counts[a.provider] || 0) + 1; });
     var last = status.accounts.length - 1;
     status.accounts.forEach(function (account, index) {
+      // Masked, the labels for screen readers number the accounts instead.
+      var spoken = masked ? accountAlias(index) : account.email || account.name;
       var card = el("div", { class: "card account", "data-account": account.name });
-      var handle = el("span", { class: "drag-handle", title: translate("drag_handle"), "aria-hidden": "true" });
+      var handle = el("span", { class: "drag-handle no-snapshot", title: translate("drag_handle"), "aria-hidden": "true" });
       handle.addEventListener("pointerdown", function (e) { startAccountDrag(e, card, handle); });
-      var moves = el("span", { class: "order-buttons" }, [
+      var moves = el("span", { class: "order-buttons no-snapshot" }, [
         el("button", { type: "button", class: "btn btn-ghost btn-icon", "data-move": "up", "data-account": account.name, disabled: index === 0,
-          title: translate("move_up"), "aria-label": translate("move_up_aria", account.email || account.name), text: "↑",
+          title: translate("move_up"), "aria-label": translate("move_up_aria", spoken), text: "↑",
           onclick: function () { moveAccount(account.name, -1); } }),
         el("button", { type: "button", class: "btn btn-ghost btn-icon", "data-move": "down", "data-account": account.name, disabled: index === last,
-          title: translate("move_down"), "aria-label": translate("move_down_aria", account.email || account.name), text: "↓",
+          title: translate("move_down"), "aria-label": translate("move_down_aria", spoken), text: "↓",
           onclick: function () { moveAccount(account.name, 1); } })
       ]);
       var pooledAccount = counts[account.provider] > 1, weight = accountWeight(account);
-      var refresh = el("button", { type: "button", class: "btn btn-ghost btn-sm", text: translate("refresh"), onclick: function () {
+      var refresh = el("button", { type: "button", class: "btn btn-ghost btn-sm no-snapshot", text: translate("refresh"), onclick: function () {
         runAction(refresh, API + "/refresh", { auth_index: account.auth_index }, translate("refreshed", account.title));
       } });
-      var rename = el("button", { type: "button", class: "btn btn-ghost btn-sm", text: translate("rename"), onclick: function () {
+      var rename = el("button", { type: "button", class: "btn btn-ghost btn-sm no-snapshot", text: translate("rename"), onclick: function () {
         renameAccount(rename, account);
       } });
-      var weigh = pooledAccount ? el("button", { type: "button", class: "btn btn-ghost btn-sm", text: translate("weight"), onclick: function () {
+      var weigh = pooledAccount ? el("button", { type: "button", class: "btn btn-ghost btn-sm no-snapshot", text: translate("weight"), onclick: function () {
         setWeight(weigh, account);
       } }) : null;
       card.appendChild(el("div", { class: "account-head" }, [
         handle,
-        el("span", { class: "type-badge type-" + account.provider, text: account.title }),
+        el("span", { class: "type-badge type-" + account.provider }, maskedNodes(account.title)),
         pooledAccount && weight !== 1 ? el("span", { class: "account-weight", title: translate("weight"), text: "×" + fmtWeight(weight) }) : null,
-        el("span", { class: "account-email", title: account.email || account.name, text: account.email || account.name }),
-        moves, rename, weigh, refresh
+        el("span", { class: "account-email " + SENSITIVE, title: masked ? null : account.email || account.name, text: account.email || account.name }),
+        moves, rename, weigh, refresh,
+        snapshotButton("snapshot_card", function () { return [card]; })
       ]));
       (account.groups || []).forEach(function (group) {
         var block = el("div", { class: "quota-group" });
         if (group.source_label && group.source_label !== providerTitle(account.provider)) {
           block.appendChild(el("div", { class: "group-title", text: group.source_label }));
         }
-        (group.windows || []).forEach(function (w) { block.appendChild(quotaRow(group, w, meterIndex++)); });
+        (group.windows || []).forEach(function (w) { block.appendChild(quotaRow(group, w, meterIndex++, index)); });
         var foot = freshness(group);
         if (foot) block.appendChild(foot);
         card.appendChild(block);
@@ -899,7 +1089,7 @@
       } else if (cooldown) {
         card.appendChild(el("div", { class: "cell-note", text: translate("cooldown", fmtDateTime(cooldown), fmtIn(cooldown)) }));
       }
-      if (account.error) card.appendChild(el("div", { class: "error-text", text: account.error }));
+      if (account.error) card.appendChild(el("div", { class: "error-text" }, maskedNodes(account.error)));
       box.appendChild(card);
     });
   }
@@ -939,9 +1129,9 @@
       } });
       var next = parseTime(t.next_due), reset = parseTime(t.reset), last = parseTime(t.last_success);
       var statusCell = el("td", {}, [badge(st.kind, st.text)]);
-      if (st.title) statusCell.appendChild(el("div", { class: "cell-note", text: st.title }));
+      if (st.title) statusCell.appendChild(el("div", { class: "cell-note" }, maskedNodes(st.title)));
       body.appendChild(el("tr", {}, [
-        el("td", { class: "strong", text: t.label }),
+        el("td", { class: "strong" }, maskedNodes(t.label)),
         el("td", { class: "mono", text: next ? fmtDateTime(next) : "—" }),
         el("td", { class: "mono", text: reset ? fmtDateTime(reset) : "—" }),
         el("td", { class: "mono", text: last ? fmtDateTime(last) : "—" }),
@@ -1021,8 +1211,8 @@
       list.appendChild(el("div", { class: "event-row", role: "row" }, [
         el("span", { class: "event-time", role: "cell", text: fmtDateTime(parseTime(ev.time)) }),
         el("span", { class: "event-type", role: "cell" }, [badge(type[0], type[1])]),
-        el("span", { class: "event-label", role: "cell", text: parts.label }),
-        el("span", { class: "event-detail", role: "cell", title: parts.detail, text: parts.detail })
+        el("span", { class: "event-label", role: "cell" }, maskedNodes(parts.label)),
+        el("span", { class: "event-detail", role: "cell", title: masked ? null : parts.detail }, maskedNodes(parts.detail))
       ]));
     });
     more.hidden = status.events.length <= EVENTS_COLLAPSED;
@@ -1177,7 +1367,7 @@
       var weights = latest && typeof latest === "object" ? JSON.parse(JSON.stringify(latest)) : {};
       if (answer === "") delete weights[account.name];
       else weights[account.name] = value;
-      return api("PATCH", CONFIG_API, { account_weights: Object.keys(weights).length ? weights : null }).then(function () {
+      return patchConfig({ account_weights: Object.keys(weights).length ? weights : null }).then(function () {
         return loadConfig().then(function () {
           toast(translate("weight_saved", account.title));
           renderAccounts();
@@ -1397,7 +1587,7 @@
   // first account, and labels of the same account keep the group_order of
   // the status API, so Gemini stays before Claude / GPT within Antigravity.
   function chartRows() {
-    var info = {}, accountOf = {}, emailOf = {};
+    var info = {}, accountOf = {}, emailOf = {}, current = [];
     status.accounts.forEach(function (a, index) {
       accountOf["auth|" + a.auth_index] = index;
       emailOf[a.auth_index] = a.email || a.name;
@@ -1405,15 +1595,28 @@
         accountOf["group|" + g.key] = index;
         (g.windows || []).forEach(function (w) {
           var reset = parseTime(w.reset);
-          info[g.key + "|" + w.id] = { email: a.email || a.name, reset: reset ? reset.getTime() / 1000 : null, weight: accountWeight(a) };
+          info[g.key + "|" + w.id] = { email: a.email || a.name, reset: reset ? reset.getTime() / 1000 : null, weight: accountWeight(a), remaining: w.remaining };
+          if (w.kind === historyWindow) current.push({ group: g.key, window: w.id, window_label: w.short, kind: w.kind, label: g.label,
+            source_label: g.source_label, provider: a.provider, auth_index: a.auth_index, points: [], resets: [] });
         });
       });
     });
     var limit = gapLimit();
     var from = new Date(history.from).getTime() / 1000;
-    var byLabel = {}, order = [];
-    history.series.forEach(function (s, seq) {
-      if (!s.points || !s.points.length || windowKind(s) !== historyWindow) return;
+    var byLabel = {}, order = [], seen = {};
+    // A window the status reports without samples in the history, such as
+    // one not queried within the range, still gets its row, with the current
+    // reading and no data on the time axis.
+    var series = history.series.filter(function (s) { return s.points && s.points.length; });
+    series.forEach(function (s) { seen[s.group + "|" + s.window] = true; });
+    history.series.forEach(function (s) { if (!seen[s.group + "|" + s.window]) seen[s.group + "|" + s.window] = s; });
+    series = series.concat(current.filter(function (s) { return seen[s.group + "|" + s.window] !== true; }).map(function (s) {
+      var empty = seen[s.group + "|" + s.window];
+      if (empty && Array.isArray(empty.resets)) s.resets = empty.resets;
+      return s;
+    }));
+    series.forEach(function (s, seq) {
+      if (windowKind(s) !== historyWindow) return;
       var meta = info[s.group + "|" + s.window];
       var lastPoint = s.points[s.points.length - 1];
       // Only the sample before the range can lie before it, so the last
@@ -1428,8 +1631,9 @@
       if (account === undefined) account = accountOf["auth|" + s.auth_index];
       if (!byLabel[id]) { byLabel[id] = []; order.push(id); }
       byLabel[id].push({ id: s.group + "|" + s.window, name: s.label + extra, source: source,
-        sub: meta ? meta.email : emailOf[s.auth_index] || s.auth_index || "", group: s.group, inactive: !meta, lastAt: lastPoint[0],
-        points: s.points, floor: cycleFloor(s.points), reset: meta ? meta.reset : null, weight: meta ? meta.weight : 1, last: lastPoint[1],
+        sub: meta ? meta.email : emailOf[s.auth_index] || s.auth_index || "", group: s.group, inactive: !meta, lastAt: lastPoint ? lastPoint[0] : null,
+        points: s.points, floor: cycleFloor(s.points), resets: Array.isArray(s.resets) ? s.resets : [],
+        reset: meta ? meta.reset : null, weight: meta ? meta.weight : 1, last: lastPoint ? lastPoint[1] : meta.remaining,
         account: account === undefined ? status.accounts.length + seq : account, seq: seq });
     });
     var lowFirst = chartSort === "low";
@@ -1536,6 +1740,9 @@
     var empty = svg("pattern", { id: "chart-hatch-empty", width: 6, height: 6, patternUnits: "userSpaceOnUse", patternTransform: "rotate(45)" });
     empty.appendChild(svg("rect", { width: 2.5, height: 6, fill: cssVar("--quota-empty-stripe") }));
     defs.appendChild(empty);
+    var blur = svg("filter", { id: "mask-blur", x: "-10%", y: "-60%", width: "120%", height: "220%" });
+    blur.appendChild(svg("feGaussianBlur", { stdDeviation: 3.5 }));
+    defs.appendChild(blur);
     root.appendChild(defs);
     return defs;
   }
@@ -1607,7 +1814,7 @@
   function tipRow(tip, text, value, strong) {
     tip.appendChild(el("div", { class: "row" + (strong ? " strong" : "") }, [
       el("span", { class: "key" + (value != null ? " fill-" + quotaLevel(value) : "") }),
-      el("span", { class: "name", text: text }),
+      el("span", { class: "name" }, maskedNodes(text)),
       el("span", { class: "value", text: value != null ? pct(value) : translate("no_data") })
     ]));
   }
@@ -1642,8 +1849,8 @@
       var name = f.depth ? r.sub : r.name;
       var maxChars = Math.floor((g.labelW - nameX - (r.children ? 30 : 8)) / 7);
       if (name.length > maxChars) name = name.slice(0, Math.max(1, maxChars - 1)) + "…";
-      root.appendChild(svgText({ x: nameX, y: y0 + 15, "font-size": f.depth ? 12 : 13, "font-weight": f.depth ? 400 : 600,
-        fill: cssVar(f.depth ? "--text-secondary" : "--text-primary"), "class": "row-name" }, name));
+      root.appendChild(svgSensitive(svgText({ x: nameX, y: y0 + 15, "font-size": f.depth ? 12 : 13, "font-weight": f.depth ? 400 : 600,
+        fill: cssVar(f.depth ? "--text-secondary" : "--text-primary"), "class": "row-name" }, name), f.depth || hasSecret(f.depth ? r.sub : r.name)));
       if (r.children) root.appendChild(svgText({ x: nameX + name.length * 8 + 8, y: y0 + 15, "font-size": 11, fill: cssVar("--text-tertiary") }, "×" + r.children.length));
       root.appendChild(svg("rect", { x: g.labelW, y: y0, width: g.plotW, height: LANE, rx: 4, fill: cssVar("--chart-lane") }));
       drawBand(root, g, r.floor, y0, limit, r.inactive);
@@ -1719,7 +1926,7 @@
       });
       var near = (g.to - g.from) / g.plotW * 8;
       events.forEach(function (ev) {
-        if (Math.abs(ev.t - t) <= near) tip.appendChild(el("div", { class: "note" + (ev.failed ? " failed" : ""), text: fmtClock(unixDate(ev.t)) + " " + ev.message }));
+        if (Math.abs(ev.t - t) <= near) tip.appendChild(el("div", { class: "note" + (ev.failed ? " failed" : "") }, maskedNodes(fmtClock(unixDate(ev.t)) + " " + ev.message)));
       });
       tip.hidden = false;
       var scale = box.clientWidth / g.width;
@@ -1812,60 +2019,72 @@
   }
 
   var WINDOW_SECONDS = { "5h": 5 * 3600, "7d": 7 * 86400 };
+  // A current reset this many seconds from the last one in the history is a
+  // new reset the history does not hold yet.
+  var RESET_DRIFT = 60;
 
-  // Cycles of one account's window, each as [start, end]. A cycle ends at a
-  // reset seen in the samples or at the current reset, and starts one window
-  // length before it, but not before the previous cycle ends. A 5-hour window
-  // starts with the first request after a reset, so the time between two
-  // windows belongs to neither. A seen reset close to the current one is the
-  // same reset.
-  function paceCycles(resets, current, length) {
-    var ends = resets.slice();
-    if (current && !ends.some(function (t) { return Math.abs(t - current) < length / 2; })) ends.push(current);
-    ends.sort(function (a, b) { return a - b; });
-    return ends.map(function (end, i) { return [Math.max(end - length, i ? ends[i - 1] : -Infinity), end]; });
-  }
-
-  // The remaining an even pace leaves at t: 100% at the start of the cycle
-  // falling to 0% at its reset, or null outside the cycles.
-  function paceAt(cycles, t) {
-    for (var i = 0; i < cycles.length; i++) {
-      var c = cycles[i];
-      if (t >= c[0] && t <= c[1]) return 100 * (c[1] - t) / (c[1] - c[0]);
+  // The even pace of one account's window, as segments [a, b, x]: from a to
+  // b the pace is 100 × (x − t) / length, falling to 0% at the reset x.
+  // resets lists [t, x] in time order: from the sample at t on, the window
+  // was due to reset at x, 0 when unknown. Each entry draws from t, or one
+  // window length before x when that is later, until the next entry or x.
+  // A window reset early gets a new entry, so the line of the old reset
+  // stops there instead of being squeezed down to 0%; no line is drawn
+  // where the reset is unknown. current is the reset in the status; when it
+  // differs from the last entry, the history does not hold it yet, and it
+  // applies from now.
+  function paceSegments(resets, length, current, now) {
+    var list = (resets || []).filter(function (r) { return Array.isArray(r) && isFinite(r[0]) && isFinite(r[1]); });
+    var last = list[list.length - 1];
+    if (current > 0 && (!last || !(last[1] > 0) || Math.abs(current - last[1]) > RESET_DRIFT) && (!last || now >= last[0])) {
+      list = list.concat([[now, current]]);
     }
-    return null;
-  }
-
-  // Resets seen in the samples of one account, found as in the detail
-  // chart: per stretch of samples, so a reset inside a gap is not seen.
-  function seenResets(points, limit) {
     var out = [];
-    runs(points, limit, Infinity).forEach(function (run) { out = out.concat(splitAtResets(run.pts, [1]).resets); });
+    if (!(length > 0)) return out;
+    list.forEach(function (r, i) {
+      var x = r[1];
+      if (!(x > 0)) return;
+      var a = Math.max(r[0], x - length), b = i + 1 < list.length ? Math.min(list[i + 1][0], x) : x;
+      if (b > a) out.push([a, b, x]);
+    });
     return out;
   }
 
-  // The even pace of a row: at(t) is its value, null outside the cycles, and
-  // breaks are the times where it can jump. A single account uses the
-  // resets seen in its samples and its current reset. A pooled row averages
-  // the even pace of its accounts, each found the same way, by their
-  // weights, over the accounts inside a cycle at that time; the total's own
-  // jumps are not used, since one account resetting can raise it by less
-  // than RESET_JUMP.
-  function rowPace(row, resets, limit) {
+  // The even pace at t, or null outside the segments. Where two segments
+  // meet, the later one counts.
+  function paceAt(segments, length, t) {
+    var value = null;
+    segments.forEach(function (s) {
+      if (t >= s[0] && t <= s[1]) value = 100 * (s[2] - t) / length;
+    });
+    return value;
+  }
+
+  // The even pace of a total: the mean of its accounts' even pace weighted
+  // like the total, only while every account has one. parts are
+  // {weight, segments}.
+  function pooledPace(parts, length, t) {
+    var sum = 0, total = 0;
+    for (var i = 0; i < parts.length; i++) {
+      var value = paceAt(parts[i].segments, length, t);
+      if (value == null) return null;
+      sum += parts[i].weight * value;
+      total += parts[i].weight;
+    }
+    return total ? sum / total : null;
+  }
+
+  // The even pace of a row: at(t) is its value, null where it has none, and
+  // breaks are the times where it can bend or jump. A pooled row combines
+  // the even pace of its accounts, each from its own resets.
+  function rowPace(row, now) {
     var length = WINDOW_SECONDS[historyWindow];
-    var parts = !length ? [] : row.children ? row.children.map(function (c) {
-      return { weight: c.weight, cycles: paceCycles(seenResets(c.points, limit), c.reset, length) };
-    }) : [{ weight: 1, cycles: paceCycles(resets, row.reset, length) }];
+    var parts = !length ? [] : (row.children || [row]).map(function (r) {
+      return { weight: row.children ? r.weight : 1, segments: paceSegments(r.resets, length, r.reset, now) };
+    });
     var breaks = [];
-    parts.forEach(function (part) { part.cycles.forEach(function (c) { breaks.push(c[0], c[1]); }); });
-    return { breaks: breaks, at: function (t) {
-      var sum = 0, total = 0;
-      parts.forEach(function (part) {
-        var value = paceAt(part.cycles, t);
-        if (value != null) { sum += part.weight * value; total += part.weight; }
-      });
-      return total ? sum / total : null;
-    } };
+    parts.forEach(function (part) { part.segments.forEach(function (s) { breaks.push(s[0], s[1]); }); });
+    return { breaks: breaks, at: function (t) { return parts.length ? pooledPace(parts, length, t) : null; } };
   }
 
   // The least-squares line through pts[a..b]: its slope per second and the
@@ -1929,7 +2148,7 @@
     var length = WINDOW_SECONDS[historyWindow], sum = 0, total = 0;
     (row.children || [row]).forEach(function (r) {
       var start = r.reset - length, low = r.floor[r.floor.length - 1];
-      if (!r.reset || start >= now || r.reset <= now || low[0] < start) return;
+      if (!low || !r.reset || start >= now || r.reset <= now || low[0] < start) return;
       sum += r.weight * (100 - low[1]) / (now - start);
       total += r.weight;
     });
@@ -1962,8 +2181,8 @@
       at: function (t) { return t < t0 || t > g.to ? null : Math.max(0, v0 + slope * (t - t0)); } };
   }
 
-  // Detail: the selected row as a smoothed line that breaks at resets, an
-  // even-pace line for each cycle and, when the axis reaches ahead, the
+  // Detail: the selected row as a smoothed line that breaks at resets, the
+  // even pace by the scheduled resets (rowPace) and, when the axis reaches ahead, the
   // projection at the current rate. A pooled row adds a band from its
   // lowest to its highest account.
   function renderDetail(row, head, box) {
@@ -1986,11 +2205,12 @@
     });
     var resets = [];
     pieces.forEach(function (piece) { resets = resets.concat(piece.split.resets); });
-    var even = row.inactive ? { breaks: [], at: function () { return null; } } : rowPace(row, resets, limit);
+    var even = row.inactive ? { breaks: [], at: function () { return null; } } : rowPace(row, g.now);
 
-    head.appendChild(el("span", { class: "detail-name", text: row.name + " · " + translate(historyWindow === "5h" ? "quota_5h" : "quota_7d") }));
+    head.appendChild(el("span", { class: "detail-name" }, maskedNodes(row.name).concat([" · " + translate(historyWindow === "5h" ? "quota_5h" : "quota_7d")])));
     if (row.inactive) head.appendChild(badge("muted", translate("inactive")));
-    head.appendChild(el("span", { class: "muted", text: group ? translate("pooled_note", row.children.length) : row.sub }));
+    head.appendChild(el("span", { class: "muted" + (group ? "" : " " + SENSITIVE), text: group ? translate("pooled_note", row.children.length) : row.sub }));
+    head.appendChild(snapshotButton("snapshot_detail", function () { return [head, box]; }));
     if (row.inactive) {
       head.appendChild(el("span", { class: "detail-stat" }, [document.createTextNode(translate("stat_last")),
         el("strong", { text: pct(row.last) + " · " + fmtDateTime(unixDate(row.lastAt)) })]));
@@ -2006,7 +2226,8 @@
 
     var H = 206, top = 22, bottom = 24, plotH = H - top - bottom;
     function y(v) { return top + (1 - v / 100) * plotH; }
-    var root = svg("svg", { viewBox: "0 0 " + g.width + " " + H, role: "img", "aria-label": translate("detail_aria", row.name) });
+    var spoken = masked && hasSecret(row.name) ? accountAlias(row.account) : row.name;
+    var root = svg("svg", { viewBox: "0 0 " + g.width + " " + H, role: "img", "aria-label": translate("detail_aria", spoken) });
     var defs = hatchPattern(root);
     var fade = svg("linearGradient", { id: "chart-fade", x1: 0, x2: 0, y1: 0, y2: 1 });
     fade.appendChild(svg("stop", { offset: "0%", "stop-color": cssVar("--text-secondary"), "stop-opacity": 0.18 }));
@@ -2056,9 +2277,10 @@
     hatchRect(root, g, ahead ? ahead.t0 : row.inactive ? cursor : dataEnd(g, cursor, limit), g.to, top, plotH);
     // The first stretch on the axis: a sample before it, from before the
     // range, can form a stretch of its own that ends left of the axis.
+    // A window without samples on the axis has no data up to now.
     var firstIn = stretches.filter(function (run) { return run.end > g.from; })[0];
-    if (firstIn && firstIn.start > g.from + limit) {
-      root.appendChild(svgText({ x: (g.x(g.from) + g.x(firstIn.start)) / 2, y: top + plotH / 2 + 4, "text-anchor": "middle", "font-size": 12,
+    if (!firstIn || firstIn.start > g.from + limit) {
+      root.appendChild(svgText({ x: (g.x(g.from) + g.x(firstIn ? firstIn.start : Math.min(g.now, g.to))) / 2, y: top + plotH / 2 + 4, "text-anchor": "middle", "font-size": 12,
         fill: cssVar("--text-tertiary"), "class": "row-name" }, translate("no_data")));
     }
 
@@ -2264,8 +2486,8 @@
       (r.children || [r]).forEach(function (c) {
         var values = c.points.filter(function (p) { return p[0] >= from; }).map(function (p) { return p[1]; });
         table.appendChild(el("tr", {}, [
-          el("td", { text: c.name }),
-          el("td", { text: c.sub }),
+          el("td", {}, maskedNodes(c.name)),
+          el("td", { class: SENSITIVE, text: c.sub }),
           el("td", { class: "num", text: pct(c.last) }),
           el("td", { class: "num", text: pct(values.length ? Math.min.apply(null, values) : null) }),
           el("td", { class: "num", text: pct(values.length ? Math.max.apply(null, values) : null) }),
@@ -2774,13 +2996,11 @@
 
   // Settings save as they change: switches and checkboxes when clicked, text
   // and number fields when they lose focus or on Enter. Saves run one at a
-  // time, so each patch starts from the config the previous one wrote. A few
-  // seconds after the last save, when the plugin has applied it, the saved
-  // fields show the effective values again. Each save shows its state beside
-  // the field: saving, saved or failed with the reason.
+  // time, so each patch starts from the config the previous one wrote. Once
+  // the plugin has applied a save, the saved fields show the effective
+  // values again. Each save shows its state beside the field: saving,
+  // waiting to apply, applied, unconfirmed or failed with the reason.
   var saveQueue = Promise.resolve();
-  var refillKeys = {};
-  var refillTimer = null;
 
   // The element that shows the save state of a field: the one named by a
   // data-save-in around it, or its label, table cell or .save-host.
@@ -2799,10 +3019,12 @@
       host.appendChild(node);
     }
     clearTimeout(node.timer);
+    node.owner = null;
     node.setAttribute("data-state", state);
     node.textContent = text;
     // A plain "saved" fades; failures and key checks stay until the next edit.
     if (state === "saved") node.timer = setTimeout(function () { node.textContent = ""; node.removeAttribute("data-state"); }, 4000);
+    return node;
   }
 
   var THRESHOLDS = ["notice_threshold", "low_threshold", "critical_threshold"];
@@ -2880,15 +3102,14 @@
         var part = buildPatch(name);
         Object.keys(part).forEach(function (k) { patch[k] = part[k]; });
       });
-      return api("PATCH", CONFIG_API, patch).then(function () {
-        noteSaved(patch);
-        if (!check) setSaveState(host, "saved", translate("save_saved"));
-        else if (check.ok) setSaveState(host, "verified", translate("key_verified"));
-        else setSaveState(host, "unverified", translate("key_unverified", check.reason));
-        tops.forEach(function (name) { refillKeys[name] = true; });
-        clearTimeout(refillTimer);
-        refillTries = 0;
-        refillTimer = setTimeout(refillSaved, 3000);
+      return patchConfig(patch).then(function (token) {
+        // Once applied, the fields show the values the plugin uses.
+        showApplied(host, token, check, /^mcp_/.test(top)).then(function (applied) {
+          if (!applied) return;
+          var keys = {};
+          tops.forEach(function (name) { keys[name] = true; });
+          fillSettings(keys);
+        });
         return loadConfig();
       }).catch(function (err) {
         if (err.message === "unauthorized") return;
@@ -2915,59 +3136,102 @@
 
   // ---- Applied config ----
 
-  // Saved values the plugin has not reported back yet, by top-level key.
-  // The status config shows what the plugin applied, with secrets replaced
-  // by "已设置", so a saved value counts as applied when the status shows it
-  // or shows a secret as set. Keys the status does not report cannot be
-  // checked and count as applied.
-  var unapplied = {};
+  // Every config write of the page carries a new config_token. The plugin
+  // reports, as config_applied_token in the status, the token of the config
+  // it has applied, MCP included. A save counts as applied when that token
+  // is its own or one this page saved after it, since a later config
+  // contains the earlier change. savedTokens lists the tokens of this
+  // page's saves, oldest first.
+  var savedTokens = [];
+  // Saves still waiting to be applied: {token, since, done}.
+  var applyWaits = [];
+  var applyTimer = null;
+  var APPLY_TIMEOUT = 15000;
 
-  function noteSaved(patch) {
-    Object.keys(patch).forEach(function (name) {
-      if (patch[name] === null) delete unapplied[name];
-      else unapplied[name] = patch[name];
+  // 16 random hexadecimal digits.
+  function newConfigToken() {
+    var bytes = new Uint8Array(8);
+    crypto.getRandomValues(bytes);
+    var text = "";
+    for (var i = 0; i < bytes.length; i++) text += (bytes[i] < 16 ? "0" : "") + bytes[i].toString(16);
+    return text;
+  }
+
+  // Whether the applied token covers the save with token: it is that save
+  // or a later one of this page.
+  function tokenApplied(tokens, token, applied) {
+    var saved = tokens.indexOf(token);
+    return saved >= 0 && !!applied && tokens.indexOf(applied) >= saved;
+  }
+
+  // Writes a patch of the plugin config with a new token, and resolves to
+  // the token once CPA has saved it.
+  function patchConfig(patch) {
+    var token = newConfigToken(), body = {};
+    Object.keys(patch).forEach(function (name) { body[name] = patch[name]; });
+    body.config_token = token;
+    return api("PATCH", CONFIG_API, body).then(function () {
+      savedTokens.push(token);
+      if (savedTokens.length > 200) savedTokens.shift();
+      return token;
     });
   }
 
-  function sameConfig(saved, shown) {
-    if (shown === undefined || saved === null || saved === undefined) return true;
-    if (typeof saved === "string") {
-      return (saved !== "" && shown === "已设置") || String(shown).trim().toLowerCase() === saved.trim().toLowerCase();
-    }
-    if (typeof saved === "number") return Number(shown) === saved;
-    if (typeof saved === "boolean") return !!shown === saved;
-    if (Array.isArray(saved)) {
-      return Array.isArray(shown) && shown.length === saved.length && saved.every(function (v, i) { return sameConfig(v, shown[i]); });
-    }
-    if (typeof saved === "object") {
-      return !!shown && typeof shown === "object" && Object.keys(saved).every(function (name) { return sameConfig(saved[name], shown[name]); });
-    }
-    return true;
+  function lastToken() { return savedTokens.length ? savedTokens[savedTokens.length - 1] : ""; }
+
+  // Resolves to true once the plugin has applied the save with token, or
+  // to false after APPLY_TIMEOUT. The status is read every second while a
+  // save waits.
+  function whenApplied(token) {
+    if (tokenApplied(savedTokens, token, status && status.config_applied_token)) return Promise.resolve(true);
+    return new Promise(function (resolve) {
+      applyWaits.push({ token: token, since: Date.now(), done: resolve });
+      pollApplied();
+    });
   }
 
+  // Settles the waiting saves that the status shows as applied or that
+  // have timed out. Called with every status.
   function checkApplied() {
-    var cfg = (status && status.config) || {};
-    Object.keys(unapplied).forEach(function (name) {
-      // MCP keys are omitted, with only their presence reported separately.
-      var applied = name === "mcp_key" ? sameConfig(!!String(unapplied[name]).trim(), cfg.mcp_key_set) : sameConfig(unapplied[name], cfg[name]);
-      if (applied) delete unapplied[name];
+    var applied = status && status.config_applied_token, now = Date.now();
+    applyWaits = applyWaits.filter(function (w) {
+      if (tokenApplied(savedTokens, w.token, applied)) w.done(true);
+      else if (now - w.since >= APPLY_TIMEOUT) w.done(false);
+      else return true;
+      return false;
     });
   }
 
-  // Resolves once the plugin reports every saved value, reading the status
-  // every second, or after about 10 seconds to true: the new settings may
-  // not be in effect yet.
-  function waitApplied() {
-    var started = Date.now();
-    function step() {
-      checkApplied();
-      if (!Object.keys(unapplied).length) return Promise.resolve(false);
-      if (Date.now() - started >= 10000) return Promise.resolve(true);
-      return new Promise(function (resolve) { setTimeout(resolve, 1000); }).then(function () {
-        return loadStatus().catch(function () {});
-      }).then(step);
-    }
-    return step();
+  function pollApplied() {
+    if (applyTimer || !applyWaits.length) return;
+    applyTimer = setTimeout(function () {
+      loadStatus().catch(function () {}).then(function () {
+        applyTimer = null;
+        checkApplied();
+        pollApplied();
+      });
+    }, 1000);
+  }
+
+  // The save state of a field after CPA saved it: waiting until the plugin
+  // applies it, then applied, or unconfirmed after the timeout. A change of
+  // MCP settings shows the MCP error instead when the endpoint does not
+  // start. check is the result of checkKey for an API key. A newer state of
+  // the field replaces this one.
+  function showApplied(host, token, check, mcp) {
+    var node = setSaveState(host, "waiting", translate("save_waiting"));
+    var owner = {};
+    if (node) node.owner = owner;
+    return whenApplied(token).then(function (applied) {
+      if (!node || node.owner !== owner) return applied;
+      var error = mcp && status && status.mcp && status.mcp.enabled && status.mcp.error;
+      if (!applied) setSaveState(host, "unverified", translate("save_unconfirmed"));
+      else if (error) setSaveState(host, "failed", translate("mcp_error", error));
+      else if (check && check.ok) setSaveState(host, "verified", translate("save_applied_verified"));
+      else if (check) setSaveState(host, "unverified", translate("save_applied_unverified", check.reason));
+      else setSaveState(host, "saved", translate("save_applied"));
+      return applied;
+    });
   }
 
   // ---- Ignition and MCP settings ----
@@ -3086,9 +3350,8 @@
     var host = $("mcp-key-field"), secret = newMcpKey();
     setSaveState(host, "saving", translate("save_saving"));
     saveQueue = saveQueue.then(function () {
-      return api("PATCH", CONFIG_API, { mcp_key: secret }).then(function () {
-        noteSaved({ mcp_key: secret });
-        setSaveState(host, "saved", translate("save_saved"));
+      return patchConfig({ mcp_key: secret }).then(function (token) {
+        showApplied(host, token, null, true);
         return loadConfig();
       }).catch(function (err) {
         if (err.message !== "unauthorized") setSaveState(host, "failed", translate("save_failed_short", err.message));
@@ -3102,29 +3365,6 @@
   function autofilled(input) {
     try { if (input.matches(":autofill")) return true; } catch (err) {}
     try { return input.matches(":-webkit-autofill"); } catch (err) { return false; }
-  }
-
-  // Fields whose saved value the plugin has not reported yet keep what was
-  // entered and are tried again a few times, so they do not fall back to
-  // the previous value.
-  var refillTries = 0;
-  function refillSaved() {
-    saveQueue = saveQueue.then(function () {
-      return loadStatus().then(function () {
-        var keys = {}, waiting = false;
-        Object.keys(refillKeys).forEach(function (name) {
-          if (unapplied[name] !== undefined && refillTries < 5) { waiting = true; return; }
-          keys[name] = true;
-          delete refillKeys[name];
-        });
-        fillSettings(keys);
-        if (waiting) {
-          refillTries++;
-          clearTimeout(refillTimer);
-          refillTimer = setTimeout(refillSaved, 3000);
-        }
-      }).catch(function () {});
-    });
   }
 
   // One line per channel; a webhook also shows the start of its response and,
@@ -3192,23 +3432,28 @@
   });
   $("test-notify").addEventListener("click", function (e) {
     // The test waits for the saves under way and for the plugin to apply
-    // them; after about 10 seconds it is sent anyway, with a note.
+    // the latest of them. When it is not applied in time, the test is not
+    // sent, since it would use the settings before the change.
     var button = e.currentTarget;
     button.disabled = true;
     var results = $("test-results");
     clear(results);
-    var stale = false;
     saveQueue.then(function () {
-      checkApplied();
-      if (Object.keys(unapplied).length) results.appendChild(el("div", { class: "test-result hint", text: translate("test_waiting") }));
-      return waitApplied();
-    }).then(function (late) {
-      stale = late;
+      var token = lastToken();
+      if (!token || tokenApplied(savedTokens, token, status && status.config_applied_token)) return true;
+      results.appendChild(el("div", { class: "test-result hint", text: translate("test_waiting") }));
+      return whenApplied(token);
+    }).then(function (applied) {
+      if (!applied) {
+        clear(results);
+        results.appendChild(el("div", { class: "test-result failed", text: translate("test_not_applied") }));
+        return null;
+      }
       return api("POST", API + "/test-notify", {});
     }).then(function (data) {
+      if (!data) return;
       if (data.status) { status = data.status; renderStatus(); }
       renderTestResults(data.results);
-      if (stale) results.insertBefore(el("div", { class: "test-result failed", text: translate("test_stale") }), results.firstChild);
       if (data.ok) toast(translate("test_sent"));
       else if (!data.results) toast(translate("failed", data.error));
       else toast(translate(data.results.some(function (r) { return r.ok; }) ? "test_some_failed" : "test_all_failed"));
@@ -3222,10 +3467,13 @@
   $("settings").addEventListener("input", function (e) {
     var host = e.target.name || e.target.hasAttribute("data-group") ? saveHost(e.target) : null;
     if (host) Array.prototype.forEach.call(host.children, function (child) {
-      if (child.classList.contains("save-state") && child.getAttribute("data-state") !== "saving") { child.textContent = ""; child.removeAttribute("data-state"); }
+      if (child.classList.contains("save-state") && child.getAttribute("data-state") !== "saving") {
+        child.textContent = ""; child.removeAttribute("data-state"); child.owner = null;
+      }
     });
     if (e.target.name === "mcp_listen") renderMcp();
   });
+  $("mask-toggle").addEventListener("click", toggleMask);
   $("mcp-key-new").addEventListener("click", generateMcpKey);
   $("mcp-key-show").addEventListener("click", function () { mcpKeyShown = !mcpKeyShown; renderMcp(); });
   $("mcp-key-copy").addEventListener("click", function (e) { copyText(mcpKey(), e.currentTarget); });
