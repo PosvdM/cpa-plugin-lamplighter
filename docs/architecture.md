@@ -49,7 +49,7 @@ Lamplighter 是用 Go 编写、以 `-buildmode=c-shared` 构建的 CPA 原生插
 
 标题栏的眼睛按钮维护仅在当前页面内存中保存的打码开关，刷新后恢复显示。HTML 中的账号标识使用 `.account-sensitive` 和 CSS `blur`，SVG 图表文字使用模糊滤镜；包含已知账号标识的事件及错误文字按相同规则处理。打码时省略含账号名的 `title` 提示，无障碍标签使用账号序号；命名等交互对话框保留原文。此开关不改变接口数据或 DOM 中的原始文本。
 
-卡片、卡片区和曲线详情图的相机按钮调用 `snapshotPng`，克隆目标节点并移除 `.no-snapshot` 操作按钮，将当前样式、主题和模糊状态通过 SVG `foreignObject` 绘制到 canvas，按设备像素比生成 PNG，再通过 `ClipboardItem` 写入剪贴板。过程不加载页面外资源，避免 canvas 被跨源内容污染；动画、过渡和悬停样式不参与截图。只有安全上下文中支持图片剪贴板的浏览器启用按钮，复制仍受浏览器权限限制。
+卡片、卡片区和曲线详情图的相机按钮调用 `snapshotPng`，克隆目标节点并移除 `.no-snapshot` 操作按钮，将当前样式、主题和模糊状态通过 SVG `foreignObject` 绘制到 canvas，按设备像素比生成 PNG，再通过 `ClipboardItem` 写入剪贴板。截图外框的内边距、背景及静态样式统一定义在 `page.css` 的 `.snapshot-frame` 规则中，离屏测量和 SVG 导出使用同一份样式。过程不加载页面外资源，避免 canvas 被跨源内容污染；动画、过渡和悬停样式不参与截图。只有安全上下文中支持图片剪贴板的浏览器启用按钮，复制仍受浏览器权限限制。
 
 顶部的“额度 | 设置”切换两个独立视图，所选视图保存在浏览器的 `localStorage` 中（`lamplighter-view`）。账号卡片支持拖拽和上移、下移按钮，以凭证文件名列表整体保存 `account_order`；页面在后端排序基础上按最新保存的列表重排，使卡片和图表立即响应顺序变化。MCP 设置读取 `status.mcp` 显示监听状态；开启时没有有效密钥，则用 `crypto.getRandomValues` 生成 32 字节随机数，以 `llmcp_` 加 base64url 编码与开关一起保存。
 
