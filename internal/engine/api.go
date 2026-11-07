@@ -645,14 +645,15 @@ func (e *Engine) historyContext(ctx context.Context, span time.Duration, kind st
 	}
 	history := &store.History{Dir: dataDir + "/history"}
 	var records []store.Record
+	var window store.HistoryWindow
 	var err error
 	if bounded {
 		// MCP 保留有限桶用于预测及响应，不构造管理图表的重置事件。
 		bucket := max(resp.Bucket, max(1, int64(span.Seconds())/2000))
 		records, err = history.QuerySampled(ctx, resp.From.Add(-historyLead), now, bucket, accept)
 	} else {
-		// 重置状态可能在范围之前持续多天，因此扫描全部保留记录。
-		records, err = history.QueryContext(ctx, time.Time{}, now)
+		window, err = history.QueryWindow(ctx, resp.From, now)
+		records = window.Records
 	}
 	if err != nil {
 		return resp, err
@@ -662,11 +663,11 @@ func (e *Engine) historyContext(ctx context.Context, span time.Duration, kind st
 	before := map[string][3]float64{}
 	var order []string
 	resetEvents := map[string][][2]int64{}
-	knownReset := map[string]bool{}
+	knownReset := window.KnownReset
 	previousReset := map[string]int64{}
-	for _, record := range records {
+	visit := func(record store.Record) error {
 		if err := ctx.Err(); err != nil {
-			return resp, err
+			return err
 		}
 		key := record.Group + "|" + record.Window
 		if !bounded && record.Kind == "s" {
@@ -687,7 +688,7 @@ func (e *Engine) historyContext(ctx context.Context, span time.Duration, kind st
 			}
 		}
 		if record.Time < resp.From.Add(-historyLead).Unix() {
-			continue
+			return nil
 		}
 		passive := 0.0
 		if record.Source == string(quota.SourcePassive) {
@@ -698,7 +699,7 @@ func (e *Engine) historyContext(ctx context.Context, span time.Duration, kind st
 			if record.Kind != "e" {
 				before[key] = point
 			}
-			continue
+			return nil
 		}
 		if record.Kind == "e" {
 			if record.Event == "ignite" || record.Event == "ignite_manual" || record.Event == "ignite_failed" || record.Event == "ignite_paused" {
@@ -707,7 +708,7 @@ func (e *Engine) historyContext(ctx context.Context, span time.Duration, kind st
 					Group: record.Group, Message: record.Message, Label: record.Label, Detail: record.Detail, Params: record.Params,
 				})
 			}
-			continue
+			return nil
 		}
 		s, ok := series[key]
 		if !ok {
@@ -743,10 +744,22 @@ func (e *Engine) historyContext(ctx context.Context, span time.Duration, kind st
 			last := s.Points[len(s.Points)-1]
 			if int64(last[0]) >= from && int64(last[0])/resp.Bucket == record.Time/resp.Bucket {
 				s.Points[len(s.Points)-1] = point
-				continue
+				return nil
 			}
 		}
 		s.Points = append(s.Points, point)
+		return nil
+	}
+	// 范围前只用最后一个样本初始化重置状态；其时间无需是 x 首次出现的时间。
+	for _, predecessor := range window.Before {
+		if err := visit(predecessor); err != nil {
+			return resp, err
+		}
+	}
+	for _, record := range records {
+		if err := visit(record); err != nil {
+			return resp, err
+		}
 	}
 	filter := kind == quota.KindFiveHour || kind == quota.KindSevenDay
 	for _, key := range order {

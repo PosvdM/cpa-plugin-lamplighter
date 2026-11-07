@@ -591,8 +591,11 @@ func (e *Engine) applyGroups(ctx context.Context, cfg config.Config, cred *Cred,
 		group.SourceLabel = rg.SourceLabel
 		group.Label = labelFor(group.SourceLabel, cred)
 		var activeWindows []string
+		legacyUnconfirmed := false
 		if e.state != nil {
-			activeWindows = e.state.Group(key).ActiveWindows
+			stored := e.state.Group(key)
+			activeWindows = stored.ActiveWindows
+			legacyUnconfirmed = stored.LegacyUnconfirmed
 		}
 		if source == quota.SourceActive {
 			group.Windows = group.Windows[:0]
@@ -601,11 +604,25 @@ func (e *Engine) applyGroups(ctx context.Context, cfg config.Config, cred *Cred,
 				activeWindows = append(activeWindows, w.ID)
 			}
 			if e.state != nil {
-				e.state.Group(key).ActiveWindows = activeWindows
+				stored := e.state.Group(key)
+				if stored.LegacyUnconfirmed {
+					// 无可靠存在信息的旧组，以首次主动结果重新建立通知基线。
+					for _, ws := range stored.Windows {
+						if ws != nil {
+							ws.Rebase = true
+						}
+					}
+				}
+				stored.ActiveWindows = activeWindows
+				stored.LegacyUnconfirmed = false
 			}
 		}
 		stale := 0
 		for _, w := range rg.Windows {
+			if source == quota.SourcePassive && legacyUnconfirmed && activeWindows == nil && !slices.ContainsFunc(group.Windows, func(existing WindowView) bool { return existing.ID == w.ID }) {
+				stale++
+				continue
+			}
 			if source == quota.SourcePassive && activeWindows != nil && !slices.Contains(activeWindows, w.ID) {
 				stale++
 				continue
