@@ -497,14 +497,26 @@
     }
   }
 
-  function api(method, path, body) {
+  // timeout, in milliseconds, aborts a request that takes longer.
+  function api(method, path, body, timeout) {
     var opts = { method: method, headers: { "Authorization": "Bearer " + key, "Accept": "application/json" } };
     if (body !== undefined) {
       opts.headers["Content-Type"] = "application/json";
       opts.body = JSON.stringify(body);
     }
+    var timer = null;
+    if (timeout && window.AbortController) {
+      var abort = new AbortController();
+      opts.signal = abort.signal;
+      timer = setTimeout(function () { abort.abort(); }, timeout);
+    }
+    var done = function () { clearTimeout(timer); };
     return fetch(path, opts).then(function (res) {
-      return res.json().catch(function () { return {}; }).then(function (data) {
+      return res.json().catch(function (err) {
+        // A body cut off by the timeout is no answer.
+        if (opts.signal && opts.signal.aborted) throw err;
+        return {};
+      }).then(function (data) {
         if (res.status === 401) {
           askForKey(translate("key_invalid"));
           throw new Error("unauthorized");
@@ -512,7 +524,7 @@
         if (!res.ok) throw new Error(data.error || data.message || ("HTTP " + res.status));
         return data;
       });
-    });
+    }).then(function (data) { done(); return data; }, function (err) { done(); throw err; });
   }
 
   function askForKey(message) {
@@ -662,8 +674,10 @@
   function accountAlias(index) { return translate("account_n", index + 1); }
 
   // The names that tell accounts apart: titles, emails, credential file
-  // names and group labels, without the provider and group names they
-  // share. Longest first, so an email wins over a part of it.
+  // names and group labels of the current accounts, and the labels of
+  // events and history series, which keep the names of renamed and deleted
+  // accounts; without the provider and group names they share. Longest
+  // first, so an email wins over a part of it.
   function accountSecrets() {
     var common = {}, found = {};
     providerList().forEach(function (p) { common[p.title] = true; common[p.id] = true; });
@@ -677,6 +691,13 @@
         if (name.length >= 2 && !common[name]) found[name] = true;
       });
     });
+    var past = [];
+    ((status && status.events) || []).concat((history && history.events) || []).forEach(function (ev) { past.push(ev.label); });
+    ((history && history.series) || []).forEach(function (s) { if (s.label !== s.source_label) past.push(s.label); });
+    past.forEach(function (name) {
+      name = typeof name === "string" ? name.trim() : "";
+      if (name.length >= 2 && !common[name]) found[name] = true;
+    });
     return Object.keys(found).sort(function (a, b) { return b.length - a.length; });
   }
 
@@ -685,9 +706,14 @@
     return accountSecrets().some(function (name) { return text.indexOf(name) >= 0; });
   }
 
-  // The text as nodes, with each account name in a SENSITIVE span.
-  function maskedNodes(text) {
+  // The text as nodes, with each account name in a SENSITIVE span. extra
+  // lists more text to treat as account names.
+  function maskedNodes(text, extra) {
     var rest = String(text == null ? "" : text), secrets = accountSecrets(), out = [];
+    if (extra) {
+      secrets = secrets.concat(extra.filter(function (name) { return typeof name === "string" && name.trim().length; }))
+        .sort(function (a, b) { return b.length - a.length; });
+    }
     while (rest) {
       var at = -1, hit = "";
       secrets.forEach(function (name) {
@@ -1193,6 +1219,23 @@
     return { label: label || "—", detail: detail };
   }
 
+  // The label and detail of an event as nodes, with the account names
+  // marked SENSITIVE by what the fields mean: the label names the quota
+  // group of an account, so it is sensitive as a whole, and so is its text
+  // within the detail, such as in a notification title, and an error text
+  // from the provider. Text that cannot be split reliably is sensitive as a
+  // whole: the detail of an error event, and of an older event without a
+  // label, whose message may name an account that no longer exists.
+  function eventMasked(ev, parts) {
+    parts = parts || eventParts(ev);
+    var p = ev.params || {};
+    var label = parts.label === "—" ? [document.createTextNode("—")] : [el("span", { class: SENSITIVE, text: parts.label })];
+    var whole = ev.kind === "error" || (!ev.params && !ev.label);
+    var detail = whole ? [el("span", { class: SENSITIVE, text: parts.detail })]
+      : maskedNodes(parts.detail, [parts.label === "—" ? "" : parts.label, p.error ? String(p.error) : ""]);
+    return { label: label, detail: detail };
+  }
+
   function renderEvents() {
     var list = $("events");
     clear(list);
@@ -1206,12 +1249,12 @@
     events.forEach(function (ev) {
       var known = EVENT_TYPES[ev.kind];
       var type = [known || (ev.level === "error" ? "failure" : ev.level === "warn" ? "warning" : "muted"), known ? translate("ev_" + ev.kind) : ev.kind];
-      var parts = eventParts(ev);
+      var parts = eventParts(ev), nodes = eventMasked(ev, parts);
       list.appendChild(el("div", { class: "event-row", role: "row" }, [
         el("span", { class: "event-time", role: "cell", text: fmtDateTime(parseTime(ev.time)) }),
         el("span", { class: "event-type", role: "cell" }, [badge(type[0], type[1])]),
-        el("span", { class: "event-label", role: "cell" }, maskedNodes(parts.label)),
-        el("span", { class: "event-detail", role: "cell", title: masked ? null : parts.detail }, maskedNodes(parts.detail))
+        el("span", { class: "event-label", role: "cell" }, nodes.label),
+        el("span", { class: "event-detail", role: "cell", title: masked ? null : parts.detail }, nodes.detail)
       ]));
     });
     more.hidden = status.events.length <= EVENTS_COLLAPSED;
@@ -1295,8 +1338,8 @@
     renderMcp();
   }
 
-  function loadStatus() {
-    return api("GET", API + "/status").then(function (data) {
+  function loadStatus(timeout) {
+    return api("GET", API + "/status", undefined, timeout).then(function (data) {
       status = data;
       renderStatus();
       reportLanguage();
@@ -1594,7 +1637,8 @@
         accountOf["group|" + g.key] = index;
         (g.windows || []).forEach(function (w) {
           var reset = parseTime(w.reset);
-          info[g.key + "|" + w.id] = { email: a.email || a.name, reset: reset ? reset.getTime() / 1000 : null, weight: accountWeight(a), remaining: w.remaining };
+          // A reported window without a reset has reset 0; see paceSegments.
+          info[g.key + "|" + w.id] = { email: a.email || a.name, reset: reset ? reset.getTime() / 1000 : 0, weight: accountWeight(a), remaining: w.remaining };
           if (w.kind === historyWindow) current.push({ group: g.key, window: w.id, window_label: w.short, kind: w.kind, label: g.label,
             source_label: g.source_label, provider: a.provider, auth_index: a.auth_index, points: [], resets: [] });
         });
@@ -1799,8 +1843,15 @@
     return (history.events || []).map(function (ev) {
       var parts = eventParts(ev);
       return { t: new Date(ev.time).getTime() / 1000, failed: ev.kind === "ignite_failed" || ev.kind === "ignite_paused",
-        message: (parts.label !== "—" ? parts.label + " " : "") + parts.detail, group: ev.group };
+        event: ev, group: ev.group };
     }).filter(function (ev) { return ev.t >= g.from; });
+  }
+
+  // An ignition in a tooltip: its time, label and detail.
+  function noteNodes(item) {
+    var nodes = eventMasked(item.event), hasLabel = eventParts(item.event).label !== "—";
+    return [document.createTextNode(fmtClock(unixDate(item.t)) + " ")].concat(
+      hasLabel ? nodes.label.concat([document.createTextNode(" ")]) : [], nodes.detail);
   }
 
   function placeTip(tip, box, g, t, top) {
@@ -1925,7 +1976,7 @@
       });
       var near = (g.to - g.from) / g.plotW * 8;
       events.forEach(function (ev) {
-        if (Math.abs(ev.t - t) <= near) tip.appendChild(el("div", { class: "note" + (ev.failed ? " failed" : "") }, maskedNodes(fmtClock(unixDate(ev.t)) + " " + ev.message)));
+        if (Math.abs(ev.t - t) <= near) tip.appendChild(el("div", { class: "note" + (ev.failed ? " failed" : "") }, noteNodes(ev)));
       });
       tip.hidden = false;
       var scale = box.clientWidth / g.width;
@@ -2029,14 +2080,17 @@
   // window length before x when that is later, until the next entry or x.
   // A window reset early gets a new entry, so the line of the old reset
   // stops there instead of being squeezed down to 0%; no line is drawn
-  // where the reset is unknown. current is the reset in the status; when it
-  // differs from the last entry, the history does not hold it yet, and it
-  // applies from now.
+  // where the reset is unknown. current is the reset in the status, 0 when
+  // the status reports the window without a reset, or null when it does not
+  // report the window. When it differs from the last entry, the history does
+  // not hold it yet, and it applies from now: a new reset draws from now, an
+  // unknown one ends the line now.
   function paceSegments(resets, length, current, now) {
     var list = (resets || []).filter(function (r) { return Array.isArray(r) && isFinite(r[0]) && isFinite(r[1]); });
     var last = list[list.length - 1];
-    if (current > 0 && (!last || !(last[1] > 0) || Math.abs(current - last[1]) > RESET_DRIFT) && (!last || now >= last[0])) {
-      list = list.concat([[now, current]]);
+    var lastKnown = !!last && last[1] > 0;
+    if (current != null && isFinite(current) && (!last || now >= last[0])) {
+      if (current > 0 ? !lastKnown || Math.abs(current - last[1]) > RESET_DRIFT : lastKnown) list = list.concat([[now, current > 0 ? current : 0]]);
     }
     var out = [];
     if (!(length > 0)) return out;
@@ -2937,35 +2991,60 @@
     box.addEventListener("change", function () { placeThumb(box, true); });
   });
 
+  // The top-level config key a settings input belongs to.
+  function inputTop(input) {
+    if (input.hasAttribute && input.hasAttribute("data-group")) return "providers";
+    return input.name ? topKey(input.name) : "";
+  }
+
+  // The values of the inputs of some top-level keys as the user left them,
+  // taken when the change is made. A save that waits in the queue builds its
+  // patch from these, so a refill of the fields in the meantime does not
+  // change what it saves.
+  function captureIntent(tops) {
+    var intent = { inputs: [], states: [] };
+    Array.prototype.forEach.call($("settings").elements, function (input) {
+      if (tops.indexOf(inputTop(input)) < 0) return;
+      intent.inputs.push(input);
+      intent.states.push({ value: input.value, checked: input.checked });
+    });
+    return intent;
+  }
+
   // The patch for one top-level key. CPA merges top-level keys only, so
   // objects are sent whole, starting from the saved object to keep keys the
-  // page does not show.
-  function buildPatch(top) {
+  // page does not show. intent, from captureIntent, holds the values to
+  // save; without it the inputs are read as they are now.
+  function buildPatch(top, intent) {
     var patch = {};
     var base = rawConfig[top];
+    var state = function (input) {
+      var i = intent ? intent.inputs.indexOf(input) : -1;
+      return i >= 0 ? intent.states[i] : { value: input.value, checked: input.checked };
+    };
     if (top === "ignition" && !base) base = status.config && status.config.ignition;
     if (base && typeof base === "object") patch[top] = JSON.parse(JSON.stringify(base));
     Array.prototype.forEach.call($("settings").elements, function (input) {
       if (!input.name || topKey(input.name) !== top) return;
-      var value;
+      var value, saved = state(input);
       var format = input.getAttribute("data-format");
       if (format) {
         // Text that does not parse keeps the saved value.
-        try { value = parseValue(format, input.value); } catch (err) { return; }
+        try { value = parseValue(format, saved.value); } catch (err) { return; }
         if (value === null) {
           var parts = input.name.split(".");
           var parent = getPath(patch, parts.slice(0, -1).join("."));
           if (parent) delete parent[parts[parts.length - 1]];
           return;
         }
-      } else if (input.type === "checkbox") value = input.checked;
+      } else if (input.type === "checkbox") value = saved.checked;
       else if (input.type === "radio") {
-        if (!input.checked) return;
-        value = input.value;
+        if (!saved.checked) return;
+        value = saved.value;
       } else if (input.type === "number") {
-        if (input.value === "") return;
-        value = Number(input.value);
-      } else value = input.value.trim();
+        if (saved.value === "") return;
+        value = Number(saved.value);
+      } else value = saved.value.trim();
       setPath(patch, input.name, value);
     });
     if (top === "providers") {
@@ -2973,7 +3052,7 @@
       providerList().forEach(function (p) { if (!patch.providers[p.id]) patch.providers[p.id] = {}; });
       providersWithGroups().forEach(function (p) {
         patch.providers[p.id].groups = Array.prototype.filter.call(
-          document.querySelectorAll("[data-groups='" + p.id + "'] [data-group]"), function (input) { return input.checked; }
+          document.querySelectorAll("[data-groups='" + p.id + "'] [data-group]"), function (input) { return state(input).checked; }
         ).map(function (input) { return input.getAttribute("data-group"); });
       });
     }
@@ -3036,6 +3115,17 @@
     return values.every(isFinite) && values[0] >= values[1] && values[1] >= values[2];
   }
 
+  // Edits by top-level key: a counter that grows with every edit and save
+  // of the key's fields. A save refills its fields with the values the
+  // plugin uses only while no later edit of the same key exists, so a late
+  // confirmation does not overwrite a newer edit, saved or not.
+  var editGen = {};
+
+  function noteEdit(top) {
+    editGen[top] = (editGen[top] || 0) + 1;
+    return editGen[top];
+  }
+
   function saveField(event) {
     var input = event.target;
     var top = input.hasAttribute("data-group") ? "providers" : input.name && topKey(input.name);
@@ -3088,6 +3178,16 @@
     }
     if (input.name === "ignition.enabled") renderIgnitionOff();
     setSaveState(host, "saving", translate("save_saving"));
+    var gens = {};
+    tops.forEach(function (name) { gens[name] = noteEdit(name); });
+    var intent = captureIntent(tops);
+    // Refills only the keys not edited since this change.
+    var refill = function () {
+      var keys = {}, any = false;
+      tops.forEach(function (name) { if (editGen[name] === gens[name]) { keys[name] = true; any = true; } });
+      if (any) fillSettings(keys);
+      if (keys["ignition"]) renderIgnitionOff();
+    };
     saveQueue = saveQueue.then(function () { return checked; }).then(function (check) {
       // A key edited again during the check is checked by its own change event.
       if (input.type === "password" && input.value.trim() !== value) return;
@@ -3098,25 +3198,17 @@
       }
       var patch = {};
       tops.forEach(function (name) {
-        var part = buildPatch(name);
+        var part = buildPatch(name, intent);
         Object.keys(part).forEach(function (k) { patch[k] = part[k]; });
       });
       return patchConfig(patch).then(function (token) {
         // Once applied, the fields show the values the plugin uses.
-        showApplied(host, token, check, /^mcp_/.test(top)).then(function (applied) {
-          if (!applied) return;
-          var keys = {};
-          tops.forEach(function (name) { keys[name] = true; });
-          fillSettings(keys);
-        });
+        showApplied(host, token, check, /^mcp_/.test(top)).then(function (applied) { if (applied) refill(); });
         return loadConfig();
       }).catch(function (err) {
         if (err.message === "unauthorized") return;
         setSaveState(host, "failed", translate("save_failed_short", err.message));
-        var keys = {};
-        tops.forEach(function (name) { keys[name] = true; });
-        fillSettings(keys);
-        if (input.name === "ignition.enabled") renderIgnitionOff();
+        refill();
       });
     });
   }
@@ -3179,32 +3271,42 @@
   function lastToken() { return savedTokens.length ? savedTokens[savedTokens.length - 1] : ""; }
 
   // Resolves to true once the plugin has applied the save with token, or
-  // to false after APPLY_TIMEOUT. The status is read every second while a
-  // save waits.
+  // to false at APPLY_TIMEOUT. The deadline is a timer of its own, so a
+  // status request that hangs does not delay it, and a status that reports
+  // the token after it no longer counts. The status is read every second
+  // while a save waits.
   function whenApplied(token) {
     if (tokenApplied(savedTokens, token, status && status.config_applied_token)) return Promise.resolve(true);
     return new Promise(function (resolve) {
-      applyWaits.push({ token: token, since: Date.now(), done: resolve });
+      var wait = { token: token };
+      wait.done = function (applied) {
+        clearTimeout(wait.timer);
+        applyWaits = applyWaits.filter(function (w) { return w !== wait; });
+        resolve(applied);
+      };
+      wait.timer = setTimeout(function () { wait.done(false); }, APPLY_TIMEOUT);
+      applyWaits.push(wait);
       pollApplied();
     });
   }
 
-  // Settles the waiting saves that the status shows as applied or that
-  // have timed out. Called with every status.
+  // Settles the waiting saves that the status shows as applied. Called with
+  // every status.
   function checkApplied() {
-    var applied = status && status.config_applied_token, now = Date.now();
-    applyWaits = applyWaits.filter(function (w) {
+    var applied = status && status.config_applied_token;
+    applyWaits.slice().forEach(function (w) {
       if (tokenApplied(savedTokens, w.token, applied)) w.done(true);
-      else if (now - w.since >= APPLY_TIMEOUT) w.done(false);
-      else return true;
-      return false;
     });
   }
+
+  // A status request of the poll gives up after this long, so the next one
+  // can start.
+  var POLL_TIMEOUT = 4000;
 
   function pollApplied() {
     if (applyTimer || !applyWaits.length) return;
     applyTimer = setTimeout(function () {
-      loadStatus().catch(function () {}).then(function () {
+      loadStatus(POLL_TIMEOUT).catch(function () {}).then(function () {
         applyTimer = null;
         checkApplied();
         pollApplied();
@@ -3464,7 +3566,9 @@
   $("settings").addEventListener("change", saveField);
   // Editing a field clears its last save state.
   $("settings").addEventListener("input", function (e) {
-    var host = e.target.name || e.target.hasAttribute("data-group") ? saveHost(e.target) : null;
+    var top = inputTop(e.target);
+    if (top) noteEdit(top);
+    var host = top ? saveHost(e.target) : null;
     if (host) Array.prototype.forEach.call(host.children, function (child) {
       if (child.classList.contains("save-state") && child.getAttribute("data-state") !== "saving") {
         child.textContent = ""; child.removeAttribute("data-state"); child.owner = null;
