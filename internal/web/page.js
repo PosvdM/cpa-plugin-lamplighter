@@ -112,19 +112,21 @@
       col_quota: "额度", col_account: "账号", col_latest: "最新", col_min: "最低", col_max: "最高", col_samples: "样本", col_to_reset: "距重置",
       events: "事件",
       settings: "设置",
-      notifications: "通知",
       bark_url: "Bark 推送地址", bark_group: "Bark 分组",
       webhook_url: "Webhook 地址", webhook_method: "请求方法", webhook_headers: "请求头（每行一个）", webhook_body: "请求体",
       webhook_body_placeholder: "留空时发送内置的 JSON 消息",
       webhook_success: "成功条件（可选）", webhook_success_hint: "JSON 响应必须包含这些字段和值才算发送成功；留空时只检查 HTTP 状态码",
       webhook_hint: "地址、请求头和请求体中可以使用占位符：{{title}} {{body}} {{text}} {{url}} {{priority}} {{kind}} {{label}} {{time}}。各服务的写法见 README。",
       headers_invalid: "每行写一个请求头，格式为 名称: 值", json_invalid: "请填写 JSON 对象，例如 {\"code\":0}",
-      test_notify: "测试推送", test_notify_hint: "按插件已应用的设置发送到所有已配置的渠道，修改设置后等几秒再测试",
+      test_notify: "测试推送", test_notify_hint: "发送到所有已配置的渠道；刚修改的设置会等插件应用后再发送",
+      test_waiting: "等待插件应用新设置…", test_stale: "新设置可能尚未生效，这次测试按插件当前的设置发送。",
       test_ok: "{0}：已发送", test_failed: "{0}：失败，{1}", test_response: "响应：{0}",
       test_unchecked: "只检查了 HTTP 状态码。飞书、钉钉、企业微信等服务失败时也返回 200，请到客户端确认是否收到，或设置成功条件。",
       test_some_failed: "部分渠道测试失败", test_all_failed: "测试推送失败",
       thresholds: "提醒阈值", remaining_le: "剩余 ≤",
-      thresholds_hint: "额度降到每一档时推送一次，耗尽时再推送一次",
+      threshold_notice: "提醒", threshold_low: "偏低", threshold_critical: "告急",
+      thresholds_hint: "额度降到每一档时推送一次，耗尽时再推送一次。三档须从高到低；前两档也决定额度条和图表的颜色。",
+      thresholds_order: "三档阈值须从高到低：提醒 > 偏低 > 告急，未保存",
       window_5h: "5 小时窗口", window_7d: "7 天窗口",
       recovery_notify: "额度恢复时通知", reset_reminder: "重置前提醒",
       recovery_notify_5h: "额度恢复时通知 · 5 小时窗口", recovery_notify_7d: "额度恢复时通知 · 7 天窗口",
@@ -132,25 +134,25 @@
       mode_off: "关闭", recovery_all: "每次", recovery_after_exhausted: "用完后",
       reminder_all: "每次", reminder_has_remaining: "有余量",
       mode_off_title: "关闭", recovery_all_title: "每次重置都通知", recovery_after_exhausted_title: "窗口用完后，在下一次重置时通知一次",
-      reminder_all_title: "每次重置前都提醒", reminder_has_remaining_title: "剩余高于第三档阈值时才提醒",
-      notify_modes_hint: "“用完后”：窗口用完后，在下一次重置时通知一次。“有余量”：剩余高于第三档阈值时才提醒。重置前提醒在 5 小时窗口重置前 1 小时、7 天窗口重置前 1 天发送。恢复通知附带上一周期的剩余额度，取自每次重置前 30 秒的查询。",
+      reminder_all_title: "每次重置前都提醒", reminder_has_remaining_title: "剩余高于告急阈值时才提醒",
+      notify_modes_hint: "“用完后”：窗口用完后，在下一次重置时通知一次。“有余量”：剩余高于告急阈值时才提醒。重置前提醒在 5 小时窗口重置前 1 小时、7 天窗口重置前 1 天发送。恢复通知附带上一周期的剩余额度，取自每次重置前 30 秒的查询。",
       quota_queries: "额度查询",
       models_api_key: "模型列表 API key",
-      models_api_key_hint: "在 CPA 的 access.api-keys 中新建一个专用 key，用于读取模型列表、选择点火模型",
+      models_api_key_hint: "插件用这个 key 从 CPA 读取模型列表，为自动点火选择模型；不使用自动点火时可以留空。请在 CPA 的 access.api-keys 中新建一个专用 key，不要填管理密钥。",
       poll_interval: "查询间隔（秒）", request_timeout: "请求超时（秒）", history_retention: "历史保留（天）",
       passive_skip: "被动数据跳过窗口（秒）", passive_skip_max: "最多连续跳过（分钟）",
       passive_skip_hint: "整点前这段时间内已有被动数据的账号跳过本轮主动查询；设为 0 则每轮都主动查询。",
       ignition_enabled: "启用自动点火",
       start_hour: "每日开始（时）", end_hour: "每日结束（时）", end_grace: "结束后宽限（分钟）",
       grace: "重置后延迟（秒）", failure_retry: "失败重试间隔（秒）", max_transient: "临时错误上限（次）",
-      services: "服务", col_service: "服务", col_monitor: "监控", col_ignition_model: "点火模型",
+      services: "服务", col_service: "服务", col_ignition_model: "点火模型",
       monitor_service: "监控 {0}", ignite_service: "点火 {0}", model_auto: "自动：{0}",
       ignite_groups: "{0} 点火额度组", no_ignition: "不支持点火", list_or: " 或 ",
       codex_reset_enabled: "转发 Did Codex Reset 发布的 Codex 重置信号",
       codex_reset_pending: "首次开启时推送当前待生效的排期",
       chart_prefs: "额度图表", remember_chart_filters: "记住筛选条件",
       remember_chart_filters_hint: "在当前浏览器中记住上次选择的额度窗口、时间范围和排序；关闭后每次打开页面都使用默认选择。",
-      save_hint: "修改后自动保存到 CPA 的 config.yaml，插件几秒内应用。文本和数字在离开输入框或按回车时保存。",
+      save_hint: "修改后自动保存到 CPA 的 config.yaml，插件几秒内应用。文本和数字在离开输入框或按回车时保存，保存结果显示在各项旁边。",
       language_note: "通知语言跟随最近打开此页面时管理中心的语言，当前为{0}。",
       lang_zh: "中文", lang_en: "English",
       due: "已到", minutes: "{0} 分钟", hours_minutes: "{0} 小时 {1} 分", days: "{0} 天",
@@ -211,11 +213,32 @@
       history_failed: "读取历史失败：{0}",
       tz_config: "配置中指定", tz_cpa: "跟随 CPA 服务器",
       tz_note: "通知和页面中的时间使用 {0}，{1}。",
-      saved: "已保存，插件会在几秒内应用新设置", save_failed: "保存失败：{0}",
+      save_failed: "保存失败：{0}",
       management_key_refused: "这是 CPA 管理密钥，未保存。请填写 access.api-keys 中的 key",
       api_key_refused: "CPA 不接受这个 key，未保存。请填写 access.api-keys 中的 key",
       load_failed: "加载失败：{0}",
-      refreshed_all: "已刷新全部额度", test_sent: "测试通知已发送"
+      refreshed_all: "已刷新全部额度", test_sent: "测试通知已发送",
+      level_full: "满", level_high: "高", level_medium: "中", level_low: "低", level_empty: "空",
+      inactive: "已停用", inactive_suffix: "（已停用）", stat_last: "最后读数",
+      legend_inactive: "已停用：账号不再报告这个窗口，保留到最后一个数据点移出所选范围",
+      drag_handle: "拖动调整顺序", move_up: "上移", move_down: "下移", move_up_aria: "上移 {0}", move_down_aria: "下移 {0}",
+      order_failed: "账号顺序保存失败：{0}",
+      view_nav: "页面", advanced: "高级",
+      notify_channels: "通知渠道", webhook_advanced: "高级：请求方法、请求头、请求体和成功条件", alert_rules: "提醒规则",
+      ignition_off: "自动点火已关闭，这些设置暂不生效。",
+      ignition_models_hint: "选择点火模型需要“高级”中的模型列表 API key。",
+      monitor_hint: "勾选要监控额度的服务。",
+      save_saving: "保存中…", save_saved: "已保存", save_failed_short: "失败：{0}",
+      key_verified: "已保存，验证通过", key_unverified: "已保存，未能验证：{0}", network_error: "网络错误",
+      mcp_hint: "AI 客户端（如 Claude Code）可以通过 MCP 查询额度、历史和事件，并刷新额度。",
+      mcp_enabled: "启用 MCP 接口", mcp_listen: "监听地址", mcp_key: "密钥", mcp_key_unset: "未设置",
+      mcp_show: "显示", mcp_hide: "隐藏", copy: "复制", copied: "已复制", copy_failed: "无法复制，请手动选择文本复制",
+      mcp_generate: "生成新密钥", mcp_regenerate_confirm: "生成新密钥？旧密钥会立即失效，使用它的客户端需要换成新密钥。",
+      mcp_status: "状态", mcp_unknown: "未知", mcp_running: "运行中", mcp_stopped: "未启动",
+      mcp_public_url: "对外地址（可选）",
+      mcp_public_hint: "对外开放时请使用反向代理并配置 HTTPS，然后在这里填写对外地址，下面的配置随之更新。这个地址只保存在当前浏览器。",
+      mcp_snippets: "客户端配置", mcp_claude: "Claude Code", mcp_json: "通用 JSON", mcp_stdio: "只支持 stdio 的客户端（mcp-remote）",
+      mcp_no_key: "先生成密钥，配置中的 <key> 会换成实际的密钥。", mcp_error: "MCP 接口未启动：{0}"
     },
     en: {
       app_sub: "", repo_hint: "View on GitHub",
@@ -242,19 +265,21 @@
       col_quota: "Quota", col_account: "Account", col_latest: "Latest", col_min: "Lowest", col_max: "Highest", col_samples: "Samples", col_to_reset: "Until reset",
       events: "Events",
       settings: "Settings",
-      notifications: "Notifications",
       bark_url: "Bark push URL", bark_group: "Bark group",
       webhook_url: "Webhook URL", webhook_method: "Method", webhook_headers: "Headers (one per line)", webhook_body: "Body",
       webhook_body_placeholder: "Empty sends the built-in JSON message",
       webhook_success: "Success condition (optional)", webhook_success_hint: "The JSON response must contain these fields and values for the delivery to count; empty checks only the HTTP status",
       webhook_hint: "The URL, headers and body can use placeholders: {{title}} {{body}} {{text}} {{url}} {{priority}} {{kind}} {{label}} {{time}}. See the README for each service.",
       headers_invalid: "One header per line, as Name: value", json_invalid: "Enter a JSON object, such as {\"code\":0}",
-      test_notify: "Send test", test_notify_hint: "Sends to every configured channel using the settings the plugin has applied; after changing a setting, wait a few seconds",
+      test_notify: "Send test", test_notify_hint: "Sends to every configured channel; settings just changed are applied first",
+      test_waiting: "Waiting for the plugin to apply the new settings…", test_stale: "The new settings may not be in effect yet; this test used the settings the plugin has applied.",
       test_ok: "{0}: sent", test_failed: "{0}: failed, {1}", test_response: "Response: {0}",
       test_unchecked: "Only the HTTP status was checked. Feishu, DingTalk, WeCom and similar services answer 200 on failure too, so check that the message arrived or set a success condition.",
       test_some_failed: "Some channels failed the test", test_all_failed: "The test notification failed",
       thresholds: "Alert thresholds", remaining_le: "Remaining ≤",
-      thresholds_hint: "One notification when quota drops to each threshold, and one more when it runs out",
+      threshold_notice: "Notice", threshold_low: "Low", threshold_critical: "Critical",
+      thresholds_hint: "One notification when quota drops to each threshold, and one more when it runs out. The thresholds must fall from first to third; the first two also set the colors of the bars and the chart.",
+      thresholds_order: "The thresholds must fall from Notice to Low to Critical; not saved",
       window_5h: "5-hour window", window_7d: "7-day window",
       recovery_notify: "Notify when quota recovers", reset_reminder: "Remind before resets",
       recovery_notify_5h: "Notify when quota recovers · 5-hour window", recovery_notify_7d: "Notify when quota recovers · 7-day window",
@@ -262,25 +287,25 @@
       mode_off: "Off", recovery_all: "Always", recovery_after_exhausted: "After out",
       reminder_all: "Always", reminder_has_remaining: "If left",
       mode_off_title: "Off", recovery_all_title: "Notify at every reset", recovery_after_exhausted_title: "After the window runs out, notify once at its next reset",
-      reminder_all_title: "Remind before every reset", reminder_has_remaining_title: "Remind only when more than the third threshold is left",
-      notify_modes_hint: "\"After out\": after the window runs out, notify once at its next reset. \"If left\": remind only when more than the third threshold is left. Reminders are sent 1 hour before a 5-hour window resets and 1 day before a 7-day window resets. Recovery notifications include what was left of the ended cycle, from the query 30 seconds before every reset.",
+      reminder_all_title: "Remind before every reset", reminder_has_remaining_title: "Remind only when more than the Critical threshold is left",
+      notify_modes_hint: "\"After out\": after the window runs out, notify once at its next reset. \"If left\": remind only when more than the Critical threshold is left. Reminders are sent 1 hour before a 5-hour window resets and 1 day before a 7-day window resets. Recovery notifications include what was left of the ended cycle, from the query 30 seconds before every reset.",
       quota_queries: "Quota queries",
       models_api_key: "Model list API key",
-      models_api_key_hint: "Create a dedicated key in CPA's access.api-keys; the plugin reads the model list with it to pick ignition models",
+      models_api_key_hint: "The plugin reads CPA's model list with this key to pick ignition models; without ignition it can stay empty. Create a dedicated key in CPA's access.api-keys rather than using the management key.",
       poll_interval: "Query interval (s)", request_timeout: "Request timeout (s)", history_retention: "History retention (days)",
       passive_skip: "Passive data window (s)", passive_skip_max: "Longest skip (min)",
       passive_skip_hint: "Accounts with passive data within this time before a slot skip that active query; 0 queries every time.",
       ignition_enabled: "Enable ignition",
       start_hour: "Daily start (hour)", end_hour: "Daily end (hour)", end_grace: "Grace after end (min)",
       grace: "Delay after reset (s)", failure_retry: "Retry after failure (s)", max_transient: "Transient error limit",
-      services: "Services", col_service: "Service", col_monitor: "Monitor", col_ignition_model: "Ignition model",
+      services: "Services", col_service: "Service", col_ignition_model: "Ignition model",
       monitor_service: "Monitor {0}", ignite_service: "Ignite {0}", model_auto: "Auto: {0}",
       ignite_groups: "{0} ignition groups", no_ignition: "No ignition", list_or: " or ",
       codex_reset_enabled: "Forward Codex reset signals published by Did Codex Reset",
       codex_reset_pending: "When first turned on, send the pending schedule",
       chart_prefs: "Quota chart", remember_chart_filters: "Remember the filters",
       remember_chart_filters_hint: "This browser remembers the last quota window, time range and order. When off, the page opens with the default choices.",
-      save_hint: "Changes save to CPA's config.yaml automatically, and the plugin applies them within a few seconds. Text and numbers save when you leave the field or press Enter.",
+      save_hint: "Changes save to CPA's config.yaml automatically, and the plugin applies them within a few seconds. Text and numbers save when you leave the field or press Enter; each field shows whether it saved.",
       language_note: "Notifications use the Management Center language from the last time this page was opened, now {0}.",
       lang_zh: "中文", lang_en: "English",
       due: "due", minutes: "{0} min", hours_minutes: "{0} h {1} min", days: "{0} days",
@@ -341,11 +366,32 @@
       history_failed: "Could not read the history: {0}",
       tz_config: "set in the config", tz_cpa: "following the CPA server",
       tz_note: "Notifications and this page show times in {0}, {1}.",
-      saved: "Saved; the plugin applies the new settings within a few seconds", save_failed: "Could not save: {0}",
+      save_failed: "Could not save: {0}",
       management_key_refused: "This is the CPA management key, so it was not saved. Enter a key from access.api-keys",
       api_key_refused: "CPA does not accept this key, so it was not saved. Enter a key from access.api-keys",
       load_failed: "Could not load: {0}",
-      refreshed_all: "Refreshed all quota", test_sent: "Test notification sent"
+      refreshed_all: "Refreshed all quota", test_sent: "Test notification sent",
+      level_full: "Full", level_high: "High", level_medium: "Medium", level_low: "Low", level_empty: "Empty",
+      inactive: "Inactive", inactive_suffix: " (inactive)", stat_last: "Last reading",
+      legend_inactive: "Inactive: the account no longer reports this window; it shows until its last sample leaves the range",
+      drag_handle: "Drag to reorder", move_up: "Move up", move_down: "Move down", move_up_aria: "Move {0} up", move_down_aria: "Move {0} down",
+      order_failed: "Could not save the account order: {0}",
+      view_nav: "Page", advanced: "Advanced",
+      notify_channels: "Notification channels", webhook_advanced: "Advanced: method, headers, body and success condition", alert_rules: "Alert rules",
+      ignition_off: "Ignition is off, so these settings do not apply for now.",
+      ignition_models_hint: "Picking ignition models needs the model list API key under Advanced.",
+      monitor_hint: "Check the services whose quota to monitor.",
+      save_saving: "Saving…", save_saved: "Saved", save_failed_short: "Failed: {0}",
+      key_verified: "Saved; CPA accepts the key", key_unverified: "Saved, but could not verify: {0}", network_error: "network error",
+      mcp_hint: "AI clients such as Claude Code can read quota, history and events and refresh quota over MCP.",
+      mcp_enabled: "Enable the MCP endpoint", mcp_listen: "Listen address", mcp_key: "Key", mcp_key_unset: "Not set",
+      mcp_show: "Show", mcp_hide: "Hide", copy: "Copy", copied: "Copied", copy_failed: "Could not copy; select the text and copy it",
+      mcp_generate: "Generate new key", mcp_regenerate_confirm: "Generate a new key? The old key stops working at once, and clients using it need the new one.",
+      mcp_status: "Status", mcp_unknown: "Unknown", mcp_running: "Running", mcp_stopped: "Not running",
+      mcp_public_url: "Public address (optional)",
+      mcp_public_hint: "To open it to other machines, put a reverse proxy with HTTPS in front and enter its address here; the configs below follow it. The address is kept in this browser only.",
+      mcp_snippets: "Client configuration", mcp_claude: "Claude Code", mcp_json: "Generic JSON", mcp_stdio: "stdio-only clients (mcp-remote)",
+      mcp_no_key: "Generate a key first; it replaces <key> in the configs.", mcp_error: "The MCP endpoint is not running: {0}"
     }
   };
 
@@ -535,22 +581,28 @@
     return translate("ago", fmtDuration(ms));
   }
 
-  // Bars and the chart color quota by the first two notification
-  // thresholds, the same split as the 🟡 and 🔴 notifications.
+  // Bars and the chart color quota in five levels: empty at 0% and full at
+  // 100%, judged on the raw value, so 99.6% is not full; between them low,
+  // medium and high, split by the first two notification thresholds, the
+  // same split as the 🟡 and 🔴 notifications. Cards, chart bands, swatches,
+  // tooltips and the legend all use quotaLevel.
   function quotaThresholds() {
     var cfg = status && status.config ? status.config : {};
     var notice = Number(cfg.notice_threshold), low = Number(cfg.low_threshold);
     return { notice: isFinite(notice) ? notice : 50, low: isFinite(low) ? low : 20 };
   }
 
+  // A weighted average of full accounts can land a rounding error below 100.
+  var LEVEL_EPSILON = 1e-6;
+
   function quotaLevel(remaining) {
     var t = quotaThresholds();
+    if (remaining <= LEVEL_EPSILON) return "empty";
+    if (remaining >= 100 - LEVEL_EPSILON) return "full";
     if (remaining <= t.low) return "low";
     if (remaining <= t.notice) return "medium";
     return "high";
   }
-
-  function meterClass(remaining) { return "fill-" + quotaLevel(remaining); }
 
   function fmtCountdown(ms) {
     if (ms <= 0) return translate("reset_now");
@@ -630,6 +682,7 @@
     if (status.list_error) box.appendChild(notice(status.list_error));
     if (status.models_error) box.appendChild(notice(translate("models_error", status.models_error)));
     if (status.notify_error) box.appendChild(notice(translate("notify_error", status.notify_error)));
+    if (status.mcp && status.mcp.enabled && !status.mcp.running && status.mcp.error) box.appendChild(notice(translate("mcp_error", status.mcp.error)));
     // No channel is how notifications are turned off, so it is a hint in the
     // settings rather than a notice.
     $("notify-off").hidden = !(status.config && !status.config.bark_url && !(status.config.webhook && status.config.webhook.url));
@@ -638,10 +691,13 @@
     }
   }
 
+  // An empty window shows no fill: its whole track turns dark red and
+  // striped instead.
   function quotaRow(group, w, index) {
     var remaining = Math.max(0, Math.min(100, w.remaining));
+    var level = quotaLevel(w.remaining);
     var reset = parseTime(w.reset);
-    var meta = [el("span", { class: "quota-percent", text: Math.round(remaining) + "%" })];
+    var meta = [el("span", { class: "quota-percent" + (level === "empty" ? " percent-empty" : ""), text: Math.round(remaining) + "%" })];
     if (reset) {
       var left = reset.getTime() - Date.now();
       meta.push(el("span", { class: "quota-reset", text: fmtDateTime(reset) }));
@@ -652,9 +708,9 @@
         el("span", { class: "quota-name", text: windowName(w) }),
         el("span", { class: "quota-meta" }, meta)
       ]),
-      el("div", { class: "quota-bar", role: "meter", "aria-valuemin": "0", "aria-valuemax": "100",
+      el("div", { class: "quota-bar" + (level === "empty" ? " bar-empty" : ""), role: "meter", "aria-valuemin": "0", "aria-valuemax": "100",
         "aria-valuenow": String(Math.round(remaining)), "aria-label": translate("remaining_aria", group.label, windowName(w)) }, [
-        el("span", { class: "quota-fill " + meterClass(remaining), style: "width:" + remaining + "%;--meter-index:" + index })
+        level === "empty" ? null : el("span", { class: "quota-fill fill-" + level, style: "width:" + remaining + "%;--meter-index:" + index })
       ])
     ]);
   }
@@ -672,7 +728,120 @@
     ]);
   }
 
+  // ---- Account order ----
+
+  // Cards follow account_order, a list of credential file names, the key
+  // account_weights uses too. The status API already returns the accounts
+  // in this order; the page sorts them again by the config it last read, so
+  // a new order shows at once instead of after the plugin applies it.
+  // Accounts not in the list keep their order from the API, after the
+  // listed ones. pendingOrder is an order being saved; it stays in place
+  // over configs read before that save finishes.
+  var pendingOrder = null;
+
+  function sortAccounts() {
+    if (!status || !status.accounts) return;
+    var order = Array.isArray(rawConfig.account_order) ? rawConfig.account_order : [];
+    var pos = {};
+    order.forEach(function (name, i) { if (!Object.prototype.hasOwnProperty.call(pos, name)) pos[name] = i; });
+    var rank = function (a) { return Object.prototype.hasOwnProperty.call(pos, a.name) ? pos[a.name] : order.length; };
+    status.accounts = status.accounts.map(function (a, i) { return { a: a, i: i }; }).sort(function (x, y) {
+      return (rank(x.a) - rank(y.a)) || (x.i - y.i);
+    }).map(function (x) { return x.a; });
+  }
+
+  // Saves the full list of credential file names in their new order through
+  // the save queue. Cards and chart show it at once.
+  function saveAccountOrder(names) {
+    pendingOrder = names.slice();
+    rawConfig.account_order = names.slice();
+    sortAccounts();
+    renderAccounts();
+    if (history) renderChart();
+    saveQueue = saveQueue.then(function () {
+      return api("PATCH", CONFIG_API, { account_order: names }).then(function () {
+        noteSaved({ account_order: names });
+        if (pendingOrder && pendingOrder.join("\n") === names.join("\n")) pendingOrder = null;
+        return loadConfig();
+      }).catch(function (err) {
+        pendingOrder = null;
+        if (err.message !== "unauthorized") toast(translate("order_failed", err.message));
+        return loadConfig().catch(function () {}).then(function () {
+          sortAccounts();
+          renderAccounts();
+          if (history) renderChart();
+        });
+      });
+    });
+  }
+
+  function accountNames() { return status.accounts.map(function (a) { return a.name; }); }
+
+  // The up and down buttons move a card by one place; the button keeps the
+  // focus, so the keyboard can move it again.
+  function moveAccount(name, delta) {
+    var names = accountNames(), from = names.indexOf(name), to = from + delta;
+    if (from < 0 || to < 0 || to >= names.length) return;
+    names.splice(to, 0, names.splice(from, 1)[0]);
+    saveAccountOrder(names);
+    var button = $("accounts").querySelector("[data-move='" + (delta < 0 ? "up" : "down") + "'][data-account='" + cssEscape(name) + "']");
+    if (button && !button.disabled) button.focus();
+    else {
+      var other = $("accounts").querySelector("[data-move][data-account='" + cssEscape(name) + "']:not([disabled])");
+      if (other) other.focus();
+    }
+  }
+
+  function cssEscape(text) { return window.CSS && CSS.escape ? CSS.escape(text) : String(text).replace(/["'\\]/g, "\\$&"); }
+
+  // Dragging a card by its handle moves the card itself through the grid:
+  // over another card, it takes that card's place. The order is saved when
+  // the pointer is released. Pointer events cover mouse, pen and touch. A
+  // status refresh during the drag would rebuild the cards, so it waits
+  // until the drag ends.
+  var accountDrag = null;
+  var accountsBehind = false;
+
+  function startAccountDrag(e, card, handle) {
+    if (e.button !== 0 || accountDrag) return;
+    e.preventDefault();
+    accountDrag = { card: card, handle: handle, pointer: e.pointerId, before: accountNames().join("\n") };
+    card.classList.add("dragging");
+    $("accounts").classList.add("sorting");
+    document.addEventListener("pointermove", moveAccountDrag);
+    document.addEventListener("pointerup", endAccountDrag);
+    document.addEventListener("pointercancel", endAccountDrag);
+  }
+
+  function moveAccountDrag(e) {
+    if (!accountDrag || e.pointerId !== accountDrag.pointer) return;
+    var box = $("accounts");
+    var target = document.elementFromPoint(e.clientX, e.clientY);
+    var over = target && target.closest ? target.closest(".card.account") : null;
+    if (!over || over === accountDrag.card || over.parentNode !== box) return;
+    var cards = Array.prototype.slice.call(box.children);
+    if (cards.indexOf(over) > cards.indexOf(accountDrag.card)) box.insertBefore(accountDrag.card, over.nextSibling);
+    else box.insertBefore(accountDrag.card, over);
+  }
+
+  function endAccountDrag(e) {
+    if (!accountDrag || e.pointerId !== accountDrag.pointer) return;
+    var drag = accountDrag;
+    accountDrag = null;
+    document.removeEventListener("pointermove", moveAccountDrag);
+    document.removeEventListener("pointerup", endAccountDrag);
+    document.removeEventListener("pointercancel", endAccountDrag);
+    drag.card.classList.remove("dragging");
+    $("accounts").classList.remove("sorting");
+    var names = Array.prototype.map.call($("accounts").querySelectorAll(".card.account"), function (card) { return card.getAttribute("data-account"); });
+    if (names.join("\n") !== drag.before && e.type !== "pointercancel") saveAccountOrder(names);
+    else if (accountsBehind || e.type === "pointercancel") renderAccounts();
+  }
+
   function renderAccounts() {
+    // Rebuilding the cards would drop the one being dragged.
+    if (accountDrag) { accountsBehind = true; return; }
+    accountsBehind = false;
     var box = $("accounts");
     clear(box);
     if (!status.accounts.length) {
@@ -685,8 +854,19 @@
     // several accounts.
     var counts = {};
     status.accounts.forEach(function (a) { counts[a.provider] = (counts[a.provider] || 0) + 1; });
-    status.accounts.forEach(function (account) {
-      var card = el("div", { class: "card account" });
+    var last = status.accounts.length - 1;
+    status.accounts.forEach(function (account, index) {
+      var card = el("div", { class: "card account", "data-account": account.name });
+      var handle = el("span", { class: "drag-handle", title: translate("drag_handle"), "aria-hidden": "true" });
+      handle.addEventListener("pointerdown", function (e) { startAccountDrag(e, card, handle); });
+      var moves = el("span", { class: "order-buttons" }, [
+        el("button", { type: "button", class: "btn btn-ghost btn-icon", "data-move": "up", "data-account": account.name, disabled: index === 0,
+          title: translate("move_up"), "aria-label": translate("move_up_aria", account.email || account.name), text: "↑",
+          onclick: function () { moveAccount(account.name, -1); } }),
+        el("button", { type: "button", class: "btn btn-ghost btn-icon", "data-move": "down", "data-account": account.name, disabled: index === last,
+          title: translate("move_down"), "aria-label": translate("move_down_aria", account.email || account.name), text: "↓",
+          onclick: function () { moveAccount(account.name, 1); } })
+      ]);
       var pooledAccount = counts[account.provider] > 1, weight = accountWeight(account);
       var refresh = el("button", { type: "button", class: "btn btn-ghost btn-sm", text: translate("refresh"), onclick: function () {
         runAction(refresh, API + "/refresh", { auth_index: account.auth_index }, translate("refreshed", account.title));
@@ -698,10 +878,11 @@
         setWeight(weigh, account);
       } }) : null;
       card.appendChild(el("div", { class: "account-head" }, [
+        handle,
         el("span", { class: "type-badge type-" + account.provider, text: account.title }),
         pooledAccount && weight !== 1 ? el("span", { class: "account-weight", title: translate("weight"), text: "×" + fmtWeight(weight) }) : null,
         el("span", { class: "account-email", title: account.email || account.name, text: account.email || account.name }),
-        rename, weigh, refresh
+        moves, rename, weigh, refresh
       ]));
       (account.groups || []).forEach(function (group) {
         var block = el("div", { class: "quota-group" });
@@ -850,20 +1031,24 @@
     more.textContent = eventsExpanded ? translate("collapse") : translate("show_more", Math.min(status.events.length, 100));
   }
 
-  // One settings row per provider, built when the provider list changes.
-  // Providers that cannot be ignited show no ignition switch or model; those
-  // with quota groups to choose get a row of group checkboxes.
+  // The provider settings, built when the provider list changes: a monitor
+  // switch per provider under Services, and a row per provider in the
+  // ignition table. Providers that cannot be ignited show no ignition switch
+  // or model; those with quota groups to choose get a row of group
+  // checkboxes.
   function renderServiceRows() {
-    var body = $("service-rows");
+    var body = $("ignition-rows"), monitors = $("monitor-rows");
     var list = providerList();
     var ids = list.map(function (p) { return p.id; }).join(",");
     if (body.getAttribute("data-ids") === ids) return false;
     clear(body);
+    clear(monitors);
     list.forEach(function (p) {
-      var cells = [
-        el("td", { class: "strong", text: p.title }),
-        el("td", {}, [el("input", { name: "providers." + p.id + ".monitor", type: "checkbox", "data-service": p.id, "data-label": "monitor_service" })])
-      ];
+      monitors.appendChild(el("label", { class: "inline" }, [
+        el("input", { name: "providers." + p.id + ".monitor", type: "checkbox", "data-service": p.id, "data-label": "monitor_service" }),
+        el("span", { text: p.title })
+      ]));
+      var cells = [el("td", { class: "strong", text: p.title })];
       if (p.ignite) {
         cells.push(el("td", {}, [el("input", { name: "providers." + p.id + ".ignite", type: "checkbox", "data-service": p.id, "data-label": "ignite_service" })]));
         cells.push(el("td", {}, [el("input", { name: "providers." + p.id + ".model", type: "text", "data-service": p.id })]));
@@ -873,7 +1058,7 @@
       }
       body.appendChild(el("tr", {}, cells));
       if (p.groups && p.groups.length) {
-        body.appendChild(el("tr", { class: "sub-row" }, [el("td"), el("td", { colspan: "3" }, [
+        body.appendChild(el("tr", { class: "sub-row" }, [el("td"), el("td", { colspan: "2" }, [
           el("span", { class: "field-label", "data-groups-label": p.id }),
           el("div", { class: "checks", "data-groups": p.id }),
           el("span", { class: "hint", "data-groups-hint": p.id })
@@ -907,6 +1092,8 @@
   }
 
   function renderStatus() {
+    sortAccounts();
+    checkApplied();
     renderHeader();
     renderNotices();
     // Rows built after the first fill need their values.
@@ -918,6 +1105,7 @@
     renderTargets();
     renderEvents();
     renderLanguageNote();
+    renderMcp();
   }
 
   function loadStatus() {
@@ -1053,8 +1241,19 @@
     return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   }
 
-  function levelVar(remaining) {
-    return { high: "--viz-success", medium: "--quota-medium-color", low: "--viz-failure" }[quotaLevel(remaining)];
+  var LEVEL_VARS = { empty: "--quota-empty-color", low: "--viz-failure", medium: "--quota-medium-color", high: "--viz-success", full: "--quota-full-color" };
+
+  // A rect in the color of a level; an empty one is also striped.
+  function levelRect(root, attrs, level) {
+    var fill = {};
+    Object.keys(attrs).forEach(function (name) { fill[name] = attrs[name]; });
+    fill.fill = cssVar(LEVEL_VARS[level]);
+    root.appendChild(svg("rect", fill));
+    if (level !== "empty") return;
+    var stripes = {};
+    Object.keys(attrs).forEach(function (name) { if (name !== "fill-opacity") stripes[name] = attrs[name]; });
+    stripes.fill = "url(#chart-hatch-empty)";
+    root.appendChild(svg("rect", stripes));
   }
 
   function pct(v) { return v == null ? "—" : Math.round(v) + "%"; }
@@ -1067,8 +1266,9 @@
   // does not show.
   function windowKind(series) { return series.kind || ""; }
 
-  // The chart offers the window kinds the accounts report, both while none
-  // are known.
+  // The chart offers the window kinds the accounts report, and those whose
+  // loaded history still has a sample in the range of an inactive window;
+  // both while none are known.
   function windowKinds() {
     var seen = {};
     (status.accounts || []).forEach(function (a) {
@@ -1076,8 +1276,19 @@
         (g.windows || []).forEach(function (w) { if (w.kind) seen[w.kind] = true; });
       });
     });
+    ["5h", "7d"].forEach(function (kind) {
+      var cached = historyCache[historyKey(kind, kind === chartWindow ? range : rangeFor(kind))];
+      if (!seen[kind] && cached && recentSamples(cached.data, kind)) seen[kind] = true;
+    });
     var kinds = ["5h", "7d"].filter(function (k) { return seen[k]; });
     return kinds.length ? kinds : ["5h", "7d"];
+  }
+
+  function recentSamples(data, kind) {
+    var from = new Date(data.from).getTime() / 1000;
+    return (data.series || []).some(function (s) {
+      return windowKind(s) === kind && s.points && s.points.length && s.points[s.points.length - 1][0] >= from;
+    });
   }
 
   // Shows the window buttons of the reported kinds. When the chosen kind is
@@ -1177,10 +1388,23 @@
   // One row per quota group label. A label with several accounts becomes a
   // pooled row that expands into one row per account. floor holds the
   // samples as cycleFloor() leaves them, for the band and the rate of use.
+  //
+  // A window shows while the status still reports it, or while it has a
+  // sample in the chosen range. A window that only has samples is inactive,
+  // such as the 5-hour window of an account whose plan no longer has one:
+  // it gets a row of its own after the label's row, is left out of the
+  // total and of "lowest first", and shows no projection or even pace.
+  //
+  // Rows follow the order of the cards: a label takes the place of its
+  // first account, and labels of the same account keep the group_order of
+  // the status API, so Gemini stays before Claude / GPT within Antigravity.
   function chartRows() {
-    var info = {};
-    status.accounts.forEach(function (a) {
+    var info = {}, accountOf = {}, emailOf = {};
+    status.accounts.forEach(function (a, index) {
+      accountOf["auth|" + a.auth_index] = index;
+      emailOf[a.auth_index] = a.email || a.name;
       (a.groups || []).forEach(function (g) {
+        accountOf["group|" + g.key] = index;
         (g.windows || []).forEach(function (w) {
           var reset = parseTime(w.reset);
           info[g.key + "|" + w.id] = { email: a.email || a.name, reset: reset ? reset.getTime() / 1000 : null, weight: accountWeight(a) };
@@ -1188,40 +1412,67 @@
       });
     });
     var limit = gapLimit();
+    var from = new Date(history.from).getTime() / 1000;
     var byLabel = {}, order = [];
-    history.series.forEach(function (s) {
+    history.series.forEach(function (s, seq) {
       if (!s.points || !s.points.length || windowKind(s) !== historyWindow) return;
-      var meta = info[s.group + "|" + s.window] || {};
+      var meta = info[s.group + "|" + s.window];
+      var lastPoint = s.points[s.points.length - 1];
+      // Only the sample before the range can lie before it, so the last
+      // sample tells whether any falls in the range.
+      if (!meta && lastPoint[0] < from) return;
       // A window with its own label, such as "7 Day Opus" next to the
       // 7-day window of the same group label, gets a row of its own.
       var extra = s.window_label && s.window_label !== historyWindow ? " · " + s.window_label : "";
       var source = (s.source_label || s.label) + extra;
       var id = s.provider + "|" + source;
+      var account = accountOf["group|" + s.group];
+      if (account === undefined) account = accountOf["auth|" + s.auth_index];
       if (!byLabel[id]) { byLabel[id] = []; order.push(id); }
-      byLabel[id].push({ id: s.group + "|" + s.window, name: s.label + extra, source: source, sub: meta.email || s.auth_index || "", group: s.group,
-        points: s.points, floor: cycleFloor(s.points), reset: meta.reset, weight: meta.weight || 1, last: s.points[s.points.length - 1][1] });
-    });
-    var rows = order.map(function (id, index) {
-      var kids = byLabel[id];
-      var serviceOrder = status.group_order || [];
-      var rank = serviceOrder.indexOf(kids[0].source);
-      if (rank < 0) rank = serviceOrder.length + index;
-      if (kids.length === 1) { kids[0].order = rank; return kids[0]; }
-      // The next reset of the accounts; a reset that has passed, of a window
-      // not opened again or not queried since, is not the next one.
-      var now = Date.now() / 1000;
-      var resets = kids.map(function (k) { return k.reset; }).filter(function (t) { return t > now; });
-      var weights = kids.reduce(function (sum, k) { return sum + k.weight; }, 0);
-      return { id: "group:" + id, name: kids[0].source, children: kids, points: pooled(kids, limit, "points"), floor: pooled(kids, limit, "floor"), order: rank,
-        last: kids.reduce(function (sum, k) { return sum + k.weight * k.last; }, 0) / weights,
-        reset: resets.length ? Math.min.apply(null, resets) : null, groups: kids.map(function (k) { return k.group; }) };
+      byLabel[id].push({ id: s.group + "|" + s.window, name: s.label + extra, source: source,
+        sub: meta ? meta.email : emailOf[s.auth_index] || s.auth_index || "", group: s.group, inactive: !meta, lastAt: lastPoint[0],
+        points: s.points, floor: cycleFloor(s.points), reset: meta ? meta.reset : null, weight: meta ? meta.weight : 1, last: lastPoint[1],
+        account: account === undefined ? status.accounts.length + seq : account, seq: seq });
     });
     var lowFirst = chartSort === "low";
-    rows.sort(function (a, b) { return lowFirst ? (a.last - b.last) || (a.order - b.order) : a.order - b.order; });
-    rows.forEach(function (r) {
-      if (r.children && lowFirst) r.children.sort(function (a, b) { return a.last - b.last; });
+    var groupOrder = status.group_order || [];
+    var byAccount = function (a, b) { return (a.account - b.account) || (a.seq - b.seq); };
+    var byLast = function (a, b) { return (a.last - b.last) || byAccount(a, b); };
+    var units = order.map(function (id, index) {
+      var kids = byLabel[id];
+      var live = kids.filter(function (k) { return !k.inactive; }).sort(lowFirst ? byLast : byAccount);
+      var gone = kids.filter(function (k) { return k.inactive; }).sort(byAccount);
+      var rank = groupOrder.indexOf(kids[0].source);
+      if (rank < 0) rank = groupOrder.length + index;
+      var first = (live.length ? live : gone).reduce(function (min, k) { return Math.min(min, k.account); }, Infinity);
+      var main = live.length === 1 ? live[0] : live.length ? pooledRow(id, live, limit) : null;
+      return { main: main, gone: gone, account: first, rank: rank };
+    });
+    units.sort(function (a, b) {
+      if (lowFirst && (a.main || b.main)) {
+        if (!a.main || !b.main) return a.main ? -1 : 1;
+        if (a.main.last !== b.main.last) return a.main.last - b.main.last;
+      }
+      return (a.account - b.account) || (a.rank - b.rank);
+    });
+    var rows = [];
+    units.forEach(function (u) {
+      if (u.main) rows.push(u.main);
+      rows.push.apply(rows, u.gone);
     });
     return rows;
+  }
+
+  // The total of the active accounts of a label.
+  function pooledRow(id, kids, limit) {
+    // The next reset of the accounts; a reset that has passed, of a window
+    // not opened again or not queried since, is not the next one.
+    var now = Date.now() / 1000;
+    var resets = kids.map(function (k) { return k.reset; }).filter(function (t) { return t > now; });
+    var weights = kids.reduce(function (sum, k) { return sum + k.weight; }, 0);
+    return { id: "group:" + id, name: kids[0].source, children: kids, points: pooled(kids, limit, "points"), floor: pooled(kids, limit, "floor"),
+      last: kids.reduce(function (sum, k) { return sum + k.weight * k.last; }, 0) / weights,
+      reset: resets.length ? Math.min.apply(null, resets) : null, groups: kids.map(function (k) { return k.group; }) };
   }
 
   function findRow(rows, id) {
@@ -1284,6 +1535,9 @@
     var pattern = svg("pattern", { id: "chart-hatch", width: 6, height: 6, patternUnits: "userSpaceOnUse", patternTransform: "rotate(45)" });
     pattern.appendChild(svg("rect", { width: 2, height: 6, fill: cssVar("--chart-hatch") }));
     defs.appendChild(pattern);
+    var empty = svg("pattern", { id: "chart-hatch-empty", width: 6, height: 6, patternUnits: "userSpaceOnUse", patternTransform: "rotate(45)" });
+    empty.appendChild(svg("rect", { width: 2.5, height: 6, fill: cssVar("--quota-empty-stripe") }));
+    defs.appendChild(empty);
     root.appendChild(defs);
     return defs;
   }
@@ -1314,25 +1568,27 @@
 
   // A band of solid color per quota level. Samples merge while the level
   // stays the same, and edges snap to whole pixels so neighbours leave no seam.
-  function drawBand(root, g, points, y0, limit) {
+  // The band of an inactive window ends at its last sample, and the rest is
+  // hatched as missing data.
+  function drawBand(root, g, points, y0, limit, inactive) {
     var cursor = g.from;
-    runs(points, limit, g.now).forEach(function (run) {
+    runs(points, limit, inactive ? points[points.length - 1][0] : g.now).forEach(function (run) {
       if (run.start > cursor + limit) hatchRect(root, g, cursor, run.start, y0, LANE);
       cursor = run.end;
       var segments = [];
       run.pts.forEach(function (p, i) {
         var end = i + 1 < run.pts.length ? run.pts[i + 1][0] : run.end;
-        var level = levelVar(p[1]), last = segments[segments.length - 1];
+        var level = quotaLevel(p[1]), last = segments[segments.length - 1];
         if (last && last.level === level) last.end = end;
         else segments.push({ start: Math.max(g.from, p[0]), end: end, level: level });
       });
       segments.forEach(function (seg) {
         if (seg.end <= g.from) return;
         var x0 = Math.round(g.x(seg.start)), x1 = Math.max(x0 + 1, Math.round(g.x(seg.end)));
-        root.appendChild(svg("rect", { x: x0, y: y0, width: x1 - x0, height: LANE, fill: cssVar(seg.level), "fill-opacity": 0.8, "shape-rendering": "crispEdges" }));
+        levelRect(root, { x: x0, y: y0, width: x1 - x0, height: LANE, "fill-opacity": seg.level === "empty" ? 0.95 : 0.8, "shape-rendering": "crispEdges" }, seg.level);
       });
     });
-    hatchRect(root, g, dataEnd(g, cursor, limit), g.to, y0, LANE);
+    hatchRect(root, g, inactive ? cursor : dataEnd(g, cursor, limit), g.to, y0, LANE);
   }
 
   function ignitionEvents(g) {
@@ -1352,7 +1608,7 @@
 
   function tipRow(tip, text, value, strong) {
     tip.appendChild(el("div", { class: "row" + (strong ? " strong" : "") }, [
-      el("span", { class: "key", style: "background:" + (value != null ? cssVar(levelVar(value)) : "transparent") }),
+      el("span", { class: "key" + (value != null ? " fill-" + quotaLevel(value) : "") }),
       el("span", { class: "name", text: text }),
       el("span", { class: "value", text: value != null ? pct(value) : translate("no_data") })
     ]));
@@ -1392,11 +1648,15 @@
         fill: cssVar(f.depth ? "--text-secondary" : "--text-primary"), "class": "row-name" }, name));
       if (r.children) root.appendChild(svgText({ x: nameX + name.length * 8 + 8, y: y0 + 15, "font-size": 11, fill: cssVar("--text-tertiary") }, "×" + r.children.length));
       root.appendChild(svg("rect", { x: g.labelW, y: y0, width: g.plotW, height: LANE, rx: 4, fill: cssVar("--chart-lane") }));
-      drawBand(root, g, r.floor, y0, limit);
+      drawBand(root, g, r.floor, y0, limit, r.inactive);
       var rx = g.width - g.rightW + 14;
-      root.appendChild(svg("rect", { x: rx, y: y0 + 7, width: 8, height: 8, rx: 2, fill: cssVar(levelVar(r.last)) }));
-      root.appendChild(svgText({ x: rx + 14, y: y0 + 15, "font-size": 13, "font-weight": 650, fill: cssVar("--text-primary") }, pct(r.last)));
-      if (r.reset) root.appendChild(svgText({ x: g.width - 2, y: y0 + 15, "font-size": 11, "text-anchor": "end", fill: cssVar("--text-tertiary") },
+      if (r.inactive) {
+        root.appendChild(svgText({ x: rx, y: y0 + 15, "font-size": 12, fill: cssVar("--text-tertiary"), "class": "row-name" }, translate("inactive")));
+      } else {
+        levelRect(root, { x: rx, y: y0 + 7, width: 8, height: 8, rx: 2 }, quotaLevel(r.last));
+        root.appendChild(svgText({ x: rx + 14, y: y0 + 15, "font-size": 13, "font-weight": 650, fill: cssVar("--text-primary") }, pct(r.last)));
+      }
+      if (r.reset && !r.inactive) root.appendChild(svgText({ x: g.width - 2, y: y0 + 15, "font-size": 11, "text-anchor": "end", fill: cssVar("--text-tertiary") },
         "↻" + fmtCountdown(r.reset * 1000 - Date.now())));
       var hit = svg("rect", { x: 0, y: y0 - 3, width: g.width, height: LANE + 6, fill: "transparent", style: "cursor:pointer" });
       hit.addEventListener("click", function () {
@@ -1448,12 +1708,12 @@
       tip.appendChild(el("div", { class: "time", text: fmtDateTime(unixDate(t)) }));
       function at(row) {
         var p = valueAt(row.points, t);
-        return p && t - p[0] <= limit ? p[1] : null;
+        return p && t - p[0] <= limit && !(row.inactive && t > row.lastAt) ? p[1] : null;
       }
       flat.forEach(function (f) {
         var r = f.row;
         if (f.depth) { tipRow(tip, "　" + r.sub, at(r), r.id === rowId); return; }
-        tipRow(tip, r.name + (r.children ? translate("total_suffix") : ""), at(r), r.id === rowId);
+        tipRow(tip, r.name + (r.children ? translate("total_suffix") : r.inactive ? translate("inactive_suffix") : ""), at(r), r.id === rowId);
         if (r.children && !chartExpanded[r.id]) {
           r.children.slice(0, 5).forEach(function (c) { tipRow(tip, "　" + c.sub, at(c), false); });
           if (r.children.length > 5) tip.appendChild(el("div", { class: "row muted", text: translate("more_accounts", r.children.length - 5) }));
@@ -1712,9 +1972,11 @@
     var g = chartView, limit = gapLimit();
     snapPoints = row.points;
     var group = !!row.children;
-    var stretches = runs(row.points, limit, g.now);
+    // An inactive window ends at its last sample, without projection or
+    // even pace.
+    var stretches = runs(row.points, limit, row.inactive ? row.lastAt : g.now);
     var lastRun = stretches[stretches.length - 1];
-    var ahead = projection(row, g, lastRun, limit);
+    var ahead = row.inactive ? null : projection(row, g, lastRun, limit);
     // Hold the last value to the end of each stretch so the line reaches it;
     // the last stretch only to the start of the projection. One account
     // resetting raises a pooled total by its share; the total line breaks
@@ -1726,16 +1988,21 @@
     });
     var resets = [];
     pieces.forEach(function (piece) { resets = resets.concat(piece.split.resets); });
-    var even = rowPace(row, resets, limit);
+    var even = row.inactive ? { breaks: [], at: function () { return null; } } : rowPace(row, resets, limit);
 
     head.appendChild(el("span", { class: "detail-name", text: row.name + " · " + translate(historyWindow === "5h" ? "quota_5h" : "quota_7d") }));
+    if (row.inactive) head.appendChild(badge("muted", translate("inactive")));
     head.appendChild(el("span", { class: "muted", text: group ? translate("pooled_note", row.children.length) : row.sub }));
+    if (row.inactive) {
+      head.appendChild(el("span", { class: "detail-stat" }, [document.createTextNode(translate("stat_last")),
+        el("strong", { text: pct(row.last) + " · " + fmtDateTime(unixDate(row.lastAt)) })]));
+    }
     // The difference from the even pace: green with more left than the pace
     // leaves, red with less.
     var pace = even.at(g.now), diff = pace == null ? null : Math.round(row.last - pace);
-    [[translate(group ? "stat_total" : "stat_current"), pct(row.last)], [translate("stat_pace"), pct(pace)],
+    (row.inactive ? [] : [[translate(group ? "stat_total" : "stat_current"), pct(row.last)], [translate("stat_pace"), pct(pace)],
       [translate("stat_diff"), fmtDiff(diff), diff > 0 ? "ahead" : diff < 0 ? "behind" : ""],
-      [translate("stat_to_reset"), row.reset ? fmtCountdown(row.reset * 1000 - Date.now()) : "—"]].forEach(function (stat) {
+      [translate("stat_to_reset"), row.reset ? fmtCountdown(row.reset * 1000 - Date.now()) : "—"]]).forEach(function (stat) {
       head.appendChild(el("span", { class: "detail-stat" }, [document.createTextNode(stat[0]), el("strong", { class: stat[2] || null, text: stat[1] })]));
     });
 
@@ -1788,7 +2055,7 @@
       cursor = run.end;
     });
     // With a projection, the hatching starts where it does, the end of the line.
-    hatchRect(root, g, ahead ? ahead.t0 : dataEnd(g, cursor, limit), g.to, top, plotH);
+    hatchRect(root, g, ahead ? ahead.t0 : row.inactive ? cursor : dataEnd(g, cursor, limit), g.to, top, plotH);
     // The first stretch on the axis: a sample before it, from before the
     // range, can form a stretch of its own that ends left of the axis.
     var firstIn = stretches.filter(function (run) { return run.end > g.from; })[0];
@@ -1868,13 +2135,13 @@
       else root.appendChild(svgText({ x: rightX, y: py + 4, "font-size": 12, "font-weight": 650, fill: cssVar("--text-secondary") }, pct(ahead.left)));
     }
     var last = row.points[row.points.length - 1];
-    if (last && lastRun.end >= g.now - limit) {
+    if (last && !row.inactive && lastRun.end >= g.now - limit) {
       root.appendChild(svg("circle", { cx: g.x(ahead ? ahead.t0 : lastRun.end), cy: y(last[1]), r: 4, fill: cssVar("--text-primary"), stroke: cssVar("--bg-primary"), "stroke-width": 2 }));
     }
     // An axis that ends now shows the current value and the even pace at the
     // ends of their lines, with the difference between them. The difference
     // sits halfway, and values too close to it move apart.
-    if (g.to <= g.now) {
+    if (g.to <= g.now && !row.inactive) {
       var yNow = y(row.last), yPace = pace == null ? null : y(pace);
       if (yPace == null) root.appendChild(svgText({ x: rightX, y: yNow + 4, "font-size": 13, "font-weight": 650, fill: cssVar("--text-primary") }, pct(row.last)));
       else {
@@ -1942,7 +2209,7 @@
         return;
       }
       var p = valueAt(row.points, t);
-      if (p && t - p[0] > limit) p = null;
+      if (p && (t - p[0] > limit || (row.inactive && t > row.lastAt))) p = null;
       if (p) { dot.setAttribute("cx", g.x(p[0])); dot.setAttribute("cy", y(p[1])); dot.setAttribute("visibility", "visible"); }
       else dot.setAttribute("visibility", "hidden");
       if (hoverSource !== "detail") { tip.hidden = true; return; }
@@ -2002,17 +2269,31 @@
           el("td", { text: c.name }),
           el("td", { text: c.sub }),
           el("td", { class: "num", text: pct(c.last) }),
-          el("td", { class: "num", text: pct(Math.min.apply(null, values)) }),
-          el("td", { class: "num", text: pct(Math.max.apply(null, values)) }),
+          el("td", { class: "num", text: pct(values.length ? Math.min.apply(null, values) : null) }),
+          el("td", { class: "num", text: pct(values.length ? Math.max.apply(null, values) : null) }),
           el("td", { class: "num", text: String(values.length) }),
-          el("td", { class: "num", text: c.reset ? fmtCountdown(c.reset * 1000 - Date.now()) : "—" })
+          el("td", { class: "num", text: c.inactive ? translate("inactive") : c.reset ? fmtCountdown(c.reset * 1000 - Date.now()) : "—" })
         ]));
       });
     });
   }
 
+  // The level swatches of the legend, with the thresholds in use.
+  function renderLegend() {
+    var t = quotaThresholds();
+    $("legend-full").textContent = translate("level_full") + " 100%";
+    $("legend-high").textContent = translate("level_high") + " > " + t.notice + "%";
+    $("legend-medium").textContent = translate("level_medium") + " " + t.low + "–" + t.notice + "%";
+    $("legend-low").textContent = translate("level_low") + " ≤ " + t.low + "%";
+    $("legend-empty").textContent = translate("level_empty") + " 0%";
+  }
+
   function renderChart() {
     var overview = $("chart"), head = $("chart-detail-head"), detail = $("chart-detail");
+    renderLegend();
+    // The chart measures its width, so a hidden chart is drawn when its view
+    // shows.
+    if ($("view-quota").hidden) return;
     chartBehind = false;
     overview.classList.toggle("loading", historyLoading !== "" && historyLoading !== historyKey(historyWindow, historyRange));
     clear(overview); clear(head); clear(detail);
@@ -2035,10 +2316,6 @@
     head.hidden = false;
     renderDetail(selected, head, detail);
     renderChartTable(rows);
-    var t = quotaThresholds();
-    $("legend-high").textContent = "> " + t.notice + "%";
-    $("legend-medium").textContent = t.low + "–" + t.notice + "%";
-    $("legend-low").textContent = "≤ " + t.low + "%";
     $("legend-projection").textContent = translate("legend_projection_" + historyWindow);
   }
 
@@ -2190,6 +2467,9 @@
     var last = {};
     history.series.forEach(function (s) { if (s.points && s.points.length) last[s.group + "|" + s.window] = s.points[s.points.length - 1]; });
     var loaded = new Date(history.to).getTime() / 1000;
+    // Without new readings the range still moves on, and an inactive
+    // window hides once its last sample leaves it.
+    if (Date.now() / 1000 - loaded > Math.max(300, sampleStep())) return true;
     return (status.accounts || []).some(function (a) {
       return (a.groups || []).some(function (g) {
         return (g.windows || []).some(function (w) {
@@ -2223,11 +2503,15 @@
   }
 
   // After the first chart loads, the other window's chart is fetched so that
-  // switching to it does not wait.
+  // switching to it does not wait. Both kinds are fetched, since a kind no
+  // account reports any more is offered while its history has samples in
+  // the range.
   function prefetchHistory() {
-    windowKinds().forEach(function (kind) {
+    ["5h", "7d"].forEach(function (kind) {
       var name = rangeFor(kind);
-      if (kind !== chartWindow && !historyCache[historyKey(kind, name)]) fetchHistory(kind, name).catch(function () {});
+      if (kind !== chartWindow && !historyCache[historyKey(kind, name)]) {
+        fetchHistory(kind, name).then(function () { if (status && renderWindowButtons()) loadHistory(); }).catch(function () {});
+      }
     });
   }
 
@@ -2296,6 +2580,9 @@
     effective.webhook.url = webhook.url || "";
     effective.webhook.body = webhook.body || "";
     effective.webhook.headers = webhook.headers || {};
+    // Plugins without MCP report neither field.
+    if (effective.mcp_enabled === undefined) effective.mcp_enabled = !!rawConfig.mcp_enabled;
+    if (!effective.mcp_listen) effective.mcp_listen = rawConfig.mcp_listen || MCP_LISTEN;
     return effective;
   }
 
@@ -2359,6 +2646,8 @@
     });
     settingsFilled = true;
     $("timezone-note").textContent = timezoneText();
+    renderIgnitionOff();
+    renderMcp();
   }
 
   // Segmented controls (.segmented button groups and .mode-switch radio
@@ -2469,6 +2758,9 @@
         ).map(function (input) { return input.getAttribute("data-group"); });
       });
     }
+    // Turning MCP on without a key also saves a new key, since the plugin
+    // does not listen without one.
+    if (top === "mcp_enabled" && patch.mcp_enabled && !rawConfig.mcp_key) patch.mcp_key = newMcpKey();
     // A fixed offset from older versions is removed so the time zone follows CPA.
     if (rawConfig.timezone_offset_hours !== undefined) patch.timezone_offset_hours = null;
     // The single switches are replaced by recovery_notify and reset_reminder.
@@ -2481,22 +2773,58 @@
   // and number fields when they lose focus or on Enter. Saves run one at a
   // time, so each patch starts from the config the previous one wrote. A few
   // seconds after the last save, when the plugin has applied it, the saved
-  // fields show the effective values again.
+  // fields show the effective values again. Each save shows its state beside
+  // the field: saving, saved or failed with the reason.
   var saveQueue = Promise.resolve();
   var refillKeys = {};
   var refillTimer = null;
+
+  // The element that shows the save state of a field: the one named by a
+  // data-save-in around it, or its label, table cell or .save-host.
+  function saveHost(input) {
+    var named = input.closest("[data-save-in]");
+    if (named) return $(named.getAttribute("data-save-in"));
+    return input.closest(".save-host, label, td");
+  }
+
+  function setSaveState(host, state, text) {
+    if (!host) return;
+    var node = null;
+    Array.prototype.forEach.call(host.children, function (child) { if (child.classList.contains("save-state")) node = child; });
+    if (!node) {
+      node = el("span", { class: "save-state", role: "status" });
+      host.appendChild(node);
+    }
+    clearTimeout(node.timer);
+    node.setAttribute("data-state", state);
+    node.textContent = text;
+    // A plain "saved" fades; failures and key checks stay until the next edit.
+    if (state === "saved") node.timer = setTimeout(function () { node.textContent = ""; node.removeAttribute("data-state"); }, 4000);
+  }
+
+  var THRESHOLDS = ["notice_threshold", "low_threshold", "critical_threshold"];
+
+  // The three thresholds must fall from the first to the third. They save
+  // together, so a value held back by the order saves once the order holds.
+  function thresholdsInOrder() {
+    var form = $("settings");
+    var values = THRESHOLDS.map(function (name) { return form.elements[name].value === "" ? NaN : Number(form.elements[name].value); });
+    return values.every(isFinite) && values[0] > values[1] && values[1] > values[2];
+  }
 
   function saveField(event) {
     var input = event.target;
     var top = input.hasAttribute("data-group") ? "providers" : input.name && topKey(input.name);
     if (!top) return;
+    var host = saveHost(input);
+    var tops = [top];
     // Browsers fill the password saved for this site, usually the management
     // key, into password fields. A value the browser fills in while the field
     // is not focused comes from autofill on page load; it is not saved, and
     // the field shows the saved value again. The management key is refused
     // with a message, and any other new key is saved only when CPA accepts it
     // for /v1/models.
-    var checked = Promise.resolve(true);
+    var checked = Promise.resolve(null);
     if (input.type === "password") {
       var value = input.value.trim();
       if (autofilled(input) && document.activeElement !== input) {
@@ -2504,15 +2832,23 @@
         return;
       }
       if (key && value === key) {
-        toast(translate("management_key_refused"));
+        setSaveState(host, "failed", translate("management_key_refused"));
         fillInput(input, effectiveConfig());
         return;
       }
-      if (value) checked = acceptedKey(value);
+      if (value) checked = checkKey(value);
     }
     if (input.type === "number") {
-      if (!input.checkValidity()) { input.reportValidity(); return; }
+      if (!input.checkValidity()) {
+        setSaveState(host, "failed", input.validationMessage);
+        input.reportValidity();
+        return;
+      }
       if (input.value === "") { fillInput(input, effectiveConfig()); return; }
+    }
+    if (THRESHOLDS.indexOf(top) >= 0) {
+      if (!thresholdsInOrder()) { setSaveState(host, "failed", translate("thresholds_order")); return; }
+      tops = THRESHOLDS;
     }
     var format = input.getAttribute("data-format");
     if (format) {
@@ -2522,40 +2858,237 @@
       } catch (err) {
         input.setCustomValidity(err.message);
         input.reportValidity();
+        setSaveState(host, "failed", err.message);
         return;
       }
     }
-    saveQueue = saveQueue.then(function () { return checked; }).then(function (accepted) {
+    if (input.name === "ignition.enabled") renderIgnitionOff();
+    setSaveState(host, "saving", translate("save_saving"));
+    saveQueue = saveQueue.then(function () { return checked; }).then(function (check) {
       // A key edited again during the check is checked by its own change event.
       if (input.type === "password" && input.value.trim() !== value) return;
-      if (!accepted) {
-        toast(translate("api_key_refused"));
+      if (check && check.refused) {
+        setSaveState(host, "failed", translate("api_key_refused"));
         fillInput(input, effectiveConfig());
         return;
       }
-      return api("PATCH", CONFIG_API, buildPatch(top)).then(function () {
-        toast(translate("saved"));
-        refillKeys[top] = true;
+      var patch = {};
+      tops.forEach(function (name) {
+        var part = buildPatch(name);
+        Object.keys(part).forEach(function (k) { patch[k] = part[k]; });
+      });
+      return api("PATCH", CONFIG_API, patch).then(function () {
+        noteSaved(patch);
+        if (!check) setSaveState(host, "saved", translate("save_saved"));
+        else if (check.ok) setSaveState(host, "verified", translate("key_verified"));
+        else setSaveState(host, "unverified", translate("key_unverified", check.reason));
+        tops.forEach(function (name) { refillKeys[name] = true; });
         clearTimeout(refillTimer);
+        refillTries = 0;
         refillTimer = setTimeout(refillSaved, 3000);
         return loadConfig();
       }).catch(function (err) {
-        if (err.message !== "unauthorized") toast(translate("save_failed", err.message));
+        if (err.message === "unauthorized") return;
+        setSaveState(host, "failed", translate("save_failed_short", err.message));
         var keys = {};
-        keys[top] = true;
+        tops.forEach(function (name) { keys[name] = true; });
         fillSettings(keys);
+        if (input.name === "ignition.enabled") renderIgnitionOff();
       });
     });
   }
 
-  // acceptedKey reports whether CPA accepts value as an API key for
-  // /v1/models, the request the plugin makes with models_api_key. Only HTTP
-  // 401 and 403 count as refused, so a check that cannot reach CPA does not
-  // block the save.
-  function acceptedKey(value) {
+  // checkKey asks CPA whether it accepts value as an API key for /v1/models,
+  // the request the plugin makes with models_api_key. It resolves to ok when
+  // CPA answers the request, refused on HTTP 401 and 403, and neither, with
+  // the reason, when the check could not tell: then the key is saved anyway.
+  function checkKey(value) {
     return fetch("/v1/models", { headers: { "Authorization": "Bearer " + value, "Accept": "application/json" } }).then(function (res) {
-      return res.status !== 401 && res.status !== 403;
-    }, function () { return true; });
+      if (res.status === 401 || res.status === 403) return { refused: true };
+      if (res.ok) return { ok: true };
+      return { reason: "HTTP " + res.status };
+    }, function () { return { reason: translate("network_error") }; });
+  }
+
+  // ---- Applied config ----
+
+  // Saved values the plugin has not reported back yet, by top-level key.
+  // The status config shows what the plugin applied, with secrets replaced
+  // by "已设置", so a saved value counts as applied when the status shows it
+  // or shows a secret as set. Keys the status does not report cannot be
+  // checked and count as applied.
+  var unapplied = {};
+
+  function noteSaved(patch) {
+    Object.keys(patch).forEach(function (name) {
+      if (patch[name] === null) delete unapplied[name];
+      else unapplied[name] = patch[name];
+    });
+  }
+
+  function sameConfig(saved, shown) {
+    if (shown === undefined || saved === null || saved === undefined || saved === "") return true;
+    if (typeof saved === "string") {
+      return shown === "已设置" || String(shown).trim().toLowerCase() === saved.trim().toLowerCase();
+    }
+    if (typeof saved === "number") return Number(shown) === saved;
+    if (typeof saved === "boolean") return !!shown === saved;
+    if (Array.isArray(saved)) {
+      return Array.isArray(shown) && shown.length === saved.length && saved.every(function (v, i) { return sameConfig(v, shown[i]); });
+    }
+    if (typeof saved === "object") {
+      return !!shown && typeof shown === "object" && Object.keys(saved).every(function (name) { return sameConfig(saved[name], shown[name]); });
+    }
+    return true;
+  }
+
+  function checkApplied() {
+    var cfg = (status && status.config) || {};
+    Object.keys(unapplied).forEach(function (name) {
+      if (sameConfig(unapplied[name], cfg[name])) delete unapplied[name];
+    });
+  }
+
+  // Resolves once the plugin reports every saved value, reading the status
+  // every second, or after about 10 seconds to true: the new settings may
+  // not be in effect yet.
+  function waitApplied() {
+    var started = Date.now();
+    function step() {
+      checkApplied();
+      if (!Object.keys(unapplied).length) return Promise.resolve(false);
+      if (Date.now() - started >= 10000) return Promise.resolve(true);
+      return new Promise(function (resolve) { setTimeout(resolve, 1000); }).then(function () {
+        return loadStatus().catch(function () {});
+      }).then(step);
+    }
+    return step();
+  }
+
+  // ---- Ignition and MCP settings ----
+
+  // With ignition off, its settings stay editable but are grayed out, with
+  // a note that they do not apply.
+  function renderIgnitionOff() {
+    var input = $("settings").elements["ignition.enabled"];
+    var off = !(input && input.checked);
+    $("ignition-params").classList.toggle("off", off);
+    $("ignition-off").hidden = !off;
+  }
+
+  var MCP_LISTEN = "127.0.0.1:8318";
+  var MCP_URL_STORE = "lamplighter-mcp-url";
+  var mcpKeyShown = false;
+
+  // 32 random bytes in base64url after the llmcp_ prefix.
+  function newMcpKey() {
+    var bytes = new Uint8Array(32);
+    crypto.getRandomValues(bytes);
+    var text = "";
+    for (var i = 0; i < bytes.length; i++) text += String.fromCharCode(bytes[i]);
+    return "llmcp_" + btoa(text).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+
+  function mcpKey() { return typeof rawConfig.mcp_key === "string" ? rawConfig.mcp_key : ""; }
+
+  function maskedKey(value) { return value ? value.slice(0, 6) + "••••••••••••" + value.slice(-4) : ""; }
+
+  // The address clients use: the public address entered in this browser, or
+  // http:// and the listen address. A listen address without a host or on
+  // all interfaces is reached through the host of this page.
+  function mcpBaseUrl() {
+    var stored = "";
+    try { stored = localStorage.getItem(MCP_URL_STORE) || ""; } catch (err) {}
+    stored = stored.trim().replace(/\/+$/, "").replace(/\/mcp$/, "");
+    if (stored) return /^[a-z][a-z0-9+.-]*:\/\//i.test(stored) ? stored : "https://" + stored;
+    var input = $("settings").elements["mcp_listen"];
+    var listen = (input && input.value.trim()) || (status && status.mcp && status.mcp.listen) || MCP_LISTEN;
+    var at = listen.lastIndexOf(":");
+    var host = at >= 0 ? listen.slice(0, at) : listen, port = at >= 0 ? listen.slice(at) : "";
+    if (!host || host === "0.0.0.0" || host === "[::]" || host === "::") host = location.hostname || "127.0.0.1";
+    return "http://" + host + port;
+  }
+
+  function mcpSnippets(url, secret) {
+    var auth = "Authorization: Bearer " + secret;
+    return [
+      ["mcp_claude", "claude mcp add --transport http lamplighter " + url + " --header \"" + auth + "\""],
+      ["mcp_json", JSON.stringify({ mcpServers: { lamplighter: { type: "http", url: url, headers: { Authorization: "Bearer " + secret } } } }, null, 2)],
+      ["mcp_stdio", "npx mcp-remote " + url + " --header \"" + auth + "\""]
+    ];
+  }
+
+  // The key, the state the plugin reports and the client configs. The
+  // configs show the key masked until it is shown; copying copies it whole.
+  function renderMcp() {
+    if (!$("mcp-key-view")) return;
+    var secret = mcpKey();
+    var view = $("mcp-key-view");
+    view.textContent = secret ? (mcpKeyShown ? secret : maskedKey(secret)) : translate("mcp_key_unset");
+    view.classList.toggle("muted", !secret);
+    $("mcp-key-show").hidden = !secret;
+    $("mcp-key-show").textContent = translate(mcpKeyShown ? "mcp_hide" : "mcp_show");
+    $("mcp-key-copy").hidden = !secret;
+
+    var box = $("mcp-status");
+    clear(box);
+    var mcp = status && status.mcp;
+    if (!mcp) box.appendChild(badge("muted", translate("mcp_unknown")));
+    else if (mcp.running) {
+      box.appendChild(badge("success", translate("mcp_running")));
+      box.appendChild(el("span", { class: "mono", text: (mcp.listen || "") + (mcp.path || "/mcp") }));
+    } else {
+      box.appendChild(badge(mcp.enabled && mcp.error ? "failure" : "muted", translate("mcp_stopped")));
+      if (mcp.error) box.appendChild(el("span", { class: "error-text", text: mcp.error }));
+    }
+
+    var url = mcpBaseUrl() + "/mcp";
+    var snippets = $("mcp-snippets");
+    clear(snippets);
+    var shown = secret ? (mcpKeyShown ? secret : maskedKey(secret)) : "<key>";
+    var full = mcpSnippets(url, secret || "<key>");
+    mcpSnippets(url, shown).forEach(function (s, i) {
+      var copy = el("button", { type: "button", class: "btn btn-ghost btn-sm", text: translate("copy"), onclick: function () { copyText(full[i][1], copy); } });
+      snippets.appendChild(el("div", { class: "snippet" }, [
+        el("div", { class: "snippet-head" }, [el("span", { class: "field-label", text: translate(s[0]) }), copy]),
+        el("pre", { class: "mono" }, [el("code", { text: s[1] })])
+      ]));
+    });
+    if (!secret) snippets.appendChild(el("p", { class: "hint", text: translate("mcp_no_key") }));
+  }
+
+  // Copies text, through a selected text area where the Clipboard API is
+  // not available, as in an iframe without the permission.
+  function copyText(text, button) {
+    var done = function () { setSaveState(button.parentNode, "saved", translate("copied")); };
+    var fallback = function () {
+      var area = el("textarea", { class: "copy-buffer", readonly: true });
+      area.value = text;
+      document.body.appendChild(area);
+      area.select();
+      var ok = false;
+      try { ok = document.execCommand("copy"); } catch (err) {}
+      document.body.removeChild(area);
+      if (ok) done(); else toast(translate("copy_failed"));
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, fallback);
+    else fallback();
+  }
+
+  // A new key replaces the old one at once; replacing a key asks first.
+  function generateMcpKey() {
+    if (mcpKey() && !confirm(translate("mcp_regenerate_confirm"))) return;
+    var host = $("mcp-key-field"), secret = newMcpKey();
+    setSaveState(host, "saving", translate("save_saving"));
+    saveQueue = saveQueue.then(function () {
+      return api("PATCH", CONFIG_API, { mcp_key: secret }).then(function () {
+        noteSaved({ mcp_key: secret });
+        setSaveState(host, "saved", translate("save_saved"));
+        return loadConfig();
+      }).catch(function (err) {
+        if (err.message !== "unauthorized") setSaveState(host, "failed", translate("save_failed_short", err.message));
+      });
+    });
   }
 
   // autofilled reports whether the browser filled in the value. Firefox and
@@ -2566,11 +3099,26 @@
     try { return input.matches(":-webkit-autofill"); } catch (err) { return false; }
   }
 
+  // Fields whose saved value the plugin has not reported yet keep what was
+  // entered and are tried again a few times, so they do not fall back to
+  // the previous value.
+  var refillTries = 0;
   function refillSaved() {
     saveQueue = saveQueue.then(function () {
-      var keys = refillKeys;
-      refillKeys = {};
-      return loadStatus().then(function () { fillSettings(keys); }).catch(function () {});
+      return loadStatus().then(function () {
+        var keys = {}, waiting = false;
+        Object.keys(refillKeys).forEach(function (name) {
+          if (unapplied[name] !== undefined && refillTries < 5) { waiting = true; return; }
+          keys[name] = true;
+          delete refillKeys[name];
+        });
+        fillSettings(keys);
+        if (waiting) {
+          refillTries++;
+          clearTimeout(refillTimer);
+          refillTimer = setTimeout(refillSaved, 3000);
+        }
+      }).catch(function () {});
     });
   }
 
@@ -2588,7 +3136,11 @@
   }
 
   function loadConfig() {
-    return api("GET", CONFIG_API).then(function (data) { rawConfig = data || {}; });
+    return api("GET", CONFIG_API).then(function (data) {
+      rawConfig = data || {};
+      if (pendingOrder) rawConfig.account_order = pendingOrder.slice();
+      renderMcp();
+    });
   }
 
   // Opening the page also checks for a newer release, after the first status
@@ -2607,6 +3159,9 @@
     $("app").hidden = false;
     Promise.all([loadStatus(), loadConfig()]).then(function () {
       checkUpdate();
+      // The status may have arrived before the config with the saved order.
+      sortAccounts();
+      renderAccounts();
       fillSettings();
       restoreChartFilters();
       return loadHistory();
@@ -2631,22 +3186,70 @@
     runAction(e.currentTarget, API + "/refresh", {}, translate("refreshed_all"));
   });
   $("test-notify").addEventListener("click", function (e) {
+    // The test waits for the saves under way and for the plugin to apply
+    // them; after about 10 seconds it is sent anyway, with a note.
     var button = e.currentTarget;
     button.disabled = true;
-    clear($("test-results"));
+    var results = $("test-results");
+    clear(results);
+    var stale = false;
     saveQueue.then(function () {
+      checkApplied();
+      if (Object.keys(unapplied).length) results.appendChild(el("div", { class: "test-result hint", text: translate("test_waiting") }));
+      return waitApplied();
+    }).then(function (late) {
+      stale = late;
       return api("POST", API + "/test-notify", {});
     }).then(function (data) {
       if (data.status) { status = data.status; renderStatus(); }
       renderTestResults(data.results);
+      if (stale) results.insertBefore(el("div", { class: "test-result failed", text: translate("test_stale") }), results.firstChild);
       if (data.ok) toast(translate("test_sent"));
       else if (!data.results) toast(translate("failed", data.error));
       else toast(translate(data.results.some(function (r) { return r.ok; }) ? "test_some_failed" : "test_all_failed"));
     }).catch(function (err) {
+      clear(results);
       if (err.message !== "unauthorized") toast(translate("failed", err.message));
     }).then(function () { button.disabled = false; });
   });
   $("settings").addEventListener("change", saveField);
+  // Editing a field clears its last save state.
+  $("settings").addEventListener("input", function (e) {
+    var host = e.target.name || e.target.hasAttribute("data-group") ? saveHost(e.target) : null;
+    if (host) Array.prototype.forEach.call(host.children, function (child) {
+      if (child.classList.contains("save-state") && child.getAttribute("data-state") !== "saving") { child.textContent = ""; child.removeAttribute("data-state"); }
+    });
+    if (e.target.name === "mcp_listen") renderMcp();
+  });
+  $("mcp-key-new").addEventListener("click", generateMcpKey);
+  $("mcp-key-show").addEventListener("click", function () { mcpKeyShown = !mcpKeyShown; renderMcp(); });
+  $("mcp-key-copy").addEventListener("click", function (e) { copyText(mcpKey(), e.currentTarget); });
+  // The public address stays in this browser; the configs follow it.
+  $("mcp-public-url").addEventListener("input", function (e) {
+    try {
+      if (e.target.value.trim()) localStorage.setItem(MCP_URL_STORE, e.target.value.trim());
+      else localStorage.removeItem(MCP_URL_STORE);
+    } catch (err) {}
+    renderMcp();
+  });
+  try { $("mcp-public-url").value = localStorage.getItem(MCP_URL_STORE) || ""; } catch (err) {}
+
+  // The quota and settings views; the last one shown is kept in this
+  // browser. The chart is drawn when its view shows, since it measures its
+  // width.
+  var VIEW_STORE = "lamplighter-view";
+  function showView(name, bounce) {
+    var settings = name === "settings";
+    $("view-quota").hidden = settings;
+    $("view-settings").hidden = !settings;
+    pressSegment("view-buttons", settings ? "settings" : "quota", bounce);
+    try { localStorage.setItem(VIEW_STORE, settings ? "settings" : "quota"); } catch (err) {}
+    if (!settings && history && status) renderChart();
+  }
+  $("view-buttons").addEventListener("click", function (e) {
+    var button = e.target.closest(".seg");
+    if (button && button.getAttribute("aria-pressed") !== "true") showView(button.getAttribute("data-value"), true);
+  });
   // Turning remembering on keeps the current filters; turning it off forgets them.
   $("settings").elements["remember_chart_filters"].addEventListener("change", function (e) {
     if (e.target.checked) saveChartFilters();
@@ -2736,6 +3339,9 @@
   applyTheme();
   applyLanguage();
   watchParent();
+  var storedView = "quota";
+  try { storedView = localStorage.getItem(VIEW_STORE) || "quota"; } catch (err) {}
+  showView(storedView);
   key = sessionStorage.getItem(KEY_STORE) || centerKey();
   if (key) start(); else askForKey("");
 })();
