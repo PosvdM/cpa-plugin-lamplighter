@@ -202,6 +202,11 @@ header .update path { fill: none; stroke: currentColor; stroke-width: 1.8; strok
 .block-head .btn.snapshot { margin-left: auto; }
 .detail-head .btn.snapshot { order: 1; margin-left: auto; align-self: center; }
 .snapshot-host { position: fixed; left: -100000px; top: 0; pointer-events: none; }
+/* The frame of a screenshot. It applies both off screen, where page.js
+   measures it, and in the image, so the two have the same size. */
+.snapshot-frame { padding: 12px; background: var(--bg-secondary); color: var(--text-primary); -webkit-font-smoothing: antialiased; }
+.snapshot-frame, .snapshot-frame *, .snapshot-frame *::before, .snapshot-frame *::after { animation: none !important; transition: none !important; }
+.snapshot-frame .detail-head { margin-top: 0; padding-top: 0; border-top: 0; }
 .hint.settings-note { margin: 0 0 14px; }
 .settings-section { display: flex; flex-direction: column; gap: 14px; }
 .settings-section > .card-title { margin: 0; }
