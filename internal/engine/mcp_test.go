@@ -164,7 +164,7 @@ func TestQuotaEventsIndependentOfNotifications(t *testing.T) {
 	c.add(time.Minute)
 	apply(100, c.t.Add(5*time.Hour), true)
 	b := NewMCPBackend(e)
-	data, err := b.events(map[string]string{"limit": "2"})
+	data, err := b.events(context.Background(), map[string]string{"limit": "2"})
 	if err != nil {
 		t.Fatal(err)
 	}

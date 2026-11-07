@@ -68,21 +68,27 @@ type Engine struct {
 	now            func() time.Time
 
 	// mu guards the fields read by the management API and usage.handle.
-	mu        sync.Mutex
-	cfg       config.Config
-	cfgErr    string
-	dataDir   string
-	enabled   bool
-	running   bool
-	lockErr   string
-	creds     map[string]*Cred
-	groups    map[string]*GroupView
-	targets   []TargetView
-	events    []Event
-	lastPoll  time.Time
-	nextPoll  time.Time
-	pollErrs  map[string]string
-	modelsErr string
+	mu                 sync.Mutex
+	cfg                config.Config
+	cfgRevision        uint64
+	runtimeRevision    uint64
+	runtimeToken       string
+	mcpRevision        uint64
+	appliedRevision    uint64
+	configAppliedToken string
+	cfgErr             string
+	dataDir            string
+	enabled            bool
+	running            bool
+	lockErr            string
+	creds              map[string]*Cred
+	groups             map[string]*GroupView
+	targets            []TargetView
+	events             []Event
+	lastPoll           time.Time
+	nextPoll           time.Time
+	pollErrs           map[string]string
+	modelsErr          string
 	// notifyErr is the reason the webhook settings were not applied.
 	notifyErr string
 	lang      string // notification language, a copy of state.Language
@@ -171,19 +177,56 @@ func New(opts Options) *Engine {
 	return e
 }
 
-// Configure applies a new configuration. An invalid configuration keeps the
-// previous one and is reported on the status page.
-func (e *Engine) Configure(cfg config.Config, parseErr error) {
+// Configure 接收有效配置并返回实例内接收序号，后台循环负责运行时应用。
+// 解析失败时保留上一份配置、记录状态错误并返回 0。
+func (e *Engine) Configure(cfg config.Config, parseErr error) uint64 {
 	e.mu.Lock()
 	if parseErr != nil {
 		e.cfgErr = parseErr.Error()
 		e.mu.Unlock()
-		return
+		return 0
 	}
+	e.cfgRevision++
+	revision := e.cfgRevision
 	e.cfg = cfg
 	e.cfgErr = ""
 	e.mu.Unlock()
 	e.wake()
+	return revision
+}
+
+// MCPConfigured 确认该配置已完成监听器配置，包括停用和绑定失败。
+func (e *Engine) MCPConfigured(revision uint64) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.mcpRevision = max(e.mcpRevision, revision)
+	e.confirmConfigLocked()
+}
+
+func (e *Engine) confirmRuntimeConfig(revision uint64, token string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if revision < e.runtimeRevision {
+		return
+	}
+	e.runtimeRevision = revision
+	e.runtimeToken = token
+	e.confirmConfigLocked()
+}
+
+func (e *Engine) confirmConfigLocked() {
+	// MCP 配置按接收序号串行执行；较新的 MCP 确认也证明较早版本已执行。
+	// 后台循环可跳过未应用的中间配置，只发布它实际确认过的版本。
+	if e.runtimeRevision > e.appliedRevision && e.mcpRevision >= e.runtimeRevision {
+		e.appliedRevision = e.runtimeRevision
+		e.configAppliedToken = e.runtimeToken
+	}
+}
+
+func (e *Engine) configSnapshot() (config.Config, uint64) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.cfg, e.cfgRevision
 }
 
 func (e *Engine) config() config.Config {
@@ -433,6 +476,16 @@ func (e *Engine) applyRuntimeConfig(cfg config.Config) {
 	}
 }
 
+// applyPendingConfig 在每轮开始确认接收版本，非运行时字段的变化也需要确认。
+func (e *Engine) applyPendingConfig(applied config.Config) (config.Config, bool) {
+	cfg, revision := e.configSnapshot()
+	if !sameRuntimeConfig(cfg, applied) {
+		e.applyRuntimeConfig(cfg)
+	}
+	e.confirmRuntimeConfig(revision, cfg.ConfigToken)
+	return cfg, cfg.PollIntervalSeconds != applied.PollIntervalSeconds
+}
+
 func alignedAfter(t time.Time, interval time.Duration) time.Time {
 	if interval <= 0 {
 		interval = 5 * time.Minute
@@ -444,7 +497,7 @@ func (e *Engine) run() {
 	if !e.sleep(startupDelay) {
 		return
 	}
-	cfg := e.config()
+	cfg, revision := e.configSnapshot()
 	if err := e.openStores(cfg); err != nil {
 		e.logf("error", "%v", err)
 		e.addEvent("error", "error", "", err.Error())
@@ -457,6 +510,7 @@ func (e *Engine) run() {
 	e.running = true
 	e.mu.Unlock()
 	e.applyRuntimeConfig(cfg)
+	e.confirmRuntimeConfig(revision, cfg.ConfigToken)
 	e.logf("info", "Lamplighter %s 已启动，数据目录 %s", e.version, e.dataDir)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -475,14 +529,12 @@ func (e *Engine) run() {
 	appliedCfg := cfg
 	for !e.stopping() {
 		now = e.now()
-		cfg = e.config()
-		if !sameRuntimeConfig(cfg, appliedCfg) {
-			e.applyRuntimeConfig(cfg)
-			if cfg.PollIntervalSeconds != appliedCfg.PollIntervalSeconds {
-				nextPoll = now
-			}
-			appliedCfg = cfg
+		var pollChanged bool
+		cfg, pollChanged = e.applyPendingConfig(appliedCfg)
+		if pollChanged {
+			nextPoll = now
 		}
+		appliedCfg = cfg
 		if !now.Before(nextEnabledCheck) {
 			e.checkEnabled()
 			nextEnabledCheck = now.Add(enabledCheckPeriod)

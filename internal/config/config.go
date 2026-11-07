@@ -107,6 +107,7 @@ type Webhook struct {
 
 // Config is the effective plugin configuration.
 type Config struct {
+	ConfigToken       string  `yaml:"config_token" json:"config_token"`
 	BarkURL           string  `yaml:"bark_url" json:"bark_url"`
 	BarkGroup         string  `yaml:"bark_group" json:"bark_group"`
 	BarkIcon          string  `yaml:"bark_icon" json:"bark_icon"`

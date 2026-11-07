@@ -48,10 +48,22 @@ type Server struct {
 	retry      *time.Timer
 	retries    sync.WaitGroup
 	generation uint64
+
+	requests       map[context.Context]context.CancelFunc
+	toolSlots      chan struct{}
+	queryTimeout   time.Duration
+	refreshTimeout time.Duration
 }
 
 func New(backend Backend, version string) *Server {
-	return &Server{backend: backend, version: version, state: State{Listen: "127.0.0.1:8318", Path: "/mcp"}}
+	return &Server{
+		backend: backend, version: version,
+		state:          State{Listen: "127.0.0.1:8318", Path: "/mcp"},
+		requests:       make(map[context.Context]context.CancelFunc),
+		toolSlots:      make(chan struct{}, 4),
+		queryTimeout:   10 * time.Second,
+		refreshTimeout: 180 * time.Second,
+	}
 }
 
 func (s *Server) State() State { s.mu.Lock(); defer s.mu.Unlock(); return s.state }
@@ -131,6 +143,9 @@ func (s *Server) startLocked() {
 
 func (s *Server) closeLocked() {
 	s.generation++
+	for _, cancel := range s.requests {
+		cancel()
+	}
 	if s.retry != nil {
 		if s.retry.Stop() {
 			s.retries.Done()
@@ -202,10 +217,20 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		return
 	}
+	// 请求登记与停止检查共用互斥锁，防止 Close 开始等待后登记新请求。
 	s.handlers.Add(1)
+	ctx, cancel := context.WithCancel(r.Context())
+	s.requests[ctx] = cancel
 	key := s.key
 	s.mu.Unlock()
-	defer s.handlers.Done()
+	defer func() {
+		cancel()
+		s.mu.Lock()
+		delete(s.requests, ctx)
+		s.mu.Unlock()
+		s.handlers.Done()
+	}()
+	r = r.WithContext(ctx)
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	if r.URL.Path != "/mcp" {
@@ -375,9 +400,11 @@ func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request, raw []byt
 			reply(w, req.ID, nil, &rpcError{-32602, err.Error()})
 			return
 		}
-		ctx, cancel := context.WithTimeout(r.Context(), 180*time.Second)
-		defer cancel()
-		value, err := s.backend.CallTool(ctx, params.Name, arguments)
+		value, err := s.callTool(r.Context(), params.Name, arguments)
+		if errors.Is(err, errServerBusy) {
+			reply(w, req.ID, nil, &rpcError{-32000, "MCP server is busy"})
+			return
+		}
 		if err != nil {
 			reply(w, req.ID, map[string]any{"content": []any{map[string]string{"type": "text", "text": err.Error()}}, "isError": true}, nil)
 			return
@@ -391,6 +418,31 @@ func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request, raw []byt
 	default:
 		reply(w, req.ID, nil, &rpcError{-32601, "Method not found"})
 	}
+}
+
+var errServerBusy = errors.New("MCP server is busy")
+
+func (s *Server) callTool(ctx context.Context, name string, arguments map[string]string) (any, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	// 每次工具调用独立占用名额，批处理与其他请求共享服务级并发上限。
+	select {
+	case s.toolSlots <- struct{}{}:
+		defer func() { <-s.toolSlots }()
+	default:
+		return nil, errServerBusy
+	}
+	timeout := s.queryTimeout
+	if name == "refresh_quotas" {
+		timeout = s.refreshTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return s.backend.CallTool(ctx, name, arguments)
 }
 
 func knownTool(name string) bool {

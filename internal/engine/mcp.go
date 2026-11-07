@@ -14,6 +14,7 @@ import (
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/notify"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/providers"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/quota"
+	"github.com/PosvdM/cpa-plugin-lamplighter/internal/store"
 )
 
 // MCPBackend exposes a separate, model-safe view of the engine.
@@ -76,15 +77,18 @@ func selectedAccounts(s Status, args map[string]string) map[string]string {
 	return out
 }
 func (b *MCPBackend) CallTool(ctx context.Context, name string, args map[string]string) (any, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	switch name {
 	case "list_quotas":
-		return b.list(args)
+		return b.listContext(ctx, args)
 	case "get_quota_history":
-		return b.history(args)
+		return b.history(ctx, args)
 	case "refresh_quotas":
 		return b.refresh(ctx, args)
 	case "get_quota_events":
-		return b.events(args)
+		return b.events(ctx, args)
 	}
 	return nil, errors.New("Unknown tool")
 }
@@ -132,10 +136,30 @@ type quotaGroupDTO struct {
 }
 
 func (b *MCPBackend) list(args map[string]string) (any, error) {
+	return b.listContext(context.Background(), args)
+}
+
+func (b *MCPBackend) listContext(ctx context.Context, args map[string]string) (any, error) {
 	e := b.engine
 	s := e.Status()
 	selected := selectedAccounts(s, args)
-	history, historyErr := e.HistoryRange("8d", "")
+	currentSeries := map[string]bool{}
+	for _, account := range s.Accounts {
+		if _, ok := selected[account.AuthIndex]; !ok {
+			continue
+		}
+		for _, group := range account.Groups {
+			for _, window := range group.Windows {
+				currentSeries[group.Key+"|"+window.ID] = true
+			}
+		}
+	}
+	history, historyErr := e.mcpHistoryRange(ctx, "8d", "", func(record store.Record) bool {
+		return currentSeries[record.Group+"|"+record.Window]
+	})
+	if historyErr != nil {
+		return nil, safeHistoryError(historyErr)
+	}
 	samples := map[string][][3]float64{}
 	for _, series := range history.Series {
 		samples[series.Group+"|"+series.Window] = series.Points
@@ -154,6 +178,9 @@ func (b *MCPBackend) list(args map[string]string) (any, error) {
 	withoutWindows := []any{}
 	byGroup := map[string]*quotaGroupDTO{}
 	for _, a := range s.Accounts {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		label, ok := selected[a.AuthIndex]
 		if !ok {
 			continue
@@ -186,14 +213,12 @@ func (b *MCPBackend) list(args map[string]string) (any, error) {
 			for _, w := range g.Windows {
 				target := targets[g.Key]
 				target.Rolling = startStates[g.Key][1]
-				dto := forecastWindow(w, target, samples[g.Key+"|"+w.ID], s.Now, s.Config.PollInterval())
+				dto, err := forecastWindowContext(ctx, w, target, samples[g.Key+"|"+w.ID], s.Now, s.Config.PollInterval())
+				if err != nil {
+					return nil, err
+				}
 				if w.Kind == quota.KindFiveHour && !startStates[g.Key][0] {
 					dto.Started = nil
-					dto.Rate = nil
-					dto.Exhaustion = nil
-					dto.BeforeReset = nil
-				}
-				if historyErr != nil {
 					dto.Rate = nil
 					dto.Exhaustion = nil
 					dto.BeforeReset = nil
@@ -231,6 +256,14 @@ func (b *MCPBackend) list(args map[string]string) (any, error) {
 }
 
 func forecastWindow(w WindowStatus, target TargetView, points [][3]float64, now time.Time, poll time.Duration) quotaWindowDTO {
+	dto, _ := forecastWindowContext(context.Background(), w, target, points, now, poll)
+	return dto
+}
+
+func forecastWindowContext(ctx context.Context, w WindowStatus, target TargetView, points [][3]float64, now time.Time, poll time.Duration) (quotaWindowDTO, error) {
+	if err := ctx.Err(); err != nil {
+		return quotaWindowDTO{}, err
+	}
 	age := max(int64(0), int64(now.Sub(w.ObservedAt).Seconds()))
 	freshLimit := max(15*time.Minute, 3*poll)
 	dto := quotaWindowDTO{ID: w.ID, Kind: w.Kind, Remaining: w.Remaining, Reset: describeTime(w.Reset, now), Updated: describeTime(w.ObservedAt, now), AgeSeconds: age, Stale: w.ObservedAt.IsZero() || now.Sub(w.ObservedAt) > freshLimit, Source: w.Source}
@@ -242,7 +275,7 @@ func forecastWindow(w WindowStatus, target TargetView, points [][3]float64, now 
 		period = quota.SevenDays
 	}
 	if period == 0 || w.Reset.IsZero() {
-		return dto
+		return dto, nil
 	}
 	start := w.Reset.Add(-period)
 	started := now.After(start) && now.Before(w.Reset)
@@ -251,14 +284,14 @@ func forecastWindow(w WindowStatus, target TargetView, points [][3]float64, now 
 	}
 	dto.Started = &started
 	if !started {
-		return dto
+		return dto, nil
 	}
 	if w.Kind == quota.KindSevenDay {
 		expected := min(100.0, max(0.0, 100*w.Reset.Sub(now).Seconds()/period.Seconds()))
 		dto.Pace = map[string]float64{"expected_remaining_percent": expected, "actual_remaining_percent": w.Remaining, "difference_percent": w.Remaining - expected, "even_budget_percent_per_day": 100.0 / 7, "remaining_budget_percent_per_day": w.Remaining / (w.Reset.Sub(now).Hours() / 24)}
 	}
 	if dto.Stale {
-		return dto
+		return dto, nil
 	}
 	if w.Remaining <= notify.ExhaustedRemaining {
 		dto.Exhaustion = describeTime(now, now)
@@ -272,6 +305,9 @@ func forecastWindow(w WindowStatus, target TargetView, points [][3]float64, now 
 	} else {
 		var floor [][3]float64
 		for _, p := range points {
+			if err := ctx.Err(); err != nil {
+				return dto, err
+			}
 			if p[0] < float64(start.Unix()) || p[0] > float64(w.ObservedAt.Unix()) {
 				continue
 			}
@@ -286,7 +322,7 @@ func forecastWindow(w WindowStatus, target TargetView, points [][3]float64, now 
 			floor = append(floor, p)
 		}
 		if len(floor) < 2 {
-			return dto
+			return dto, nil
 		}
 		// Bound the piecewise fit independently of the retained history size.
 		if len(floor) > 256 {
@@ -302,7 +338,11 @@ func forecastWindow(w WindowStatus, target TargetView, points [][3]float64, now 
 			floor = append(floor, [3]float64{float64(now.Unix()), last[1], last[2]})
 			base = now
 		}
-		rate = max(0.0, -recentSlope(floor)*3600)
+		slope, err := recentSlopeContext(ctx, floor)
+		if err != nil {
+			return dto, err
+		}
+		rate = max(0.0, -slope*3600)
 	}
 	dto.Rate = &rate
 	before := false
@@ -312,16 +352,16 @@ func forecastWindow(w WindowStatus, target TargetView, points [][3]float64, now 
 	} else if rate > 0 {
 		seconds := w.Remaining / rate * 3600
 		if seconds > float64((365*24*time.Hour)/time.Second) {
-			return dto
+			return dto, nil
 		}
 		base = base.Add(time.Duration(seconds * float64(time.Second)))
 	} else {
-		return dto
+		return dto, nil
 	}
 	dto.Exhaustion = describeTime(base, now)
 	before = base.Before(w.Reset)
 	dto.BeforeReset = &before
-	return dto
+	return dto, nil
 }
 
 func lineFit(points [][3]float64, a, b int) (float64, float64) {
@@ -346,8 +386,13 @@ func lineFit(points [][3]float64, a, b int) (float64, float64) {
 	return slope, err
 }
 func recentSlope(points [][3]float64) float64 {
+	slope, _ := recentSlopeContext(context.Background(), points)
+	return slope
+}
+
+func recentSlopeContext(ctx context.Context, points [][3]float64) (float64, error) {
 	if len(points) < 2 {
-		return 0
+		return 0, ctx.Err()
 	}
 	pieces := make([][2]int, len(points)-1)
 	for i := range pieces {
@@ -356,6 +401,9 @@ func recentSlope(points [][3]float64) float64 {
 	for len(pieces) > 1 {
 		best, cost := 0, math.Inf(1)
 		for i := 0; i < len(pieces)-1; i++ {
+			if err := ctx.Err(); err != nil {
+				return 0, err
+			}
 			_, err := lineFit(points, pieces[i][0], pieces[i+1][1])
 			if err < cost {
 				best, cost = i, err
@@ -369,7 +417,7 @@ func recentSlope(points [][3]float64) float64 {
 	}
 	last := pieces[len(pieces)-1]
 	slope, _ := lineFit(points, last[0], last[1])
-	return slope
+	return slope, ctx.Err()
 }
 func downsample(points [][3]float64, limit int) [][3]float64 {
 	if len(points) <= limit {
@@ -382,7 +430,14 @@ func downsample(points [][3]float64, limit int) [][3]float64 {
 	return out
 }
 
-func (b *MCPBackend) history(args map[string]string) (any, error) {
+func safeHistoryError(err error) error {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, store.ErrHistoryLimit) {
+		return err
+	}
+	return errors.New("Quota history is unavailable")
+}
+
+func (b *MCPBackend) history(ctx context.Context, args map[string]string) (any, error) {
 	if args["range"] != "" {
 		if _, ok := historyRanges[args["range"]]; !ok && args["range"] != "1mo" {
 			return nil, errors.New("Unsupported history range")
@@ -390,9 +445,33 @@ func (b *MCPBackend) history(args map[string]string) (any, error) {
 	}
 	s := b.engine.Status()
 	selected := selectedAccounts(s, args)
-	history, err := b.engine.HistoryRange(args["range"], args["window"])
+	history, err := b.engine.mcpHistoryRange(ctx, args["range"], args["window"], func(record store.Record) bool {
+		parts := strings.SplitN(record.Group, ":", 3)
+		if len(parts) != 3 || providers.Lookup(parts[0]) == nil || args["provider"] != "" && args["provider"] != parts[0] {
+			return false
+		}
+		window := args["window"]
+		if window != "" && window != "5h" && window != "7d" && record.Window != window {
+			return false
+		}
+		if args["account"] == "" {
+			return true
+		}
+		if _, ok := selected[parts[1]]; ok {
+			return true
+		}
+		if args["account"] != "retired account" {
+			return false
+		}
+		for _, account := range s.Accounts {
+			if account.Provider == parts[0] && account.AuthIndex == parts[1] {
+				return false
+			}
+		}
+		return true
+	})
 	if err != nil {
-		return nil, errors.New("Quota history is unavailable")
+		return nil, safeHistoryError(err)
 	}
 	// Match historical group keys against known accounts without exposing them.
 	type historical struct {
@@ -405,6 +484,9 @@ func (b *MCPBackend) history(args map[string]string) (any, error) {
 	out := []historical{}
 	remaining := 2000
 	for _, series := range history.Series {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		label, ok := selected[series.AuthIndex]
 		provider := series.Provider
 		groupLabel := series.SourceLabel
@@ -502,7 +584,7 @@ func (b *MCPBackend) refresh(ctx context.Context, args map[string]string) (any, 
 		return nil, errors.New("Quota engine stopped")
 	}
 }
-func (b *MCPBackend) events(args map[string]string) (any, error) {
+func (b *MCPBackend) events(ctx context.Context, args map[string]string) (any, error) {
 	since := time.Time{}
 	if args["since"] != "" {
 		var err error
@@ -533,6 +615,9 @@ func (b *MCPBackend) events(args map[string]string) (any, error) {
 	b.engine.mu.Unlock()
 	sort.SliceStable(events, func(i, j int) bool { return events[i].Time.After(events[j].Time) })
 	for _, event := range events {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if event.Time.Before(since) {
 			continue
 		}

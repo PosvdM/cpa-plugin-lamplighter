@@ -2,7 +2,9 @@ package store
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -10,6 +12,9 @@ import (
 	"sync"
 	"time"
 )
+
+// ErrHistoryLimit 表示查询超过历史扫描的内存预算。
+var ErrHistoryLimit = errors.New("History query exceeds the 20000-bucket memory limit")
 
 // Record is one line of a history file: a quota sample or an event.
 type Record struct {
@@ -83,30 +88,117 @@ func (h *History) Append(records ...Record) error {
 
 // Query returns the records between from and to, oldest first.
 func (h *History) Query(from, to time.Time) ([]Record, error) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	return h.QueryContext(context.Background(), from, to)
+}
+
+func (h *History) QueryContext(ctx context.Context, from, to time.Time) ([]Record, error) {
 	var out []Record
-	for day := from.UTC().Truncate(24 * time.Hour); !day.After(to); day = day.Add(24 * time.Hour) {
-		file, err := os.Open(h.fileFor(day))
-		if err != nil {
-			continue
-		}
-		scanner := bufio.NewScanner(file)
-		scanner.Buffer(make([]byte, 64*1024), 1024*1024)
-		for scanner.Scan() {
-			var record Record
-			if json.Unmarshal(scanner.Bytes(), &record) != nil {
-				continue
-			}
-			if record.Time < from.Unix() || record.Time > to.Unix() {
-				continue
-			}
-			out = append(out, record)
-		}
-		file.Close()
+	err := h.Scan(ctx, from, to, func(record Record) error {
+		out = append(out, record)
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Time < out[j].Time })
-	return out, nil
+	return out, ctx.Err()
+}
+
+// Scan 逐行读取历史；零值 from 表示读取所有保留文件。回调顺序为文件顺序，
+// 同一文件中的补写记录可以乱序。扫描不持有写锁，取消无需等待写入结束。
+func (h *History) Scan(ctx context.Context, from, to time.Time, visit func(Record) error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(h.Dir)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		day, err := time.Parse("2006-01-02", strings.TrimSuffix(entry.Name(), ".jsonl"))
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".jsonl") || err != nil || day.After(to) || !from.IsZero() && day.Add(24*time.Hour).Before(from) {
+			continue
+		}
+		err = func() error {
+			file, err := os.Open(filepath.Join(h.Dir, entry.Name()))
+			if os.IsNotExist(err) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			defer file.Close()
+			scanner := bufio.NewScanner(file)
+			scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+			for scanner.Scan() {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				var record Record
+				if json.Unmarshal(scanner.Bytes(), &record) != nil || !from.IsZero() && record.Time < from.Unix() || record.Time > to.Unix() {
+					continue
+				}
+				if err := visit(record); err != nil {
+					return err
+				}
+			}
+			return scanner.Err()
+		}()
+		if err != nil {
+			return err
+		}
+	}
+	return ctx.Err()
+}
+
+// QuerySampled 在扫描时仅保留每桶的最后一个样本，内存最多容纳 20000 个桶。
+// 文件大小和记录数量不影响此上限；超过上限时返回工具错误。
+func (h *History) QuerySampled(ctx context.Context, from, to time.Time, bucket int64, accept func(Record) bool) ([]Record, error) {
+	type key struct {
+		group, window string
+		bucket        int64
+	}
+	kept := map[key]Record{}
+	err := h.Scan(ctx, from, to, func(record Record) error {
+		if record.Kind != "s" || accept != nil && !accept(record) {
+			return nil
+		}
+		k := key{record.Group, record.Window, record.Time / max(1, bucket)}
+		old, exists := kept[k]
+		if !exists && len(kept) >= 20000 {
+			return ErrHistoryLimit
+		}
+		if !exists || record.Time >= old.Time {
+			kept[k] = record
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Record, 0, len(kept))
+	for _, record := range kept {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		out = append(out, record)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Time != out[j].Time {
+			return out[i].Time < out[j].Time
+		}
+		if out[i].Group != out[j].Group {
+			return out[i].Group < out[j].Group
+		}
+		return out[i].Window < out[j].Window
+	})
+	return out, ctx.Err()
 }
 
 // Prune deletes day files older than retention.
