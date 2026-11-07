@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -61,8 +62,9 @@ type GroupView struct {
 	SourceLabel string
 	Label       string
 	Windows     []WindowView
-	// active is set once an active query has described the group.
-	active bool
+	// rolling and startKnown copy the ignition observation for model-safe reads.
+	rolling    bool
+	startKnown bool
 }
 
 func (g *GroupView) windows() []quota.Window {
@@ -553,7 +555,31 @@ func (e *Engine) sendPlanNotice(ctx context.Context, cred *Cred, state *store.Pl
 // group whose windows are all dropped is not processed further.
 func (e *Engine) applyGroups(ctx context.Context, cfg config.Config, cred *Cred, raw []quota.RawGroup, source quota.Source, now, readAt time.Time, alerts bool) {
 	var changed []*GroupView
+	previous := map[string][]WindowView{}
 	e.mu.Lock()
+	if source == quota.SourceActive {
+		// A successful active response describes the whole credential. Keep empty
+		// groups as tombstones so passive headers cannot resurrect retired pools.
+		prefix := cred.Provider + ":" + cred.AuthIndex + ":"
+		seen := map[string]bool{}
+		for _, rg := range raw {
+			seen[prefix+rg.Key] = true
+		}
+		addMissing := func(key, label string) {
+			if strings.HasPrefix(key, prefix) && !seen[key] {
+				raw = append(raw, quota.RawGroup{Key: strings.TrimPrefix(key, prefix), SourceLabel: label})
+				seen[key] = true
+			}
+		}
+		for key, g := range e.groups {
+			addMissing(key, g.SourceLabel)
+		}
+		if e.state != nil {
+			for key := range e.state.Groups {
+				addMissing(key, "")
+			}
+		}
+	}
 	for _, rg := range raw {
 		key := cred.Provider + ":" + cred.AuthIndex + ":" + rg.Key
 		group, ok := e.groups[key]
@@ -561,14 +587,46 @@ func (e *Engine) applyGroups(ctx context.Context, cfg config.Config, cred *Cred,
 			group = &GroupView{Key: key, Provider: cred.Provider, AuthIndex: cred.AuthIndex}
 			e.groups[key] = group
 		}
+		previous[key] = append([]WindowView(nil), group.Windows...)
 		group.SourceLabel = rg.SourceLabel
 		group.Label = labelFor(group.SourceLabel, cred)
+		var activeWindows []string
+		legacyUnconfirmed := false
+		if e.state != nil {
+			stored := e.state.Group(key)
+			activeWindows = stored.ActiveWindows
+			legacyUnconfirmed = stored.LegacyUnconfirmed
+		}
 		if source == quota.SourceActive {
 			group.Windows = group.Windows[:0]
-			group.active = true
+			activeWindows = make([]string, 0, len(rg.Windows))
+			for _, w := range rg.Windows {
+				activeWindows = append(activeWindows, w.ID)
+			}
+			if e.state != nil {
+				stored := e.state.Group(key)
+				if stored.LegacyUnconfirmed {
+					// 无可靠存在信息的旧组，以首次主动结果重新建立通知基线。
+					for _, ws := range stored.Windows {
+						if ws != nil {
+							ws.Rebase = true
+						}
+					}
+				}
+				stored.ActiveWindows = activeWindows
+				stored.LegacyUnconfirmed = false
+			}
 		}
 		stale := 0
 		for _, w := range rg.Windows {
+			if source == quota.SourcePassive && legacyUnconfirmed && activeWindows == nil && !slices.ContainsFunc(group.Windows, func(existing WindowView) bool { return existing.ID == w.ID }) {
+				stale++
+				continue
+			}
+			if source == quota.SourcePassive && activeWindows != nil && !slices.Contains(activeWindows, w.ID) {
+				stale++
+				continue
+			}
 			view := WindowView{Window: w, Source: source, ObservedAt: now, ReadAt: readAt}
 			replaced := false
 			for i := range group.Windows {
@@ -582,7 +640,7 @@ func (e *Engine) applyGroups(ctx context.Context, cfg config.Config, cred *Cred,
 					break
 				}
 			}
-			if !replaced && (source == quota.SourceActive || !group.active) {
+			if !replaced {
 				group.Windows = append(group.Windows, view)
 			}
 		}
@@ -599,9 +657,44 @@ func (e *Engine) applyGroups(ctx context.Context, cfg config.Config, cred *Cred,
 	e.mu.Unlock()
 
 	for _, group := range changed {
-		if w, ok := group.fiveHour(); ok {
-			ignite.Observe(e.state.Target(group.Key), w.Reset, now, source == quota.SourcePassive)
+		if source == quota.SourceActive {
+			// Missing windows keep their baseline across restarts, but their
+			// first reading after a return must not compare unrelated cycles.
+			if stored := e.state.Groups[group.Key]; stored != nil {
+				present := make(map[string]bool, len(group.Windows))
+				for _, w := range group.Windows {
+					present[w.ID] = true
+				}
+				for id, ws := range stored.Windows {
+					if ws != nil && !present[id] {
+						ws.Rebase = true
+					}
+				}
+			}
 		}
+		if w, ok := group.fiveHour(); ok {
+			target := e.state.Target(group.Key)
+			startKnown := source == quota.SourcePassive || target.ResetObservation != nil || w.Reset.Sub(now) < quota.FiveHours-2*time.Minute
+			ignite.Observe(target, w.Reset, now, source == quota.SourcePassive)
+			e.mu.Lock()
+			if live := e.groups[group.Key]; live != nil {
+				live.rolling = target.RollingReset
+				live.startKnown = startKnown
+			}
+			e.mu.Unlock()
+		} else if source == quota.SourceActive {
+			if target := e.state.Scheduler[group.Key]; target != nil {
+				target.ResetObservation = nil
+				target.RollingReset = false
+			}
+			e.mu.Lock()
+			if live := e.groups[group.Key]; live != nil {
+				live.startKnown = false
+				live.rolling = false
+			}
+			e.mu.Unlock()
+		}
+		e.recordQuotaTransitions(group, previous[group.Key], now)
 		e.recordSamples(group, source, now)
 		if e.alerts != nil && alerts {
 			e.alerts.ProcessGroup(ctx, e.state, notify.Group{Key: group.Key, Label: group.Label, Windows: group.windows()}, now)

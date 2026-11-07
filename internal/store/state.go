@@ -9,6 +9,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"sync"
 )
 
@@ -37,8 +39,8 @@ type WindowState struct {
 	EndedReset string `json:"ended_reset,omitempty"`
 	// PendingRecovery is a recovery notification not delivered yet.
 	PendingRecovery *PendingRecovery `json:"pending_recovery,omitempty"`
-	// Rebase is set when the plan of the account changed: the next reading
-	// only records a new baseline, as for a window seen for the first time.
+	// Rebase 表示套餐变化或主动查询确认窗口缺席；窗口返回后的首次读数
+	// 只记录新基线。窗口是否允许被动更新由 GroupState.ActiveWindows 决定。
 	Rebase bool `json:"rebase,omitempty"`
 }
 
@@ -56,9 +58,13 @@ type PendingRecovery struct {
 
 // GroupState holds the notification baselines of one quota group.
 type GroupState struct {
-	Label    string                  `json:"label,omitempty"`
-	LastSeen int64                   `json:"last_seen,omitempty"`
-	Windows  map[string]*WindowState `json:"windows"`
+	// ActiveWindows 保存最近一次成功主动查询确认的窗口；nil 表示尚未确认。
+	ActiveWindows []string `json:"active_windows"`
+	// LegacyUnconfirmed 限制磁盘中已有但缺少可靠主动确认信息的组；不持久化。
+	LegacyUnconfirmed bool                    `json:"-"`
+	Label             string                  `json:"label,omitempty"`
+	LastSeen          int64                   `json:"last_seen,omitempty"`
+	Windows           map[string]*WindowState `json:"windows"`
 }
 
 // Observation is the last observed 5-hour reset of an ignition target.
@@ -239,7 +245,48 @@ func (f *StateFile) Load() (state *State, fresh bool, err error) {
 		return NewState(), true, fmt.Errorf("状态文件损坏，已重建: %w", err)
 	}
 	state.ensure()
+	state.restoreActiveWindows()
 	return state, false, nil
+}
+
+// restoreActiveWindows 只信任成功主动查询写入的非空 plans.windows。
+// 通知基线、Rebase 和点火观测都不能证明当前窗口仍然存在。
+func (s *State) restoreActiveWindows() {
+	for key, group := range s.Groups {
+		if group.ActiveWindows != nil {
+			continue
+		}
+		group.LegacyUnconfirmed = true
+		parts := strings.SplitN(key, ":", 3)
+		if len(parts) != 3 {
+			continue
+		}
+		plan := s.Plans[parts[1]]
+		if plan == nil || plan.Windows == "" {
+			continue
+		}
+		windows := []string{}
+		valid := true
+		for _, entry := range strings.Split(plan.Windows, "\n") {
+			name, id, ok := strings.Cut(entry, "|")
+			if !ok || name == "" || id == "" || strings.Contains(id, "|") {
+				valid = false
+				break
+			}
+			if name == parts[2] {
+				windows = append(windows, id)
+			}
+		}
+		if valid {
+			group.ActiveWindows = windows
+			group.LegacyUnconfirmed = false
+			for id, ws := range group.Windows {
+				if ws != nil && !slices.Contains(windows, id) {
+					ws.Rebase = true
+				}
+			}
+		}
+	}
 }
 
 // Save writes state atomically.

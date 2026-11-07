@@ -6,6 +6,7 @@ import (
 	_ "time/tzdata"
 
 	"fmt"
+	"log"
 	"math"
 	"sort"
 	"strings"
@@ -106,6 +107,7 @@ type Webhook struct {
 
 // Config is the effective plugin configuration.
 type Config struct {
+	ConfigToken       string  `yaml:"config_token" json:"config_token"`
 	BarkURL           string  `yaml:"bark_url" json:"bark_url"`
 	BarkGroup         string  `yaml:"bark_group" json:"bark_group"`
 	BarkIcon          string  `yaml:"bark_icon" json:"bark_icon"`
@@ -135,6 +137,11 @@ type Config struct {
 	CPABaseURL   string `yaml:"cpa_base_url" json:"cpa_base_url"`
 	ModelsAPIKey string `yaml:"models_api_key" json:"models_api_key"`
 
+	MCPEnabled bool   `yaml:"mcp_enabled" json:"mcp_enabled"`
+	MCPListen  string `yaml:"mcp_listen" json:"mcp_listen"`
+	MCPKey     string `yaml:"mcp_key" json:"mcp_key,omitempty"`
+	MCPKeySet  bool   `yaml:"-" json:"mcp_key_set"`
+
 	Ignition          Ignition            `yaml:"ignition" json:"ignition"`
 	Providers         map[string]Provider `yaml:"providers" json:"providers"`
 	CodexResetUpdates CodexResetUpdates   `yaml:"codex_reset_updates" json:"codex_reset_updates"`
@@ -150,6 +157,9 @@ type Config struct {
 	// in the total of several accounts on the page. Accounts without one use
 	// the default of their plan.
 	AccountWeights map[string]float64 `yaml:"account_weights,omitempty" json:"account_weights,omitempty"`
+	// AccountOrder lists credential file names in display order. Accounts
+	// absent from the list follow the provider and account-name order.
+	AccountOrder []string `yaml:"account_order" json:"account_order"`
 }
 
 // DefaultProvider returns the built-in settings for provider.
@@ -184,6 +194,7 @@ func Default() Config {
 		PassiveSkipSeconds:    60,
 		PassiveSkipMaxMinutes: 30,
 		CPABaseURL:            "http://127.0.0.1:8317",
+		MCPListen:             "127.0.0.1:8318",
 		Ignition: Ignition{
 			Enabled:                  true,
 			StartHour:                7,
@@ -313,6 +324,26 @@ func (c *Config) normalize() {
 		c.CPABaseURL = "http://127.0.0.1:8317"
 	}
 	c.ModelsAPIKey = strings.TrimSpace(c.ModelsAPIKey)
+	c.MCPListen = strings.TrimSpace(c.MCPListen)
+	if c.MCPListen == "" {
+		c.MCPListen = "127.0.0.1:8318"
+	}
+	c.MCPKey = strings.TrimSpace(c.MCPKey)
+	c.MCPKeySet = false
+	before := [3]float64{c.NoticeThreshold, c.LowThreshold, c.CriticalThreshold}
+	threshold := func(value, fallback, maximum float64) float64 {
+		if math.IsNaN(value) {
+			value = fallback
+		}
+		return math.Max(0, math.Min(value, maximum))
+	}
+	c.NoticeThreshold = threshold(c.NoticeThreshold, 50, 100)
+	c.LowThreshold = threshold(c.LowThreshold, 20, c.NoticeThreshold)
+	c.CriticalThreshold = threshold(c.CriticalThreshold, 10, c.LowThreshold)
+	after := [3]float64{c.NoticeThreshold, c.LowThreshold, c.CriticalThreshold}
+	if before != after {
+		log.Printf("lamplighter: normalized notice/low/critical thresholds from %v to %v", before, after)
+	}
 	c.DataDir = strings.TrimSpace(c.DataDir)
 	c.Timezone = strings.TrimSpace(c.Timezone)
 	if c.TimezoneOffsetHours != nil && (*c.TimezoneOffsetHours < -14 || *c.TimezoneOffsetHours > 14) {

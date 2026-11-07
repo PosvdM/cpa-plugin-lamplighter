@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/config"
+	"github.com/PosvdM/cpa-plugin-lamplighter/internal/mcp"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/notify"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/providers"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/quota"
@@ -271,11 +272,12 @@ type WindowStatus struct {
 	Label string `json:"label"`
 	Short string `json:"short"`
 	// Kind is "5h", "7d" or empty for a window of another length.
-	Kind       string    `json:"kind,omitempty"`
-	Remaining  float64   `json:"remaining"`
-	Reset      time.Time `json:"reset,omitempty"`
-	Source     string    `json:"source"`
-	ObservedAt time.Time `json:"observed_at"`
+	Kind          string    `json:"kind,omitempty"`
+	PeriodSeconds float64   `json:"period_seconds,omitempty"`
+	Remaining     float64   `json:"remaining"`
+	Reset         time.Time `json:"reset,omitempty"`
+	Source        string    `json:"source"`
+	ObservedAt    time.Time `json:"observed_at"`
 }
 
 // GroupStatus is one quota group on the status page.
@@ -311,13 +313,15 @@ type AccountStatus struct {
 
 // Status is the response of the status endpoint.
 type Status struct {
-	Version     string `json:"version"`
-	Running     bool   `json:"running"`
-	Enabled     bool   `json:"enabled"`
-	ConfigError string `json:"config_error,omitempty"`
-	LockError   string `json:"lock_error,omitempty"`
-	ModelsError string `json:"models_error,omitempty"`
-	ListError   string `json:"list_error,omitempty"`
+	ConfigAppliedToken string    `json:"config_applied_token"`
+	MCP                mcp.State `json:"mcp"`
+	Version            string    `json:"version"`
+	Running            bool      `json:"running"`
+	Enabled            bool      `json:"enabled"`
+	ConfigError        string    `json:"config_error,omitempty"`
+	LockError          string    `json:"lock_error,omitempty"`
+	ModelsError        string    `json:"models_error,omitempty"`
+	ListError          string    `json:"list_error,omitempty"`
 	// NotifyError is the reason the webhook settings were not applied.
 	NotifyError string `json:"notify_error,omitempty"`
 	DataDir     string `json:"data_dir"`
@@ -383,6 +387,9 @@ func (e *Engine) Status() Status {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	cfg := e.cfg
+	cfg.MCPKeySet = cfg.MCPKey != ""
+	cfg.MCPKey = ""
+	cfg.AccountOrder = append([]string(nil), cfg.AccountOrder...)
 	if cfg.BarkURL != "" {
 		cfg.BarkURL = "已设置"
 	}
@@ -404,25 +411,26 @@ func (e *Engine) Status() Status {
 		cfg.Webhook.Headers = headers
 	}
 	status := Status{
-		Version:     e.version,
-		Running:     e.running,
-		Enabled:     e.enabled,
-		ConfigError: e.cfgErr,
-		LockError:   e.lockErr,
-		ModelsError: e.modelsErr,
-		NextModels:  maps.Clone(e.nextModels),
-		ListError:   e.pollErrs[""],
-		NotifyError: e.notifyErr,
-		Language:    notify.NormalizeLang(e.lang),
-		DataDir:     e.dataDir,
-		Timezone:    e.cfg.Location().String(),
-		Now:         e.now().UTC(),
-		LastPoll:    e.lastPoll,
-		NextPoll:    e.nextPoll,
-		Config:      cfg,
-		Targets:     append([]TargetView{}, e.targets...),
-		Providers:   providerInfos(),
-		GroupOrder:  providers.GroupOrder(),
+		ConfigAppliedToken: e.configAppliedToken,
+		Version:            e.version,
+		Running:            e.running,
+		Enabled:            e.enabled,
+		ConfigError:        e.cfgErr,
+		LockError:          e.lockErr,
+		ModelsError:        e.modelsErr,
+		NextModels:         maps.Clone(e.nextModels),
+		ListError:          e.pollErrs[""],
+		NotifyError:        e.notifyErr,
+		Language:           notify.NormalizeLang(e.lang),
+		DataDir:            e.dataDir,
+		Timezone:           e.cfg.Location().String(),
+		Now:                e.now().UTC(),
+		LastPoll:           e.lastPoll,
+		NextPoll:           e.nextPoll,
+		Config:             cfg,
+		Targets:            append([]TargetView{}, e.targets...),
+		Providers:          providerInfos(),
+		GroupOrder:         providers.GroupOrder(),
 	}
 	status.LatestVersion, status.ReleaseURL = e.latest.Version, e.latest.URL
 	_, status.UTCOffset = e.now().In(e.cfg.Location()).Zone()
@@ -430,11 +438,28 @@ func (e *Engine) Status() Status {
 	for _, cred := range e.creds {
 		creds = append(creds, cred)
 	}
+	order := make(map[string]int, len(cfg.AccountOrder))
+	for i, name := range cfg.AccountOrder {
+		if _, exists := order[name]; !exists {
+			order[name] = i
+		}
+	}
 	sort.SliceStable(creds, func(i, j int) bool {
+		ri, listedI := order[creds[i].Name]
+		rj, listedJ := order[creds[j].Name]
+		if listedI != listedJ {
+			return listedI
+		}
+		if listedI && ri != rj {
+			return ri < rj
+		}
 		if creds[i].Provider != creds[j].Provider {
 			return providers.Rank(creds[i].Provider) < providers.Rank(creds[j].Provider)
 		}
-		return creds[i].Suffix < creds[j].Suffix
+		if creds[i].Suffix != creds[j].Suffix {
+			return creds[i].Suffix < creds[j].Suffix
+		}
+		return creds[i].Name < creds[j].Name
 	})
 	for _, cred := range creds {
 		account := AccountStatus{
@@ -469,14 +494,15 @@ func (e *Engine) Status() Status {
 			gs := GroupStatus{Key: group.Key, Label: group.Label, SourceLabel: group.SourceLabel}
 			for _, w := range group.Windows {
 				gs.Windows = append(gs.Windows, WindowStatus{
-					ID:         w.ID,
-					Label:      w.Label,
-					Short:      quota.ShortLabel(w.Label),
-					Kind:       quota.Kind(w.Window),
-					Remaining:  w.Remaining,
-					Reset:      w.Reset,
-					Source:     string(w.Source),
-					ObservedAt: w.ObservedAt,
+					ID:            w.ID,
+					Label:         w.Label,
+					Short:         quota.ShortLabel(w.Label),
+					Kind:          quota.Kind(w.Window),
+					PeriodSeconds: w.Period.Seconds(),
+					Remaining:     w.Remaining,
+					Reset:         w.Reset,
+					Source:        string(w.Source),
+					ObservedAt:    w.ObservedAt,
 				})
 			}
 			account.Groups = append(account.Groups, gs)
@@ -507,6 +533,7 @@ type Series struct {
 	Provider    string       `json:"provider"`
 	AuthIndex   string       `json:"auth_index"`
 	Points      [][3]float64 `json:"points"` // [unix seconds, remaining, 1 for passive]
+	Resets      [][2]int64   `json:"resets"` // [sample time, scheduled reset; 0 means unknown]
 }
 
 // HistoryResponse is the response of the history endpoint.
@@ -561,6 +588,10 @@ func (e *Engine) HistoryRange(name, kind string) (HistoryResponse, error) {
 	return e.History(RangeSpan(name, e.now(), e.config().Location()), kind)
 }
 
+func (e *Engine) mcpHistoryRange(ctx context.Context, name, kind string, accept func(store.Record) bool) (HistoryResponse, error) {
+	return e.historyContext(ctx, RangeSpan(name, e.now(), e.config().Location()), kind, true, accept)
+}
+
 // historyBucket returns the bucket length in seconds for a span. Spans up to
 // 2 days keep every sample; longer spans use 10 minutes, then 15 minutes
 // over 4 days, 30 minutes over 8 days and one hour over 15 days, so that a
@@ -593,11 +624,18 @@ const historyLead = 24 * time.Hour
 // With kind "5h" or "7d" only windows of that kind are returned, otherwise
 // all windows.
 func (e *Engine) History(span time.Duration, kind string) (HistoryResponse, error) {
+	return e.historyContext(context.Background(), span, kind, false, nil)
+}
+
+func (e *Engine) historyContext(ctx context.Context, span time.Duration, kind string, bounded bool, accept func(store.Record) bool) (HistoryResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return HistoryResponse{}, err
+	}
 	e.mu.Lock()
 	dataDir := e.dataDir
 	labels := map[string]GroupView{}
 	for key, group := range e.groups {
-		labels[key] = GroupView{Key: key, Provider: group.Provider, AuthIndex: group.AuthIndex, SourceLabel: group.SourceLabel, Label: group.Label, Windows: group.Windows}
+		labels[key] = GroupView{Key: key, Provider: group.Provider, AuthIndex: group.AuthIndex, SourceLabel: group.SourceLabel, Label: group.Label, Windows: append([]WindowView(nil), group.Windows...)}
 	}
 	e.mu.Unlock()
 	now := e.now().UTC()
@@ -606,7 +644,17 @@ func (e *Engine) History(span time.Duration, kind string) (HistoryResponse, erro
 		return resp, nil
 	}
 	history := &store.History{Dir: dataDir + "/history"}
-	records, err := history.Query(resp.From.Add(-historyLead), now)
+	var records []store.Record
+	var window store.HistoryWindow
+	var err error
+	if bounded {
+		// MCP 保留有限桶用于预测及响应，不构造管理图表的重置事件。
+		bucket := max(resp.Bucket, max(1, int64(span.Seconds())/2000))
+		records, err = history.QuerySampled(ctx, resp.From.Add(-historyLead), now, bucket, accept)
+	} else {
+		window, err = history.QueryWindow(ctx, resp.From, now)
+		records = window.Records
+	}
 	if err != nil {
 		return resp, err
 	}
@@ -614,8 +662,34 @@ func (e *Engine) History(span time.Duration, kind string) (HistoryResponse, erro
 	series := map[string]*Series{}
 	before := map[string][3]float64{}
 	var order []string
-	for _, record := range records {
+	resetEvents := map[string][][2]int64{}
+	knownReset := window.KnownReset
+	previousReset := map[string]int64{}
+	visit := func(record store.Record) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		key := record.Group + "|" + record.Window
+		if !bounded && record.Kind == "s" {
+			changes := resetEvents[key]
+			if record.Reset != 0 {
+				knownReset[key] = true
+			}
+			previous, seen := previousReset[key]
+			previousReset[key] = record.Reset
+			if !seen || (record.Reset == 0) != (previous == 0) || absInt64(record.Reset-previous) > 60 {
+				change := [2]int64{record.Time, record.Reset}
+				if record.Time < resp.From.Unix() {
+					changes = [][2]int64{change}
+				} else {
+					changes = append(changes, change)
+				}
+				resetEvents[key] = changes
+			}
+		}
+		if record.Time < resp.From.Add(-historyLead).Unix() {
+			return nil
+		}
 		passive := 0.0
 		if record.Source == string(quota.SourcePassive) {
 			passive = 1
@@ -625,7 +699,7 @@ func (e *Engine) History(span time.Duration, kind string) (HistoryResponse, erro
 			if record.Kind != "e" {
 				before[key] = point
 			}
-			continue
+			return nil
 		}
 		if record.Kind == "e" {
 			if record.Event == "ignite" || record.Event == "ignite_manual" || record.Event == "ignite_failed" || record.Event == "ignite_paused" {
@@ -634,7 +708,7 @@ func (e *Engine) History(span time.Duration, kind string) (HistoryResponse, erro
 					Group: record.Group, Message: record.Message, Label: record.Label, Detail: record.Detail, Params: record.Params,
 				})
 			}
-			continue
+			return nil
 		}
 		s, ok := series[key]
 		if !ok {
@@ -670,15 +744,31 @@ func (e *Engine) History(span time.Duration, kind string) (HistoryResponse, erro
 			last := s.Points[len(s.Points)-1]
 			if int64(last[0]) >= from && int64(last[0])/resp.Bucket == record.Time/resp.Bucket {
 				s.Points[len(s.Points)-1] = point
-				continue
+				return nil
 			}
 		}
 		s.Points = append(s.Points, point)
+		return nil
+	}
+	// 范围前只用最后一个样本初始化重置状态；其时间无需是 x 首次出现的时间。
+	for _, predecessor := range window.Before {
+		if err := visit(predecessor); err != nil {
+			return resp, err
+		}
+	}
+	for _, record := range records {
+		if err := visit(record); err != nil {
+			return resp, err
+		}
 	}
 	filter := kind == quota.KindFiveHour || kind == quota.KindSevenDay
 	for _, key := range order {
 		if filter && series[key].Kind != kind {
 			continue
+		}
+		series[key].Resets = [][2]int64{}
+		if knownReset[key] {
+			series[key].Resets = append(series[key].Resets, resetEvents[key]...)
 		}
 		resp.Series = append(resp.Series, *series[key])
 	}

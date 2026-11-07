@@ -21,6 +21,11 @@
   --primary-contrast: #ffffff;
   --success-color: #10b981;
   --quota-medium-color: #e0aa14;
+  /* Full quota is cyan blue, apart from the green of high; empty quota is a
+     darker red than low, striped with --quota-empty-stripe. */
+  --quota-full-color: #0ea5e9;
+  --quota-empty-color: #8e2a1f;
+  --quota-empty-stripe: rgba(255, 255, 255, 0.22);
   --error-color: #c65746;
   --warning-bg: rgba(198, 87, 70, 0.12);
   --warning-border: rgba(198, 87, 70, 0.35);
@@ -85,6 +90,9 @@
   --border-hover: #5a544d;
   --primary-hover: #9a948e;
   --quota-medium-color: #ffd862;
+  --quota-full-color: #38bdf8;
+  --quota-empty-color: #9a2e22;
+  --quota-empty-stripe: rgba(0, 0, 0, 0.32);
   --warning-bg: rgba(198, 87, 70, 0.22);
   --warning-border: rgba(198, 87, 70, 0.45);
   --warning-text: #f1b0a6;
@@ -176,21 +184,33 @@ header .update path { fill: none; stroke: currentColor; stroke-width: 1.8; strok
 .card-title, .block-title { font-size: 15px; font-weight: 650; margin: 0 0 14px; }
 .block-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
 .block-head .block-title { margin: 0; }
-.hint.settings-note { margin: -8px 0 14px; }
-/* Settings fold into one row; the chevron turns down when open. */
-.settings-card > summary {
-  display: flex; align-items: center; gap: 8px; margin: 0;
-  list-style: none; color: var(--text-primary); font-size: inherit;
-}
-.settings-card > summary::-webkit-details-marker { display: none; }
-.settings-card > summary::before {
-  content: "›"; width: 12px; color: var(--text-secondary); font-size: 18px; line-height: 1;
-  text-align: center; transition: transform 0.15s ease;
-}
-.settings-card[open] > summary::before { transform: rotate(90deg); }
-.settings-card > summary .card-title { margin: 0; }
-.settings-card[open] > summary { margin-bottom: 14px; }
 .block { margin-bottom: 18px; }
+
+/* The switch between the quota and settings views, below the header. */
+.view-nav { margin: -4px 0 16px; display: flex; align-items: center; gap: 8px; }
+
+/* Account masking: the eye button beside the view switch blurs the text
+   that names accounts (.account-sensitive). */
+.mask-toggle { padding: 6px 8px; color: var(--text-secondary); }
+.mask-toggle svg { display: block; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.mask-toggle[aria-pressed="true"] { background: var(--bg-tertiary); border-color: var(--border-color); color: var(--text-primary); }
+.mask-accounts .account-sensitive { filter: blur(5px); }
+
+/* Screenshot buttons, and the off-screen copy measured for a screenshot. */
+.btn.snapshot { padding: 4px 6px; }
+.btn.snapshot svg { display: block; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linejoin: round; }
+.block-head .btn.snapshot { margin-left: auto; }
+.detail-head .btn.snapshot { order: 1; margin-left: auto; align-self: center; }
+.snapshot-host { position: fixed; left: -100000px; top: 0; pointer-events: none; }
+/* The frame of a screenshot. It applies both off screen, where page.js
+   measures it, and in the image, so the two have the same size. */
+.snapshot-frame { padding: 12px; background: var(--bg-secondary); color: var(--text-primary); -webkit-font-smoothing: antialiased; }
+.snapshot-frame, .snapshot-frame *, .snapshot-frame *::before, .snapshot-frame *::after { animation: none !important; transition: none !important; }
+.snapshot-frame .detail-head { margin-top: 0; padding-top: 0; border-top: 0; }
+.hint.settings-note { margin: 0 0 14px; }
+.settings-section { display: flex; flex-direction: column; gap: 14px; }
+.settings-section > .card-title { margin: 0; }
+.settings-section > fieldset { margin: 0; }
 
 /* Buttons, matching .btn in the Management Center */
 .btn {
@@ -207,6 +227,7 @@ header .update path { fill: none; stroke: currentColor; stroke-width: 1.8; strok
 .btn-ghost { background: transparent; color: var(--text-secondary); }
 .btn-ghost:hover { background: var(--bg-tertiary); color: var(--text-primary); }
 .btn-sm { padding: 4px 10px; font-size: 12.5px; }
+.btn[hidden] { display: none; }
 .btn:disabled { opacity: 0.6; cursor: not-allowed; }
 .btn:focus-visible, .seg:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
   outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-color) 25%, transparent);
@@ -255,10 +276,31 @@ input[type="checkbox"] { width: 16px; height: 16px; padding: 0; accent-color: va
   .card.account:hover { transform: translateY(-2px); border-color: var(--border-hover); box-shadow: 0 12px 26px -14px rgb(0 0 0 / 0.16); }
 }
 .account-head { display: flex; align-items: center; gap: 9px; min-width: 0; }
-.account-head .btn { margin-left: auto; }
-.account-head .btn + .btn { margin-left: 0; }
+.account-head .order-buttons { display: inline-flex; gap: 2px; }
+.btn-icon { padding: 2px 7px; font-size: 13px; line-height: 1.4; }
+/* The handle stays faint until hovered. With a mouse, the order buttons show
+   while the card is hovered or holds the focus, and are otherwise kept
+   out of the layout but still reachable with Tab, so the email has room. On
+   touch screens they always show. */
+.drag-handle {
+  flex: none; width: 10px; height: 18px; margin: 0 -3px 0 -4px; cursor: grab; touch-action: none; opacity: 0.45;
+  background: radial-gradient(circle, var(--text-tertiary) 1.2px, transparent 1.6px) 0 0 / 5px 6px;
+}
+.drag-handle:hover { opacity: 1; }
+.order-buttons .btn:disabled { opacity: 0.3; }
+@media (hover: hover) and (pointer: fine) {
+  .card.account:not(:hover):not(:focus-within) .order-buttons {
+    position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+  }
+}
+@media (hover: none) { .drag-handle { opacity: 1; } }
+.accounts.sorting { cursor: grabbing; user-select: none; }
+.accounts.sorting .drag-handle { cursor: grabbing; }
+.card.account.dragging {
+  opacity: 0.75; border-style: dashed; border-color: var(--primary-color); transform: none; box-shadow: none;
+}
 .account-email {
-  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  min-width: 0; margin-right: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: var(--text-secondary); font-size: 13px;
 }
 .account-weight { flex: none; font-family: var(--font-mono); font-size: 12px; font-weight: 650; color: var(--text-secondary); }
@@ -297,6 +339,11 @@ input[type="checkbox"] { width: 16px; height: 16px; padding: 0; accent-color: va
 .fill-high { background: var(--viz-success); }
 .fill-medium { background: var(--quota-medium-color); }
 .fill-low { background: var(--viz-failure); }
+.fill-full { background: var(--quota-full-color); }
+.fill-empty, .quota-bar.bar-empty {
+  background: repeating-linear-gradient(135deg, var(--quota-empty-stripe) 0 2px, transparent 2px 5px), var(--quota-empty-color);
+}
+.quota-percent.percent-empty { color: var(--error-color); }
 .group-foot { display: flex; gap: 8px; align-items: center; font-size: 11.5px; color: var(--text-tertiary); }
 .source { padding: 0 6px; border-radius: 4px; font-size: 11px; background: var(--bg-tertiary); color: var(--text-secondary); }
 .source-passive { background: color-mix(in srgb, var(--viz-success) 14%, transparent); color: var(--success-badge-text); }
@@ -387,11 +434,47 @@ form label { display: flex; flex-direction: column; gap: 5px; font-size: 12.5px;
 form label.inline { flex-direction: row; align-items: center; gap: 8px; font-weight: 500; color: var(--text-primary); }
 .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 18px; }
 .grid-3 .span-2 { grid-column: span 2; }
-.bark-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 12px 18px; align-items: end; }
-.webhook-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 12px 18px; align-items: end; }
-.webhook-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 12px 18px; }
-.webhook-grid label:last-child { grid-column: 1 / -1; }
+.bark-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 12px 18px; align-items: start; }
+.webhook-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 12px 18px; align-items: start; padding-top: 12px; }
+.webhook-grid .span-all { grid-column: 1 / -1; }
 .webhook-grid input { font-family: var(--font-mono); }
+details.advanced > summary { margin-top: 0; }
+
+/* The save state beside a field: saving, saved, verified, unverified or
+   failed. */
+.save-state { font-size: 12px; font-weight: 500; color: var(--text-tertiary); }
+.save-state:empty { display: none; }
+.save-state[data-state="saved"], .save-state[data-state="verified"] { color: var(--success-badge-text); }
+.save-state[data-state="saved"]::before, .save-state[data-state="verified"]::before { content: "✓ "; }
+.save-state[data-state="unverified"] { color: var(--amber-text); }
+.save-state[data-state="waiting"] { color: var(--text-secondary); }
+.save-state[data-state="failed"] { color: var(--error-color); }
+label.inline .save-state, td .save-state, .mode-row .save-state, .snippet-head .save-state, .key-row .save-state { margin-left: 8px; }
+td .save-state { display: inline-block; }
+.mode-row { display: flex; flex-wrap: wrap; align-items: baseline; }
+
+.ignition-params { display: flex; flex-direction: column; gap: 14px; transition: opacity 150ms ease; }
+.ignition-params.off > :not(.off-note) { opacity: 0.5; }
+.off-note {
+  margin: 0; padding: 8px 12px; border-radius: 8px; font-size: 12.5px;
+  background: var(--amber-bg); color: var(--amber-text); border: 1px solid var(--amber-border);
+}
+.level-name { font-weight: 650; min-width: 2.5em; }
+
+/* MCP */
+.key-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 34px; }
+.key-view {
+  font-family: var(--font-mono); font-size: 12.5px; padding: 6px 10px; border-radius: 8px; min-width: 0;
+  background: var(--bg-tertiary); border: 1px solid var(--border-color); overflow-wrap: anywhere;
+}
+.mcp-status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12.5px; }
+.snippets { display: flex; flex-direction: column; gap: 10px; }
+.snippet-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.snippet pre {
+  margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--bg-tertiary); border: 1px solid var(--border-color);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.copy-buffer { position: fixed; left: -9999px; top: 0; opacity: 0; }
 .test-row { display: flex; align-items: flex-start; gap: 12px 18px; flex-wrap: wrap; }
 .test-results { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; min-width: 0; flex: 1; padding-top: 6px; }
 .test-results:empty { display: none; }
@@ -449,7 +532,7 @@ form label.mode-option {
 .seg:active:not([aria-pressed="true"]) { scale: 0.92; }
 .hint, form .hint { font-size: 12px; font-weight: 400; color: var(--text-tertiary); margin: 0; }
 table.services th, table.services td { padding: 8px 10px; }
-table.services td:nth-child(2), table.services td:nth-child(3), table.services th:nth-child(2), table.services th:nth-child(3) { width: 84px; text-align: center; }
+table.services td:nth-child(2), table.services th:nth-child(2) { width: 84px; text-align: center; }
 table.services td:first-child { width: 120px; }
 table.services input[type="text"] { width: 100%; }
 table.services tbody tr:hover td { background: transparent; }
@@ -472,7 +555,7 @@ table.services .sub-row td { border-bottom: none; padding-top: 4px; text-align: 
 @media (max-width: 640px) {
   main { padding: 14px 12px 32px; }
   .grid-3 { grid-template-columns: 1fr; }
-  .bark-row, .webhook-row, .webhook-grid { grid-template-columns: 1fr; }
+  .bark-row, .webhook-grid { grid-template-columns: 1fr; }
   .grid-3 .span-2 { grid-column: auto; }
   .notify-modes { grid-template-columns: repeat(2, minmax(0, 1fr)); justify-content: stretch; }
   .notify-modes .mode-corner { display: none; }
@@ -486,5 +569,5 @@ table.services .sub-row td { border-bottom: none; padding-top: 4px; text-align: 
 @media (prefers-reduced-motion: reduce) {
   .quota-fill { animation: none; } .card.account { transition: none; }
   .seg-thumb, .seg, .mode-option span { transition: none; } .seg-thumb.bounce { animation: none; }
-  .settings-card > summary::before { transition: none; }
+  .ignition-params { transition: none; }
 }
