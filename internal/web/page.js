@@ -125,8 +125,8 @@
       test_some_failed: "部分渠道测试失败", test_all_failed: "测试推送失败",
       thresholds: "提醒阈值", remaining_le: "剩余 ≤",
       threshold_notice: "提醒", threshold_low: "偏低", threshold_critical: "告急",
-      thresholds_hint: "额度降到每一档时推送一次，耗尽时再推送一次。三档须从高到低；前两档也决定额度条和图表的颜色。",
-      thresholds_order: "三档阈值须从高到低：提醒 > 偏低 > 告急，未保存",
+      thresholds_hint: "额度降到每一档时推送一次，耗尽时再推送一次。三档须从高到低，可以相等；前两档也决定额度条和图表的颜色。",
+      thresholds_order: "阈值须满足：提醒 ≥ 偏低 ≥ 告急，未保存",
       window_5h: "5 小时窗口", window_7d: "7 天窗口",
       recovery_notify: "额度恢复时通知", reset_reminder: "重置前提醒",
       recovery_notify_5h: "额度恢复时通知 · 5 小时窗口", recovery_notify_7d: "额度恢复时通知 · 7 天窗口",
@@ -158,7 +158,6 @@
       due: "已到", minutes: "{0} 分钟", hours_minutes: "{0} 小时 {1} 分", days: "{0} 天",
       soon: "即将", in_time: "{0}后", just_now: "刚刚", ago: "{0}前",
       reset_now: "已重置",
-      window_5h: "5 小时", window_7d: "7 天",
       state_disabled: "已停用", state_starting: "启动中", state_running: "运行中",
       last_poll: "上次查询 {0}（{1}）", next_poll: "下次 {0}（{1}）",
       config_error: "配置无法解析，仍在使用上一份配置：{0}",
@@ -278,8 +277,8 @@
       test_some_failed: "Some channels failed the test", test_all_failed: "The test notification failed",
       thresholds: "Alert thresholds", remaining_le: "Remaining ≤",
       threshold_notice: "Notice", threshold_low: "Low", threshold_critical: "Critical",
-      thresholds_hint: "One notification when quota drops to each threshold, and one more when it runs out. The thresholds must fall from first to third; the first two also set the colors of the bars and the chart.",
-      thresholds_order: "The thresholds must fall from Notice to Low to Critical; not saved",
+      thresholds_hint: "One notification when quota drops to each threshold, and one more when it runs out. The thresholds must not increase from first to third; the first two also set the colors of the bars and the chart.",
+      thresholds_order: "Thresholds must satisfy Notice ≥ Low ≥ Critical; not saved",
       window_5h: "5-hour window", window_7d: "7-day window",
       recovery_notify: "Notify when quota recovers", reset_reminder: "Remind before resets",
       recovery_notify_5h: "Notify when quota recovers · 5-hour window", recovery_notify_7d: "Notify when quota recovers · 7-day window",
@@ -311,7 +310,6 @@
       due: "due", minutes: "{0} min", hours_minutes: "{0} h {1} min", days: "{0} days",
       soon: "soon", in_time: "in {0}", just_now: "just now", ago: "{0} ago",
       reset_now: "reset",
-      window_5h: "5 hours", window_7d: "7 days",
       state_disabled: "Disabled", state_starting: "Starting", state_running: "Running",
       last_poll: "last query {0} ({1})", next_poll: "next {0} ({1})",
       config_error: "The config cannot be parsed; the previous config stays in use: {0}",
@@ -2760,7 +2758,12 @@
     }
     // Turning MCP on without a key also saves a new key, since the plugin
     // does not listen without one.
-    if (top === "mcp_enabled" && patch.mcp_enabled && !rawConfig.mcp_key) patch.mcp_key = newMcpKey();
+    if (top === "mcp_enabled" && patch.mcp_enabled && !mcpKey().trim()) patch.mcp_key = newMcpKey();
+    // Save the same URL and listen defaults that config.Parse applies, so
+    // status comparisons do not wait on a trailing slash or an empty field.
+    if (top === "bark_url" || top === "cpa_base_url") patch[top] = patch[top].replace(/\/+$/, "");
+    if (top === "cpa_base_url" && !patch[top]) patch[top] = "http://127.0.0.1:8317";
+    if (top === "mcp_listen" && !patch[top]) patch[top] = "127.0.0.1:8318";
     // A fixed offset from older versions is removed so the time zone follows CPA.
     if (rawConfig.timezone_offset_hours !== undefined) patch.timezone_offset_hours = null;
     // The single switches are replaced by recovery_notify and reset_reminder.
@@ -2804,12 +2807,12 @@
 
   var THRESHOLDS = ["notice_threshold", "low_threshold", "critical_threshold"];
 
-  // The three thresholds must fall from the first to the third. They save
+  // The three thresholds must not increase from first to third. They save
   // together, so a value held back by the order saves once the order holds.
   function thresholdsInOrder() {
     var form = $("settings");
     var values = THRESHOLDS.map(function (name) { return form.elements[name].value === "" ? NaN : Number(form.elements[name].value); });
-    return values.every(isFinite) && values[0] > values[1] && values[1] > values[2];
+    return values.every(isFinite) && values[0] >= values[1] && values[1] >= values[2];
   }
 
   function saveField(event) {
@@ -2927,9 +2930,9 @@
   }
 
   function sameConfig(saved, shown) {
-    if (shown === undefined || saved === null || saved === undefined || saved === "") return true;
+    if (shown === undefined || saved === null || saved === undefined) return true;
     if (typeof saved === "string") {
-      return shown === "已设置" || String(shown).trim().toLowerCase() === saved.trim().toLowerCase();
+      return (saved !== "" && shown === "已设置") || String(shown).trim().toLowerCase() === saved.trim().toLowerCase();
     }
     if (typeof saved === "number") return Number(shown) === saved;
     if (typeof saved === "boolean") return !!shown === saved;
@@ -2945,7 +2948,9 @@
   function checkApplied() {
     var cfg = (status && status.config) || {};
     Object.keys(unapplied).forEach(function (name) {
-      if (sameConfig(unapplied[name], cfg[name])) delete unapplied[name];
+      // MCP keys are omitted, with only their presence reported separately.
+      var applied = name === "mcp_key" ? sameConfig(!!String(unapplied[name]).trim(), cfg.mcp_key_set) : sameConfig(unapplied[name], cfg[name]);
+      if (applied) delete unapplied[name];
     });
   }
 

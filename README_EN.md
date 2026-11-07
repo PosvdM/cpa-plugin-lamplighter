@@ -133,7 +133,7 @@ Title icons: 🟡 remaining fell to the first threshold (50% by default), 🔴 t
 
 ## Configuration
 
-All settings live under `plugins.configs.lamplighter` in `config.yaml`, and can also be edited under "设置" (Settings) on the management page. Settings on the page save as you change them: switches and checkboxes when clicked, text and numbers when you leave the field or press Enter. Changes apply without a restart.
+All settings live under `plugins.configs.lamplighter` in `config.yaml`. On the management page, use the "Quota | Settings" switch at the top to open the settings view. Switches and checkboxes save when clicked; text and numbers save when you leave the field or press Enter. Each field shows its save result. The three alert thresholds save together and must be in descending order, with equal values allowed. Changes apply without a restart.
 
 | Key | Default | Description |
 | --- | --- | --- |
@@ -233,7 +233,7 @@ plugins:
 
 MCP lets coding agents query quota through standard Streamable HTTP, independently of the client. The plugin listens on `127.0.0.1:8318` at `/mcp` and requires a dedicated Bearer key. The CPA management key does not authenticate this endpoint. Protocol versions `2025-03-26` and `2025-06-18` are supported; responses are JSON only, without SSE.
 
-Generate and save an MCP key in the settings, then enable MCP. Alternatively, configure these keys under `plugins.configs.lamplighter`:
+Enable MCP in the settings view; if no key is set, the page generates one in the same save. You can also generate a new key separately or configure these keys under `plugins.configs.lamplighter`:
 
 ```yaml
 mcp_enabled: true
@@ -381,27 +381,30 @@ plugins:
 
 ## Management page
 
-The page shows:
+Use the "Quota | Settings" switch at the top to change views. The browser remembers the last view. The quota view shows:
 
-- the quota windows of each account with reset times, data sources and plan, with buttons to refresh each account, name it or set its weight in the total;
+- the quota windows of each account with reset times, data sources and plan, with buttons to refresh each account, name it or set its weight in the total; drag a card by its handle or use its move-up and move-down buttons to save the order in `account_order`, which also sets the default chart order;
+- five color levels shared by quota bars and charts: full at a raw remaining value of 100%, empty at 0%, and high, medium and low between them, split by the first two alert thresholds; 99.6% does not use the full color even when rounded to 100% for display;
 - the next ignition, last result and failure protection state of each quota group, with an "ignite now" button; hidden while ignition is off;
 - a quota chart:
   - It shows either the 5-hour quota, over 1, 3, 6, 12, 24 or 26 hours (6 by default), or the 7-day quota, over 1, 4, 8 or 15 days, one month (from this date last month) or 36 days (8 days by default). Only the window kinds the accounts have are offered; windows of other lengths only show on the account cards. With `remember_chart_filters` on, the page keeps the last choices.
   - 1 and 3 hours and 1 and 4 days end now. Longer ranges end at the reset of the selected row's current window; 6 hours, for example, shows the current 5-hour window and the last hour of the previous one, with the time after now hatched. When the selected row has no reset, or its reset has passed (a 5-hour window no request has opened yet), these ranges also end now.
-  - The top part has one colored band per service, colored like the quota bars by the lowest reading so far in each cycle, in the order Claude, GPT, Gemini, Kimi, Grok, Fable, Claude / GPT by default or by lowest remaining. A service with several accounts shows their weighted total and expands into one row per account.
+  - The top part has one colored band per service, colored like the quota bars by the lowest reading so far in each cycle. The default order follows the account cards: each service takes the position of its first account, and groups within the same account keep their group order. You can also sort by lowest remaining. A service with several accounts shows their weighted total and expands into one row per account.
+  - A window the account no longer reports is marked "Inactive" until its last sample leaves the selected range. It gets a separate row and is excluded from totals and lowest-first ordering. Its curve ends at the last reading, without an even-pace line or projection.
   - The bottom part plots the selected row with its resets and ignition results, and an even-pace line for each cycle, from 100% when the cycle starts to 0% at its reset, so a curve above the line is using the quota slower than an even pace; for a total, it is the weighted mean of the accounts' even pace. Its header shows the current remaining, the even-pace value now and the difference between them, green above the pace and red below. When the chart ends now, these three values also appear right of the plot, at the ends of the curve and the even-pace line.
   - When the chart ends at a reset, a projection starts now: if the quota runs out first, the time (and the date for the 7-day quota) is marked on the time axis; if the reset comes first, what will be left is marked right of the plot.
     - The 5-hour quota is projected at the current rate, showing where use at that rate would lead. The rate comes from the latest stretch of steady use in this cycle, so in the first minutes of heavy use the projected time comes too early.
     - The 7-day quota is projected at this cycle's daily average: what the cycle has used so far over the time since it began, including the time without use. In the first day or two of a cycle the projection is less accurate.
   - The page reads the status every 30 seconds and updates the chart when there is new data; while the pointer is over the chart, the update waits until it leaves.
-- recent events in columns for time, type, quota group and detail;
-- the settings form at the bottom, folded until you click "设置" (Settings), with a test notification button in the notification settings. The test goes to every configured channel and shows the result of each; it uses the settings the plugin has applied, so after changing a setting, wait a few seconds before testing. An empty ignition model field shows the model the next ignition will use in its hint; for Antigravity, the model of the Gemini group. Services that cannot be ignited show "No ignition". The model list is read when the plugin starts, when `cpa_base_url` or `models_api_key` changes and for every ignition, so a model newly listed by CPA shows after the next ignition, which already uses it.
+- recent events in columns for time, type, quota group and detail.
+
+The settings view contains notification, ignition, provider and MCP configuration. "Send test" in the notification settings waits for pending saves and then up to about 10 seconds for the plugin to report the applied settings. On timeout it warns that older settings may still be in use, then sends to every configured channel and shows each result. An empty ignition model field shows the model the next ignition will use in its hint; for Antigravity, the model of the Gemini group. Services that cannot be ignited show "No ignition". The model list is read when the plugin starts, when `cpa_base_url` or `models_api_key` changes and for every ignition, so a model newly listed by CPA shows after the next ignition, which already uses it.
 
 The page follows the language of the CPA Management Center: Chinese for Simplified or Traditional Chinese, English for every other language.
 
 ## Security and risk
 
-- The plugin reads the access token from the credential file into memory only to query quota, and never writes it to logs or disk. The page and its API require the CPA management key.
+- The plugin reads the access token from the credential file into memory only to query quota, and never writes it to logs or disk. The page's data API requires the CPA management key; MCP uses its own key.
 - `bark_url`, `webhook`, `models_api_key` and `mcp_key` are stored in plain text in CPA's `config.yaml`, visible to anyone with the management key.
 - Each service restricts the use of subscription accounts through third-party tools in its own way. Using accounts through CPA, sending scheduled ignition requests and querying quota may all put accounts at risk. Use it at your own discretion.
 
