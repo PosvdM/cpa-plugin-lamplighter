@@ -37,8 +37,8 @@ type WindowState struct {
 	EndedReset string `json:"ended_reset,omitempty"`
 	// PendingRecovery is a recovery notification not delivered yet.
 	PendingRecovery *PendingRecovery `json:"pending_recovery,omitempty"`
-	// Rebase is set when the plan of the account changed: the next reading
-	// only records a new baseline, as for a window seen for the first time.
+	// Rebase 表示套餐变化或主动查询确认窗口缺席；窗口返回后的首次读数
+	// 只记录新基线。窗口是否允许被动更新由 GroupState.ActiveWindows 决定。
 	Rebase bool `json:"rebase,omitempty"`
 }
 
@@ -56,9 +56,11 @@ type PendingRecovery struct {
 
 // GroupState holds the notification baselines of one quota group.
 type GroupState struct {
-	Label    string                  `json:"label,omitempty"`
-	LastSeen int64                   `json:"last_seen,omitempty"`
-	Windows  map[string]*WindowState `json:"windows"`
+	// ActiveWindows 保存最近一次成功主动查询确认的窗口；nil 表示尚未确认。
+	ActiveWindows []string                `json:"active_windows"`
+	Label         string                  `json:"label,omitempty"`
+	LastSeen      int64                   `json:"last_seen,omitempty"`
+	Windows       map[string]*WindowState `json:"windows"`
 }
 
 // Observation is the last observed 5-hour reset of an ignition target.

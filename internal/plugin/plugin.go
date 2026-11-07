@@ -105,6 +105,8 @@ func (p *Plugin) Shutdown() {
 }
 
 func (p *Plugin) status() engine.Status {
+	p.lifecycleMu.Lock()
+	defer p.lifecycleMu.Unlock()
 	status := p.engine.Status()
 	status.MCP = p.mcp.State()
 	return status
@@ -124,9 +126,10 @@ func (p *Plugin) handle(method string, request []byte) ([]byte, error) {
 		cfg, err := config.Parse(req.ConfigYAML)
 		p.lifecycleMu.Lock()
 		if !p.stopped {
-			p.engine.Configure(cfg, err)
+			revision := p.engine.Configure(cfg, err)
 			if err == nil {
 				p.mcp.Configure(cfg.MCPEnabled, cfg.MCPListen, cfg.MCPKey)
+				p.engine.MCPConfigured(revision)
 			}
 			p.once.Do(p.engine.Start)
 		}
@@ -172,6 +175,7 @@ func (p *Plugin) registration() registration {
 			Author:           "PosvdM",
 			GitHubRepository: repository,
 			ConfigFields: []pluginapi.ConfigField{
+				field("config_token", pluginapi.ConfigFieldTypeString, "配置应用确认令牌，可为空 / Configuration acknowledgment token; may be empty"),
 				field("bark_url", pluginapi.ConfigFieldTypeString, "Bark 推送地址，到 device key 为止；为空时不通过 Bark 推送 / Bark push URL up to the device key; empty disables Bark"),
 				field("bark_group", pluginapi.ConfigFieldTypeString, "Bark 通知分组 / Bark notification group"),
 				field("webhook", pluginapi.ConfigFieldTypeObject, "自定义 webhook：url、method、headers、body、success_json；url 为空时不启用 / Custom webhook: url, method, headers, body, success_json; empty url disables it"),

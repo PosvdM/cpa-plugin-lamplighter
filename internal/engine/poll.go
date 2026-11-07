@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -61,8 +62,6 @@ type GroupView struct {
 	SourceLabel string
 	Label       string
 	Windows     []WindowView
-	// active is set once an active query has described the group.
-	active bool
 	// rolling and startKnown copy the ignition observation for model-safe reads.
 	rolling    bool
 	startKnown bool
@@ -591,12 +590,26 @@ func (e *Engine) applyGroups(ctx context.Context, cfg config.Config, cred *Cred,
 		previous[key] = append([]WindowView(nil), group.Windows...)
 		group.SourceLabel = rg.SourceLabel
 		group.Label = labelFor(group.SourceLabel, cred)
+		var activeWindows []string
+		if e.state != nil {
+			activeWindows = e.state.Group(key).ActiveWindows
+		}
 		if source == quota.SourceActive {
 			group.Windows = group.Windows[:0]
-			group.active = true
+			activeWindows = make([]string, 0, len(rg.Windows))
+			for _, w := range rg.Windows {
+				activeWindows = append(activeWindows, w.ID)
+			}
+			if e.state != nil {
+				e.state.Group(key).ActiveWindows = activeWindows
+			}
 		}
 		stale := 0
 		for _, w := range rg.Windows {
+			if source == quota.SourcePassive && activeWindows != nil && !slices.Contains(activeWindows, w.ID) {
+				stale++
+				continue
+			}
 			view := WindowView{Window: w, Source: source, ObservedAt: now, ReadAt: readAt}
 			replaced := false
 			for i := range group.Windows {
@@ -610,7 +623,7 @@ func (e *Engine) applyGroups(ctx context.Context, cfg config.Config, cred *Cred,
 					break
 				}
 			}
-			if !replaced && (source == quota.SourceActive || !group.active) {
+			if !replaced {
 				group.Windows = append(group.Windows, view)
 			}
 		}

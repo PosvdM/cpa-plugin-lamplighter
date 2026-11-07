@@ -313,14 +313,15 @@ type AccountStatus struct {
 
 // Status is the response of the status endpoint.
 type Status struct {
-	MCP         mcp.State `json:"mcp"`
-	Version     string    `json:"version"`
-	Running     bool      `json:"running"`
-	Enabled     bool      `json:"enabled"`
-	ConfigError string    `json:"config_error,omitempty"`
-	LockError   string    `json:"lock_error,omitempty"`
-	ModelsError string    `json:"models_error,omitempty"`
-	ListError   string    `json:"list_error,omitempty"`
+	ConfigAppliedToken string    `json:"config_applied_token"`
+	MCP                mcp.State `json:"mcp"`
+	Version            string    `json:"version"`
+	Running            bool      `json:"running"`
+	Enabled            bool      `json:"enabled"`
+	ConfigError        string    `json:"config_error,omitempty"`
+	LockError          string    `json:"lock_error,omitempty"`
+	ModelsError        string    `json:"models_error,omitempty"`
+	ListError          string    `json:"list_error,omitempty"`
 	// NotifyError is the reason the webhook settings were not applied.
 	NotifyError string `json:"notify_error,omitempty"`
 	DataDir     string `json:"data_dir"`
@@ -410,25 +411,26 @@ func (e *Engine) Status() Status {
 		cfg.Webhook.Headers = headers
 	}
 	status := Status{
-		Version:     e.version,
-		Running:     e.running,
-		Enabled:     e.enabled,
-		ConfigError: e.cfgErr,
-		LockError:   e.lockErr,
-		ModelsError: e.modelsErr,
-		NextModels:  maps.Clone(e.nextModels),
-		ListError:   e.pollErrs[""],
-		NotifyError: e.notifyErr,
-		Language:    notify.NormalizeLang(e.lang),
-		DataDir:     e.dataDir,
-		Timezone:    e.cfg.Location().String(),
-		Now:         e.now().UTC(),
-		LastPoll:    e.lastPoll,
-		NextPoll:    e.nextPoll,
-		Config:      cfg,
-		Targets:     append([]TargetView{}, e.targets...),
-		Providers:   providerInfos(),
-		GroupOrder:  providers.GroupOrder(),
+		ConfigAppliedToken: e.configAppliedToken,
+		Version:            e.version,
+		Running:            e.running,
+		Enabled:            e.enabled,
+		ConfigError:        e.cfgErr,
+		LockError:          e.lockErr,
+		ModelsError:        e.modelsErr,
+		NextModels:         maps.Clone(e.nextModels),
+		ListError:          e.pollErrs[""],
+		NotifyError:        e.notifyErr,
+		Language:           notify.NormalizeLang(e.lang),
+		DataDir:            e.dataDir,
+		Timezone:           e.cfg.Location().String(),
+		Now:                e.now().UTC(),
+		LastPoll:           e.lastPoll,
+		NextPoll:           e.nextPoll,
+		Config:             cfg,
+		Targets:            append([]TargetView{}, e.targets...),
+		Providers:          providerInfos(),
+		GroupOrder:         providers.GroupOrder(),
 	}
 	status.LatestVersion, status.ReleaseURL = e.latest.Version, e.latest.URL
 	_, status.UTCOffset = e.now().In(e.cfg.Location()).Zone()
@@ -531,6 +533,7 @@ type Series struct {
 	Provider    string       `json:"provider"`
 	AuthIndex   string       `json:"auth_index"`
 	Points      [][3]float64 `json:"points"` // [unix seconds, remaining, 1 for passive]
+	Resets      [][2]int64   `json:"resets"` // [sample time, scheduled reset; 0 means unknown]
 }
 
 // HistoryResponse is the response of the history endpoint.
@@ -585,6 +588,10 @@ func (e *Engine) HistoryRange(name, kind string) (HistoryResponse, error) {
 	return e.History(RangeSpan(name, e.now(), e.config().Location()), kind)
 }
 
+func (e *Engine) mcpHistoryRange(ctx context.Context, name, kind string, accept func(store.Record) bool) (HistoryResponse, error) {
+	return e.historyContext(ctx, RangeSpan(name, e.now(), e.config().Location()), kind, true, accept)
+}
+
 // historyBucket returns the bucket length in seconds for a span. Spans up to
 // 2 days keep every sample; longer spans use 10 minutes, then 15 minutes
 // over 4 days, 30 minutes over 8 days and one hour over 15 days, so that a
@@ -617,6 +624,13 @@ const historyLead = 24 * time.Hour
 // With kind "5h" or "7d" only windows of that kind are returned, otherwise
 // all windows.
 func (e *Engine) History(span time.Duration, kind string) (HistoryResponse, error) {
+	return e.historyContext(context.Background(), span, kind, false, nil)
+}
+
+func (e *Engine) historyContext(ctx context.Context, span time.Duration, kind string, bounded bool, accept func(store.Record) bool) (HistoryResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return HistoryResponse{}, err
+	}
 	e.mu.Lock()
 	dataDir := e.dataDir
 	labels := map[string]GroupView{}
@@ -630,7 +644,16 @@ func (e *Engine) History(span time.Duration, kind string) (HistoryResponse, erro
 		return resp, nil
 	}
 	history := &store.History{Dir: dataDir + "/history"}
-	records, err := history.Query(resp.From.Add(-historyLead), now)
+	var records []store.Record
+	var err error
+	if bounded {
+		// MCP 保留有限桶用于预测及响应，不构造管理图表的重置事件。
+		bucket := max(resp.Bucket, max(1, int64(span.Seconds())/2000))
+		records, err = history.QuerySampled(ctx, resp.From.Add(-historyLead), now, bucket, accept)
+	} else {
+		// 重置状态可能在范围之前持续多天，因此扫描全部保留记录。
+		records, err = history.QueryContext(ctx, time.Time{}, now)
+	}
 	if err != nil {
 		return resp, err
 	}
@@ -638,8 +661,34 @@ func (e *Engine) History(span time.Duration, kind string) (HistoryResponse, erro
 	series := map[string]*Series{}
 	before := map[string][3]float64{}
 	var order []string
+	resetEvents := map[string][][2]int64{}
+	knownReset := map[string]bool{}
+	previousReset := map[string]int64{}
 	for _, record := range records {
+		if err := ctx.Err(); err != nil {
+			return resp, err
+		}
 		key := record.Group + "|" + record.Window
+		if !bounded && record.Kind == "s" {
+			changes := resetEvents[key]
+			if record.Reset != 0 {
+				knownReset[key] = true
+			}
+			previous, seen := previousReset[key]
+			previousReset[key] = record.Reset
+			if !seen || (record.Reset == 0) != (previous == 0) || absInt64(record.Reset-previous) > 60 {
+				change := [2]int64{record.Time, record.Reset}
+				if record.Time < resp.From.Unix() {
+					changes = [][2]int64{change}
+				} else {
+					changes = append(changes, change)
+				}
+				resetEvents[key] = changes
+			}
+		}
+		if record.Time < resp.From.Add(-historyLead).Unix() {
+			continue
+		}
 		passive := 0.0
 		if record.Source == string(quota.SourcePassive) {
 			passive = 1
@@ -703,6 +752,10 @@ func (e *Engine) History(span time.Duration, kind string) (HistoryResponse, erro
 	for _, key := range order {
 		if filter && series[key].Kind != kind {
 			continue
+		}
+		series[key].Resets = [][2]int64{}
+		if knownReset[key] {
+			series[key].Resets = append(series[key].Resets, resetEvents[key]...)
 		}
 		resp.Series = append(resp.Series, *series[key])
 	}
