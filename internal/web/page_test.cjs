@@ -18,7 +18,7 @@ function context(names, globals) {
 }
 
 test("a save counts as applied only by its own config token or a later one", () => {
-  const ctx = context(["tokenApplied", "checkApplied"], { APPLY_TIMEOUT: 15000, status: { config: { bark_url: "已设置" } } });
+  const ctx = context(["tokenApplied", "checkApplied"], { status: { config: { bark_url: "已设置" } } });
   const tokens = ["a1", "b2", "c3"];
   assert.equal(ctx.tokenApplied(tokens, "b2", "a1"), false);
   assert.equal(ctx.tokenApplied(tokens, "b2", "b2"), true);
@@ -31,14 +31,14 @@ test("a save counts as applied only by its own config token or a later one", () 
 
   const settled = [];
   ctx.savedTokens = tokens;
-  ctx.applyWaits = [
-    { token: "b2", since: Date.now(), done: (v) => settled.push(["b2", v]) },
-    { token: "c3", since: Date.now(), done: (v) => settled.push(["c3", v]) },
-    { token: "c3", since: Date.now() - 20000, done: (v) => settled.push(["old", v]) },
-  ];
+  const wait = (token) => {
+    const w = { token, done: (v) => { settled.push([token, v]); ctx.applyWaits = ctx.applyWaits.filter((x) => x !== w); } };
+    return w;
+  };
+  ctx.applyWaits = [wait("b2"), wait("c3")];
   ctx.status.config_applied_token = "b2";
   ctx.checkApplied();
-  assert.deepEqual(settled, [["b2", true], ["old", false]]);
+  assert.deepEqual(settled, [["b2", true]]);
   assert.equal(ctx.applyWaits.length, 1);
   ctx.status.config_applied_token = "c3";
   ctx.checkApplied();
@@ -157,4 +157,68 @@ test("window translations have no duplicate definitions", () => {
   assert.equal((source.match(/window_5h:/g) || []).length, 2);
   assert.equal((source.match(/window_7d:/g) || []).length, 2);
   assert.match(source, /window_5h: "5-hour window"/);
+});
+
+test("a queued save keeps the value the user chose, whatever the field shows later", () => {
+  const input = { name: "mcp_enabled", value: "on", type: "checkbox", checked: false, getAttribute: () => null };
+  const ctx = context(["topKey", "setPath", "buildPatch", "mcpKey"], {
+    rawConfig: { mcp_key: "llmcp_x" }, status: { config: {} },
+    $: () => ({ elements: [input] }),
+    newMcpKey: () => "llmcp_generated",
+  });
+  // The user turned MCP off; a late confirmation of an earlier save then
+  // refilled the switch as on.
+  const intent = { inputs: [input], states: [{ value: "on", checked: false }] };
+  input.checked = true;
+  assert.deepEqual(plain(ctx.buildPatch("mcp_enabled", intent)), { mcp_enabled: false });
+  assert.deepEqual(plain(ctx.buildPatch("mcp_enabled")), { mcp_enabled: true });
+});
+
+test("the confirmation deadline ends a wait even when no status arrives", async () => {
+  const ctx = context(["tokenApplied", "whenApplied", "checkApplied"], {
+    APPLY_TIMEOUT: 40, setTimeout, clearTimeout, Promise,
+    savedTokens: ["a1", "b2"], applyWaits: [], status: { config_applied_token: "old" },
+    // The status requests hang: nothing calls checkApplied.
+    pollApplied: () => {},
+  });
+  const started = Date.now();
+  assert.equal(await ctx.whenApplied("a1"), false);
+  assert.ok(Date.now() - started < 1000);
+  assert.equal(ctx.applyWaits.length, 0);
+  // The token reported after the deadline settles nothing.
+  ctx.status.config_applied_token = "a1";
+  ctx.checkApplied();
+  assert.equal(ctx.applyWaits.length, 0);
+
+  ctx.status.config_applied_token = "old";
+  const pending = ctx.whenApplied("b2");
+  assert.equal(ctx.applyWaits.length, 1);
+  ctx.status.config_applied_token = "b2";
+  ctx.checkApplied();
+  assert.equal(await pending, true);
+  assert.equal(ctx.applyWaits.length, 0);
+  assert.equal(await ctx.whenApplied("a1"), true);
+});
+
+test("a current window whose reset became unknown ends the even pace now", () => {
+  const ctx = pace();
+  const L = WEEK, now = 5000 * DAY, x = now + 3 * DAY;
+  const history = [[now - 2 * DAY, x]];
+  // Reset unknown in the status: the line stops now, including the future.
+  let segs = ctx.paceSegments(history, L, 0, now);
+  assert.ok(ctx.paceAt(segs, L, now - 1) > 0);
+  assert.equal(ctx.paceAt(segs, L, now + HOUR), null);
+  assert.equal(ctx.paceAt(segs, L, x - 1), null);
+  // Without the window in the status, the history holds.
+  segs = ctx.paceSegments(history, L, null, now);
+  assert.ok(ctx.paceAt(segs, L, now + HOUR) > 0);
+  segs = ctx.paceSegments(history, L, undefined, now);
+  assert.ok(ctx.paceAt(segs, L, now + HOUR) > 0);
+  // Already unknown in the history: nothing more to add.
+  assert.deepEqual(plain(ctx.paceSegments([[now - DAY, 0]], L, 0, now)), []);
+  // A total breaks with the account whose reset became unknown.
+  const a = { weight: 1, segments: ctx.paceSegments(history, L, 0, now) };
+  const b = { weight: 1, segments: ctx.paceSegments([[now - DAY, now + 6 * DAY]], L, now + 6 * DAY, now) };
+  assert.ok(ctx.pooledPace([a, b], L, now - 1) > 0);
+  assert.equal(ctx.pooledPace([a, b], L, now + HOUR), null);
 });
