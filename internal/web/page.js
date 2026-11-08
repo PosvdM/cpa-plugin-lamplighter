@@ -742,8 +742,9 @@
     return node;
   }
 
-  function renderMaskButton() {
-    var button = $("mask-toggle");
+  // The header button and the eye buttons beside the screenshot buttons all
+  // switch the same masking, so a screenshot needs no trip to the top.
+  function drawMaskButton(button) {
     var label = translate(masked ? "mask_off" : "mask_on");
     button.setAttribute("aria-pressed", masked ? "true" : "false");
     button.setAttribute("title", label);
@@ -754,6 +755,16 @@
     icon.appendChild(svg("circle", { cx: 8, cy: 8, r: 2.1 }));
     if (masked) icon.appendChild(svg("path", { d: "M2.5 2.5l11 11" }));
     button.appendChild(icon);
+    return button;
+  }
+
+  function renderMaskButton() {
+    Array.prototype.forEach.call(document.querySelectorAll(".mask-toggle"), drawMaskButton);
+  }
+
+  // An eye button for beside a screenshot button; screenshots leave it out.
+  function maskButton() {
+    return drawMaskButton(el("button", { type: "button", class: "btn btn-ghost btn-icon mask-toggle no-snapshot", onclick: toggleMask }));
   }
 
   function toggleMask() {
@@ -845,6 +856,11 @@
     button.id = "snapshot-cards";
     if (old) old.parentNode.replaceChild(button, old);
     else $("refresh-all").parentNode.insertBefore(button, $("refresh-all"));
+    if (!$("mask-cards")) {
+      var eye = maskButton();
+      eye.id = "mask-cards";
+      button.parentNode.insertBefore(eye, button);
+    }
   }
 
   // A camera button that copies a screenshot of the nodes nodesOf returns.
@@ -2278,7 +2294,7 @@
     head.appendChild(el("span", { class: "detail-name" }, (row.orphan ? [el("span", { class: SENSITIVE, text: row.name })] : maskedNodes(row.name)).concat([" · " + translate(historyWindow === "5h" ? "quota_5h" : "quota_7d")])));
     if (row.inactive) head.appendChild(badge("muted", translate("inactive")));
     head.appendChild(el("span", { class: "muted" + (group ? "" : " " + SENSITIVE), text: group ? translate("pooled_note", row.children.length) : row.sub }));
-    head.appendChild(snapshotButton("snapshot_detail", function () { return [head, box]; }));
+    head.appendChild(el("span", { class: "detail-tools" }, [maskButton(), snapshotButton("snapshot_detail", function () { return [head, box]; })]));
     if (row.inactive) {
       head.appendChild(el("span", { class: "detail-stat" }, [document.createTextNode(translate("stat_last")),
         el("strong", { text: pct(row.last) + " · " + fmtDateTime(unixDate(row.lastAt)) })]));

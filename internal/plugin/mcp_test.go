@@ -74,10 +74,9 @@ func TestMCPLifecycleAndEngineProtocol(t *testing.T) {
 		if code != 200 || !strings.Contains(body, `"content"`) || strings.Contains(body, `"error":`) {
 			t.Fatalf("%s %d %s", tool, code, body)
 		}
-		if tool == "refresh_quotas" && !strings.Contains(body, `"isError":true`) {
-			t.Fatalf("startup refresh should report not running: %s", body)
+		if !strings.Contains(body, `\"state\":\"starting\"`) || strings.Contains(body, `"isError":true`) {
+			t.Fatalf("%s during startup should report starting: %s", tool, body)
 		}
-		t.Logf("real engine %s: %d (refresh during startup returns bounded tool error)", tool, code)
 	}
 	// Invalid YAML must preserve both the effective config and the old listener.
 	configure("mcp_enabled: [invalid\n")

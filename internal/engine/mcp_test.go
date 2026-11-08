@@ -34,6 +34,9 @@ func TestMCPDTOsAndTools(t *testing.T) {
 	}
 	apply("1", 50, true)
 	apply("2", 20, false)
+	e.mu.Lock()
+	e.running, e.lastPoll = true, c.t
+	e.mu.Unlock()
 	b := NewMCPBackend(e)
 	result, err := b.CallTool(context.Background(), "list_quotas", map[string]string{"provider": "codex", "model": "alias-with-unknown-route"})
 	if err != nil {

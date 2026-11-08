@@ -42,17 +42,70 @@ func describeTime(t, now time.Time) *modelTime {
 	}
 	return &modelTime{t.UTC().Format(time.RFC3339), relative}
 }
-func accountLabel(a AccountStatus, index int) string {
+// maskEmail keeps the last two characters of the email user name, the same
+// characters the page uses to tell accounts apart, such as "***rk". The
+// domain and the length of the user name are left out.
+func maskEmail(email string) string {
+	local, _, _ := strings.Cut(email, "@")
+	runes := []rune(local)
+	if len(runes) > 2 {
+		runes = runes[len(runes)-2:]
+	}
+	return "***" + string(runes)
+}
+
+// baseAccountLabel names an account by the first line of its note, else by
+// its masked email, else by its position.
+func baseAccountLabel(a AccountStatus, index int) string {
 	if name := strings.TrimSpace(strings.SplitN(a.Note, "\n", 2)[0]); name != "" {
 		return name
 	}
 	if a.Email != "" {
-		return a.Email
+		return maskEmail(a.Email)
 	}
 	return fmt.Sprintf("account-%d", index+1)
 }
-func matchesAccount(a AccountStatus, index int, filter string) bool {
-	return filter == "" || filter == accountLabel(a, index) || a.Email != "" && filter == a.Email
+
+// accountLabels returns the label of each account. Accounts whose base
+// labels are equal get "#1", "#2" and so on, so that every label names one
+// account.
+func accountLabels(accounts []AccountStatus) []string {
+	base := make([]string, len(accounts))
+	count := map[string]int{}
+	for i, a := range accounts {
+		base[i] = baseAccountLabel(a, i)
+		count[base[i]]++
+	}
+	taken := map[string]bool{}
+	for _, label := range base {
+		if count[label] == 1 {
+			taken[label] = true
+		}
+	}
+	out := make([]string, len(accounts))
+	next := map[string]int{}
+	for i, label := range base {
+		if count[label] == 1 {
+			out[i] = label
+			continue
+		}
+		for {
+			next[label]++
+			candidate := label + "#" + strconv.Itoa(next[label])
+			if !taken[candidate] {
+				out[i] = candidate
+				taken[candidate] = true
+				break
+			}
+		}
+	}
+	return out
+}
+
+// matchesAccount accepts the label, the shared base label of accounts with
+// the same name, and the full email, which only the caller can know.
+func matchesAccount(a AccountStatus, index int, label, filter string) bool {
+	return filter == "" || filter == label || filter == baseAccountLabel(a, index) || a.Email != "" && filter == a.Email
 }
 func safeQueryError(a AccountStatus) string {
 	if a.Error == "" {
@@ -69,16 +122,51 @@ func safeQueryError(a AccountStatus) string {
 }
 func selectedAccounts(s Status, args map[string]string) map[string]string {
 	out := map[string]string{}
+	labels := accountLabels(s.Accounts)
 	for i, a := range s.Accounts {
-		if (args["provider"] == "" || args["provider"] == a.Provider) && matchesAccount(a, i, args["account"]) {
-			out[a.AuthIndex] = accountLabel(a, i)
+		if (args["provider"] == "" || args["provider"] == a.Provider) && matchesAccount(a, i, labels[i], args["account"]) {
+			out[a.AuthIndex] = labels[i]
 		}
 	}
 	return out
 }
+
+// startupRetrySeconds is the retry delay reported while the engine starts.
+// The engine waits startupDelay before it runs and then polls every account
+// once.
+const startupRetrySeconds = 30
+
+// notReady returns the result for a tool call that arrives before the
+// engine has quota data: while it waits after CPA starts, before its first
+// full poll, and while the plugin is disabled. Empty lists at that time
+// would read as accounts without quota. nil means the engine is ready. A
+// failed credential listing counts as ready; list_quotas then shows no
+// accounts.
+func (b *MCPBackend) notReady(needPoll bool) map[string]any {
+	e := b.engine
+	e.mu.Lock()
+	enabled, running := e.enabled, e.running
+	polled := !e.lastPoll.IsZero() || e.pollErrs[""] != ""
+	e.mu.Unlock()
+	switch {
+	case !enabled:
+		return map[string]any{"ready": false, "state": "disabled", "certain": false, "note": "Lamplighter is disabled in the CPA config and reports no quota data."}
+	case !running || needPoll && !polled:
+		return map[string]any{"ready": false, "state": "starting", "certain": false, "retry_after_seconds": startupRetrySeconds, "note": "Lamplighter is starting and has not loaded quota data yet; this is not an empty quota list. Retry after retry_after_seconds."}
+	}
+	return nil
+}
+
 func (b *MCPBackend) CallTool(ctx context.Context, name string, args map[string]string) (any, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	switch name {
+	case "list_quotas", "get_quota_history", "get_quota_events", "refresh_quotas":
+		// A refresh only needs the running engine; it is itself a poll.
+		if result := b.notReady(name != "refresh_quotas"); result != nil {
+			return result, nil
+		}
 	}
 	switch name {
 	case "list_quotas":
@@ -540,7 +628,7 @@ func (b *MCPBackend) refresh(ctx context.Context, args map[string]string) (any, 
 	if args["account"] != "" {
 		selected := selectedAccounts(s, args)
 		if len(selected) != 1 {
-			return nil, errors.New("Account must match exactly one display name or email")
+			return nil, errors.New("Account must match exactly one account label or email")
 		}
 		for id := range selected {
 			auth = id
@@ -603,9 +691,10 @@ func (b *MCPBackend) events(ctx context.Context, args map[string]string) (any, e
 	}
 	s := b.engine.Status()
 	labels := map[string][2]string{}
+	accountNames := accountLabels(s.Accounts)
 	for i, a := range s.Accounts {
 		for _, g := range a.Groups {
-			labels[g.Key] = [2]string{accountLabel(a, i), g.SourceLabel}
+			labels[g.Key] = [2]string{accountNames[i], g.SourceLabel}
 		}
 	}
 	out := []any{}

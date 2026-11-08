@@ -49,6 +49,7 @@ func largeHistoryEngine(t *testing.T) *Engine {
 	now := time.Now().UTC()
 	e := New(Options{Now: func() time.Time { return now }})
 	e.dataDir = t.TempDir()
+	e.running, e.lastPoll = true, now
 	e.creds["1"] = &Cred{AuthIndex: "1", Provider: "codex", Name: "history.json", Email: "history@example.com"}
 	e.groups["codex:1:gpt"] = &GroupView{Key: "codex:1:gpt", AuthIndex: "1", Provider: "codex", SourceLabel: "GPT", startKnown: true,
 		Windows: []WindowView{{Window: quota.Window{ID: quota.WindowFiveHour, Remaining: 50, Reset: now.Add(time.Hour)}, ObservedAt: now, Source: quota.SourceActive}}}

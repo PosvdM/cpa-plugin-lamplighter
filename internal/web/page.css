@@ -189,9 +189,11 @@ header .update path { fill: none; stroke: currentColor; stroke-width: 1.8; strok
 /* The switch between the quota and settings views, below the header. */
 .view-nav { margin: -4px 0 16px; display: flex; align-items: center; gap: 8px; }
 
-/* Account masking: the eye button beside the view switch blurs the text
-   that names accounts (.account-sensitive). */
+/* Account masking: the eye buttons beside the view switch and the
+   screenshot buttons blur the text that names accounts
+   (.account-sensitive). */
 .mask-toggle { padding: 6px 8px; color: var(--text-secondary); }
+.mask-toggle.no-snapshot { padding: 4px 6px; }
 .mask-toggle svg { display: block; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .mask-toggle[aria-pressed="true"] { background: var(--bg-tertiary); border-color: var(--border-color); color: var(--text-primary); }
 .mask-accounts .account-sensitive { filter: blur(5px); }
@@ -199,8 +201,8 @@ header .update path { fill: none; stroke: currentColor; stroke-width: 1.8; strok
 /* Screenshot buttons, and the off-screen copy measured for a screenshot. */
 .btn.snapshot { padding: 4px 6px; }
 .btn.snapshot svg { display: block; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linejoin: round; }
-.block-head .btn.snapshot { margin-left: auto; }
-.detail-head .btn.snapshot { order: 1; margin-left: auto; align-self: center; }
+.block-head .mask-toggle { margin-left: auto; }
+.detail-tools { order: 1; margin-left: auto; align-self: center; display: flex; gap: 4px; }
 .snapshot-host { position: fixed; left: -100000px; top: 0; pointer-events: none; }
 /* The frame of a screenshot. It applies both off screen, where page.js
    measures it, and in the image, so the two have the same size. */
