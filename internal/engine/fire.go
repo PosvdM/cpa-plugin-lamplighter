@@ -222,6 +222,13 @@ func (e *Engine) igniteTarget(ctx context.Context, cfg config.Config, t target, 
 	}
 	now := e.now()
 	if err != nil {
+		if manual {
+			// Keep the automatic retry and circuit state unchanged. Without
+			// retry params the page displays the stored failure detail.
+			e.addEventDetail("warn", "ignite_failed", t.group.Key, t.group.Label,
+				err.Error(), fmt.Sprintf("%s 手动点火失败：%v", t.group.Label, err), nil)
+			return err
+		}
 		outcome := schedule.RecordFailure(ts, now, err)
 		e.dirty = true
 		if outcome.CircuitOpened {

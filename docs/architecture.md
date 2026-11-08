@@ -277,7 +277,15 @@ Do not think, reason, deliberate, use tools, or perform any other task. Reply wi
 
 ### 流式执行与取消
 
-`engine.executeStream` 同步打开模型流，取得 `stream_id` 后逐块读取；响应头保留给 `confirm`。`stream_parse.go` 按宿主接口的实际格式解析：OpenAI Chat Completions（Antigravity）每个 chunk 是 JSON 对象，HTTP handler 才会添加 `data:` 和 `[DONE]`；Responses 和 Claude 的 chunk 已带 SSE。SSE 允许跨 chunk 的行、事件和 UTF-8 字符，单行及单事件缓冲各最多 1 MiB，单个 Chat JSON chunk 同样限为 1 MiB。首次非空文本、可见 reasoning 或工具参数增量触发 `onOutput`，心跳、角色、生命周期和加密 reasoning 不触发。
+`engine.executeStream` 同步打开模型流，取得 `stream_id` 后逐块读取；响应头保留给 `confirm`。`stream_parse.go` 按协议固定格式假设：
+
+- `openai`（Antigravity）：每个 chunk 是原始 JSON 对象，直接解析；HTTP handler 才会添加 `data:` 和 `[DONE]`。
+- `claude`：只按标准 SSE 字节流解析，保留跨 chunk 的行内容，以空行派发事件；不丢弃未完成的 `event:` 或注释行，也不提前派发无换行的 `data:`。
+- `openai-response`（Codex）：尚未见到换行、且行缓冲为空时，不含 `\n` 的 chunk 是 CPA Scanner 去掉行尾换行后的完整单行。`event:` 和注释作为独立行忽略；`data:` 组成完整 JSON 或 `[DONE]` 时立即派发，因为 CPA 会丢弃空行。含 `\n` 的 chunk 按标准 SSE 字节流处理，并为该流永久锁定字节流模式；后续无换行的 chunk 只作为碎片保留。
+
+**Codex 格式限制**：如果 CPA 的 Codex 路径以后改为发送尚未包含换行的字节流碎片，首批碎片会被误判为 Scanner 完整单行；需要随 CPA 的格式变化调整解析器。
+
+标准 SSE 允许跨 chunk 的行、事件、CRLF 和 UTF-8 字符，单行及单事件缓冲各最多 1 MiB，单个 Chat JSON chunk 同样限为 1 MiB。首次非空文本、可见 reasoning 或工具参数增量触发 `onOutput`，心跳、角色、生命周期和加密 reasoning 不触发。
 
 独立 watchdog 从首次输出的单调时钟时间起计时 2 秒（`ignitionOutputWindow`），到期调用 `host.model.stream_close`。这个回调取消 CPA 的上游 HTTP context，因此下一次 `stream_read` 阻塞时仍可关闭。自然终止、读取或解析错误、调用 context 取消及插件停止时同样释放流。读路径和 watchdog 通过互斥锁争取单一终止所有权，只有仍活动的流能被 watchdog 截断；已确定的完成或错误不会被迟到的 deadline、取消或 watchdog panic 覆盖。deadline 分支发现取消或停止已就绪时按取消处理。`sync.Once` 保证只关闭一次，调用返回前等待 watchdog 退出；关闭错误或 panic 记为 `close_error`，同时保留已确定的执行错误。主动 2 秒断流记为 `output_timeout`，不触发候选模型 fallback，随后仍走额度窗口确认。Claude/Responses 终止事件前的 EOF 作为异常处理；Chat 收到 `finish_reason` 后继续读取可能独立返回的 usage，随后 EOF 才视为正常终止。
 
@@ -326,7 +334,9 @@ CPA 的模型列表来自它内置并定期更新的模型表，同一服务的�
 
 ### 失败分类和保护
 
-`ignite.Classify`：
+手动点火失败只记录一次 `ignite_failed` 事件并向调用方返回错误，不安排重试、不累计失败次数、不打开熔断或发送暂停通知；已有自动点火的重试、熔断和失败状态保持不变。事件不带 `params`，页面使用保存的错误详情，避免显示重试提示。手动成功仍通过 `ignite.RecordSuccess` 记录并清空失败状态。
+
+以下调度和保护规则用于自动点火。`ignite.Classify`：
 
 | 类别 | 条件 | 处理 |
 | --- | --- | --- |
@@ -388,7 +398,7 @@ Did Codex Reset 每 `poll_seconds` 秒（最少 300 秒，对齐时间边界）�
 | `history/YYYY-MM-DD.jsonl` | 按 UTC 日期分文件的额度样本和事件 |
 | `instance.lock` | 实例锁 |
 
-历史记录每行一个 JSON：样本为 `{"k":"s","t":秒,"g":额度组,"w":窗口,"r":剩余,"x":重置,"s":"active|passive"}`，事件为 `{"k":"e","t":秒,"g":额度组,"e":类型,"v":级别,"m":文本,"l":标签,"d":详情,"p":参数}`。`m` 和 `d` 是写给 CPA 日志的中文；`p` 是页面拼出事件文字所需的值：`ignite` 和 `ignite_manual` 为 `model`、`reset`，`ignite_failed` 为 `retry_seconds`、`error` 和可选的 `cooldown`，`ignite_paused` 为 `until`、`error`，`model_refused` 为 `model`、`fallback`、`hours`，`notify` 为 `title`，`notify_failed` 为 `title`、`error`，`cooldown_stale` 为 `until`，`plan_change` 为 `from`、`to`（套餐名），`codex_reset` 为 `count`；`reset` 和 `exhausted` 为 `window`、`remaining` 及可选的 `reset`；时间为 RFC 3339 UTC。主动样本每次都写；被动样本只在数值或重置时间变化时写，同一窗口每分钟最多一次，期间的新值暂存在 `pendingSamp`，满一分钟后写入。历史接口对超过 2 天的范围分段，每段取最后一个样本：超过 2 天按 10 分钟，超过 4 天按 15 分钟，超过 8 天按 30 分钟，超过 15 天按 1 小时，使这些范围的每个系列不超过约 800 个点（图表约 1000 像素宽）。2 天及以内不分段。分段长度在响应的 `bucket_seconds` 中。每个系列还带有 `resets: [[t, x], ...]`，两个值均为 Unix 秒，表示从样本时间 `t` 起预定重置时间为 `x`。此数组在点降采样之前按原始样本生成，按 `t` 升序；相邻原始样本的非零 `x` 相差超过 60 秒才记为变化，已知与未知之间的切换始终记录，未知使用 `x=0`。范围前生效项使用范围开始前时间最大的样本的 `[t, x]`，其 `t` 可以早于样本的一天前导范围，不要求是该 `x` 首次出现的时间；整个系列从未有重置时间时返回空数组。`points` 仍为 `[t, remaining, passive]`，分段规则独立于重置事件。每个系列带有 `label`（含账号后缀，例如 `ChatGPT#rk`）和 `source_label`（不含后缀），页面按服务和 `source_label` 合并同一额度的多个账号。
+历史记录每行一个 JSON：样本为 `{"k":"s","t":秒,"g":额度组,"w":窗口,"r":剩余,"x":重置,"s":"active|passive"}`，事件为 `{"k":"e","t":秒,"g":额度组,"e":类型,"v":级别,"m":文本,"l":标签,"d":详情,"p":参数}`。`m` 和 `d` 是写给 CPA 日志的中文；`p` 是页面拼出事件文字所需的值：`ignite` 和 `ignite_manual` 为 `model`、`reset`，自动点火的 `ignite_failed` 为 `retry_seconds`、`error` 和可选的 `cooldown`（手动失败无 `p`，直接显示 `d`），`ignite_paused` 为 `until`、`error`，`model_refused` 为 `model`、`fallback`、`hours`，`notify` 为 `title`，`notify_failed` 为 `title`、`error`，`cooldown_stale` 为 `until`，`plan_change` 为 `from`、`to`（套餐名），`codex_reset` 为 `count`；`reset` 和 `exhausted` 为 `window`、`remaining` 及可选的 `reset`；时间为 RFC 3339 UTC。主动样本每次都写；被动样本只在数值或重置时间变化时写，同一窗口每分钟最多一次，期间的新值暂存在 `pendingSamp`，满一分钟后写入。历史接口对超过 2 天的范围分段，每段取最后一个样本：超过 2 天按 10 分钟，超过 4 天按 15 分钟，超过 8 天按 30 分钟，超过 15 天按 1 小时，使这些范围的每个系列不超过约 800 个点（图表约 1000 像素宽）。2 天及以内不分段。分段长度在响应的 `bucket_seconds` 中。每个系列还带有 `resets: [[t, x], ...]`，两个值均为 Unix 秒，表示从样本时间 `t` 起预定重置时间为 `x`。此数组在点降采样之前按原始样本生成，按 `t` 升序；相邻原始样本的非零 `x` 相差超过 60 秒才记为变化，已知与未知之间的切换始终记录，未知使用 `x=0`。范围前生效项使用范围开始前时间最大的样本的 `[t, x]`，其 `t` 可以早于样本的一天前导范围，不要求是该 `x` 首次出现的时间；整个系列从未有重置时间时返回空数组。`points` 仍为 `[t, remaining, passive]`，分段规则独立于重置事件。每个系列带有 `label`（含账号后缀，例如 `ChatGPT#rk`）和 `source_label`（不含后缀），页面按服务和 `source_label` 合并同一额度的多个账号。
 
 管理历史查询通过 `store.History.QueryWindow` 单遍扫描保留记录。每个系列在范围外只保留时间最大的一个前驱样本，以及是否出现过非零重置时间的标记；同一时间的前驱取最后补写值，乱序补写不会覆盖较新的前驱。范围内记录收集后按时间稳定排序，再计算重置变化、点降采样和事件。前驱在一天前导范围内时也作为 `points` 的起始点，更早的前驱只提供重置状态；范围内没有样本的系列不输出。内存为 `O(系列数 + 范围内记录数)`，不对范围外记录排序，不创建磁盘临时文件，不依赖临时目录。扫描循环和范围内处理保留 context 取消检查。
 
