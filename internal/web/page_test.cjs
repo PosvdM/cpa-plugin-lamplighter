@@ -54,6 +54,70 @@ test("config tokens are 16 hexadecimal digits", () => {
   assert.notEqual(a, b);
 });
 
+test("account names preserve trailing note lines and clearing removes the whole note", () => {
+  const ctx = context(["accountNote"]);
+  assert.equal(ctx.accountNote("old\r\nsecond\r\nthird", "new"), "new\nsecond\nthird");
+  assert.equal(ctx.accountNote("old\nsecond", ""), "");
+  assert.equal(ctx.accountNote("", "new"), "new");
+});
+
+test("drag targets use layout midpoints rather than animated rectangles", () => {
+  const ctx = context(["accountDropIndex"]);
+  const rows = [0, 100, 200].map((offsetTop) => ({
+    offsetTop, offsetHeight: 80,
+    getBoundingClientRect: () => { throw new Error("animated geometry must not be read"); },
+  }));
+  assert.equal(ctx.accountDropIndex(rows, 49, 10), 0);
+  assert.equal(ctx.accountDropIndex(rows, 51, 10), 1);
+  assert.equal(ctx.accountDropIndex(rows, 150, 10), 1);
+  assert.equal(ctx.accountDropIndex(rows, 151, 10), 2);
+  assert.equal(ctx.accountDropIndex(rows, 999, 10), 3);
+});
+
+test("queued inline weights merge changes and an empty field removes only its own override", async () => {
+  const states = [], writes = [];
+  const ctx = context(["saveAccountField", "accountNote", "fmtWeight"], {
+    rawConfig: {}, saveQueue: Promise.resolve(), history: null,
+    translate: (key) => key, setSaveState: (...args) => states.push(args),
+    claimState: () => () => {}, showApplied: () => {},
+    patchConfig: async (patch) => { writes.push(plain(patch)); Object.assign(ctx.rawConfig, patch); return "token"; },
+    loadConfig: async () => {}, renderAccounts: () => {},
+  });
+  const input = (value) => ({ value, accountSaved: "", accountEdit: 1, accountDirty: true, validity: { badInput: false }, getAttribute: () => "weight" });
+  const a = input("2.5"), b = input("7");
+  ctx.saveAccountField(a, { account: { name: "a" } });
+  ctx.saveAccountField(b, { account: { name: "b" } });
+  await ctx.saveQueue;
+  assert.deepEqual(plain(ctx.rawConfig.account_weights), { a: 2.5, b: 7 });
+  a.value = ""; a.accountEdit++;
+  ctx.saveAccountField(a, { account: { name: "a" } });
+  await ctx.saveQueue;
+  assert.deepEqual(plain(ctx.rawConfig.account_weights), { b: 7 });
+  for (const bad of ["0", "-1", "Infinity", "NaN"]) {
+    ctx.saveAccountField(input(bad), { account: { name: "a" } });
+  }
+  const invalidEmpty = input(""); invalidEmpty.validity.badInput = true;
+  ctx.saveAccountField(invalidEmpty, { account: { name: "a" } });
+  await ctx.saveQueue;
+  assert.equal(writes.length, 3);
+  assert.equal(states.length, 5);
+});
+
+test("an earlier account name save does not overwrite a newer unsaved edit", async () => {
+  const ctx = context(["saveAccountField", "accountNote", "fmtWeight"], {
+    saveQueue: Promise.resolve(), history: null,
+    claimState: () => () => {}, translate: (key) => key, renderAccounts: () => {},
+    saveAccountName: async () => {},
+  });
+  const input = { value: "first", accountSaved: "old", accountEdit: 1, accountDirty: true, getAttribute: () => "name" };
+  ctx.saveAccountField(input, { account: { name: "a", note: "old\nrest" } });
+  input.value = "new unsaved draft"; input.accountEdit++;
+  await ctx.saveQueue;
+  assert.equal(input.value, "new unsaved draft");
+  assert.equal(input.accountDirty, true);
+  assert.equal(input.accountPending, 0);
+});
+
 const HOUR = 3600, DAY = 86400, WEEK = 7 * DAY;
 function pace() { return context(["paceSegments", "paceAt", "pooledPace"], { RESET_DRIFT: 60 }); }
 // Arrays from the VM context have another prototype.

@@ -213,6 +213,16 @@
       </section>
 
       <section class="card settings-section">
+        <h2 class="card-title" data-i18n="account_settings">账号</h2>
+        <p class="hint" data-i18n="account_order_hint">拖动手柄或使用上移、下移按钮调整顺序，额度卡片和图表默认顺序随之调整。拖动时按 Esc 可取消。</p>
+        <div class="table-wrap">
+          <div id="account-rows"></div>
+        </div>
+        <p class="hint" data-i18n="rename_hint">名称写入 CPA 凭证备注的第一行，保留其余各行。留空则按邮箱区分账号；备注有多行时，清空名称须确认删除整条备注。</p>
+        <p class="hint" data-i18n="weight_hint">同一服务有多个账号时，可设置各账号的权重，合计按权重平均剩余额度。权重须大于 0，可带小数；留空使用输入框中提示的套餐默认值。</p>
+      </section>
+
+      <section class="card settings-section">
         <h2 class="card-title" data-i18n="services">服务</h2>
         <div class="checks" id="monitor-rows"></div>
         <p class="hint" data-i18n="monitor_hint">勾选要监控额度的服务。</p>
