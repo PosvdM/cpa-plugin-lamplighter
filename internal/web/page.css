@@ -278,6 +278,12 @@ input[type="checkbox"] { width: 16px; height: 16px; padding: 0; accent-color: va
   .card.account:hover { transform: translateY(-2px); border-color: var(--border-hover); box-shadow: 0 12px 26px -14px rgb(0 0 0 / 0.16); }
 }
 .account-head { display: flex; align-items: center; gap: 9px; min-width: 0; }
+/* Preserve the heading height and the space occupied by the plan line. */
+.card.account > .account-head:first-child { min-height: 28.75px; }
+.card.account > .account-head.cell-note { margin: auto 0 0; min-height: 21.25px; max-width: none; }
+.account-head.cell-note > .cell-note { margin: 0; flex: 1; min-width: 0; max-width: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-head.cell-note > .btn { flex: none; padding: 1px 6px; font-size: 11.5px; line-height: 1.5; min-height: 21.25px; }
+.type-badge > .account-weight { margin-left: 6px; }
 .btn-icon { padding: 2px 7px; font-size: 13px; line-height: 1.4; }
 /* Pointer dragging starts at the handle. */
 .drag-handle {
@@ -455,8 +461,9 @@ details.advanced > summary { margin-top: 0; }
 
 /* Headings summarize saves on one line; failed controls retain their border. */
 .save-state { display: flex; align-items: center; font-size: 12px; font-weight: 500; color: var(--text-tertiary); }
-.save-state > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.save-state > span + span, .save-state::before { flex: none; white-space: pre; }
+.save-state > [data-save-part="summary"], .save-state > [data-save-part="reason"], .save-state > [data-save-part="progress"] { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.save-state > [data-save-part="compact"] { display: none; }
+.save-state > [data-save-part="count"], .save-state::before { flex: none; white-space: pre; }
 .save-state:empty { display: none; }
 .save-state[data-state="saved"], .save-state[data-state="verified"] { color: var(--success-badge-text); }
 .save-state[data-state="saved"]::before, .save-state[data-state="verified"]::before { content: "✓ "; }
@@ -567,6 +574,10 @@ table.services .sub-row td { border-bottom: none; padding-top: 4px; text-align: 
 }
 
 @media (max-width: 640px) {
+  .settings-section > .card-title > :first-child, form legend > :first-child { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .save-state[data-state="failed"] { flex: none; max-width: 100%; }
+  .save-state[data-state="failed"] > [data-save-part="summary"], .save-state > [data-save-part="reason"] { display: none; }
+  .save-state > [data-save-part="compact"] { display: block; flex: none; }
   main { padding: 14px 12px 32px; }
   .grid-3 { grid-template-columns: 1fr; }
   .bark-row, .webhook-grid { grid-template-columns: 1fr; }

@@ -231,7 +231,7 @@
       ignition_models_hint: "选择点火模型需要“高级”中的模型列表 API key。",
       monitor_hint: "勾选要监控额度的服务。",
       save_saved: "已保存", save_saving: "保存中…",
-      save_field_failed: "✕ {0}保存失败：{1}", save_more_failed: "（另有 {0} 项失败）", save_order: "排序",
+      save_field_failed: "✕ {0}保存失败", save_failure_reason: "：{0}", save_failed_compact: "✕ 保存失败", save_more_failed: "（另有 {0} 项失败）", save_order: "排序",
       save_waiting: "已保存，等待生效", save_applied: "已生效", save_unconfirmed: "未确认生效",
       save_applied_verified: "已生效，验证通过", save_applied_unverified: "已生效，未能验证：{0}", network_error: "网络错误",
       mask_on: "打码账号", mask_off: "显示账号", account_n: "账号 {0}",
@@ -391,7 +391,7 @@
       ignition_models_hint: "Picking ignition models needs the model list API key under Advanced.",
       monitor_hint: "Check the services whose quota to monitor.",
       save_saved: "Saved", save_saving: "Saving…",
-      save_field_failed: "✕ {0} save failed: {1}", save_more_failed: " ({0} more failed)", save_order: "Order",
+      save_field_failed: "✕ {0} save failed", save_failure_reason: ": {0}", save_failed_compact: "✕ Save failed", save_more_failed: " ({0} more failed)", save_order: "Order",
       save_waiting: "Saved; waiting to take effect", save_applied: "In effect", save_unconfirmed: "Not confirmed in effect",
       save_applied_verified: "In effect; CPA accepts the key", save_applied_unverified: "In effect, but could not verify: {0}", network_error: "network error",
       mask_on: "Blur accounts", mask_off: "Show accounts", account_n: "Account {0}",
@@ -1191,6 +1191,7 @@
         input.setAttribute("aria-label", translate(weight ? "account_weight_aria" : "account_name_aria", spoken));
         input.parentNode.classList.toggle("account-weight-empty", weight && counts[account.provider] <= 1);
         input.disabled = weight && counts[account.provider] <= 1;
+        saveEntry(saveHost(input), input);
         var saved = rawConfig.account_weights && Number(rawConfig.account_weights[account.name]);
         var value = weight ? (saved > 0 ? fmtWeight(saved) : "") : (account.note || "").split(/\r?\n/)[0].trim();
         if (!input.accountDirty && !input.accountPending && document.activeElement !== input) {
@@ -1231,11 +1232,10 @@
         runAction(refresh, API + "/refresh", { auth_index: account.auth_index }, translate("refreshed", account.title));
       } });
       card.appendChild(el("div", { class: "account-head" }, [
-        el("span", { class: "type-badge type-" + account.provider }, maskedNodes(account.title)),
-        pooledAccount && weight !== 1 ? el("span", { class: "account-weight", title: translate("weight"), text: "×" + fmtWeight(weight) }) : null,
-        el("span", { class: "account-email " + SENSITIVE, title: masked ? null : account.email || account.name, text: account.email || account.name }),
-        refresh,
-        snapshotButton("snapshot_card", function () { return [card]; })
+        el("span", { class: "type-badge type-" + account.provider }, maskedNodes(account.title).concat(
+          pooledAccount && weight !== 1 ? [el("span", { class: "account-weight", title: translate("weight"), text: "×" + fmtWeight(weight) })] : []
+        )),
+        el("span", { class: "account-email " + SENSITIVE, title: masked ? null : account.email || account.name, text: account.email || account.name })
       ]));
       (account.groups || []).forEach(function (group) {
         var block = el("div", { class: "quota-group" });
@@ -1247,7 +1247,6 @@
         if (foot) block.appendChild(foot);
         card.appendChild(block);
       });
-      if (account.plan) card.appendChild(el("div", { class: "cell-note", text: translate("plan", account.plan) }));
       var cooldown = parseTime(account.cooldown_until);
       if (cooldown && account.stale_cooldown) {
         card.appendChild(el("div", { class: "error-text", text: translate("cooldown_stale", fmtDateTime(cooldown)) }));
@@ -1255,6 +1254,11 @@
         card.appendChild(el("div", { class: "cell-note", text: translate("cooldown", fmtDateTime(cooldown), fmtIn(cooldown)) }));
       }
       if (account.error) card.appendChild(el("div", { class: "error-text" }, maskedNodes(account.error)));
+      card.appendChild(el("div", { class: "account-head cell-note" }, [
+        el("span", { class: "cell-note", text: account.plan ? translate("plan", account.plan) : "" }),
+        refresh,
+        snapshotButton("snapshot_card", function () { return [card]; })
+      ]));
       box.appendChild(card);
     });
   }
@@ -1528,7 +1532,7 @@
   // Dirty or pending fields survive polling, sorting and earlier saves.
   // Each field owns its result; the heading summarizes failures and progress.
   function saveAccountField(input, row) {
-    var host = accountFieldHost(input);
+    var host = accountFieldHost(input), binding = saveEntry(host, input);
     var account = row.account, kind = input.getAttribute("data-account-field"), weight = kind === "weight";
     var answer = weight ? input.value.trim() : input.value.replace(/\s+/g, " ").trim();
     var value = Number(answer), gen = input.accountEdit || 0;
@@ -1559,15 +1563,18 @@
         return loadConfig();
       });
     }).then(function () {
+      input = binding.input;
       if ((input.accountEdit || 0) === gen) {
         input.value = weight && answer !== "" ? fmtWeight(value) : answer;
         input.accountSaved = input.value;
         input.accountDirty = false;
       }
     }).catch(function (err) {
+      input = binding.input;
       if ((input.accountEdit || 0) === gen) input.accountDirty = true;
       say("failed", err.message);
     }).then(function () {
+      input = binding.input;
       input.accountPending--;
       renderAccounts();
       if (history) renderChart();
@@ -3070,6 +3077,7 @@
       if (!input.name) return;
       if (keys && (!keys[topKey(input.name)] || input === active)) return;
       if (input.settingsDirty || input.hasAttribute("aria-invalid")) return;
+      if (input.type === "radio" && saveControls(input).some(function (peer) { return peer.settingsDirty || peer.hasAttribute("aria-invalid"); })) return;
       fillInput(input, effective);
     });
     Array.prototype.forEach.call(document.querySelectorAll(".mode-switch"), function (box) { placeThumb(box, false); });
@@ -3164,11 +3172,11 @@
   // patch from these, so a refill of the fields in the meantime does not
   // change what it saves.
   function captureIntent(tops) {
-    var intent = { inputs: [], states: [] };
+    var intent = { inputs: [], states: [], submitted: [] };
     Array.prototype.forEach.call($("settings").elements, function (input) {
       if (tops.indexOf(inputTop(input)) < 0) return;
       intent.inputs.push(input);
-      intent.states.push({ value: input.value, checked: input.checked });
+      intent.states.push({ value: input.value, checked: input.checked, edit: input.settingsEdit || 0 });
     });
     return intent;
   }
@@ -3179,6 +3187,7 @@
   // save; without it the inputs are read as they are now.
   function buildPatch(top, intent) {
     var patch = {};
+    if (intent && !intent.submitted) intent.submitted = [];
     var base = rawConfig[top];
     var state = function (input) {
       var i = intent ? intent.inputs.indexOf(input) : -1;
@@ -3197,24 +3206,30 @@
           var parts = input.name.split(".");
           var parent = getPath(patch, parts.slice(0, -1).join("."));
           if (parent) delete parent[parts[parts.length - 1]];
+          if (intent) intent.submitted.push(input);
           return;
         }
       } else if (input.type === "checkbox") value = saved.checked;
       else if (input.type === "radio") {
         if (!saved.checked) return;
         value = saved.value;
+        if (intent) intent.inputs.forEach(function (peer) { if (peer !== input && peer.name === input.name) intent.submitted.push(peer); });
       } else if (input.type === "number") {
         if (saved.value === "") return;
         value = Number(saved.value);
       } else value = saved.value.trim();
       setPath(patch, input.name, value);
+      if (intent) intent.submitted.push(input);
     });
     if (top === "providers") {
       if (!patch.providers) patch.providers = {};
       providerList().forEach(function (p) { if (!patch.providers[p.id]) patch.providers[p.id] = {}; });
       providersWithGroups().forEach(function (p) {
         patch.providers[p.id].groups = Array.prototype.filter.call(
-          document.querySelectorAll("[data-groups='" + p.id + "'] [data-group]"), function (input) { return state(input).checked; }
+          document.querySelectorAll("[data-groups='" + p.id + "'] [data-group]"), function (input) {
+            if (intent) intent.submitted.push(input);
+            return state(input).checked;
+          }
         ).map(function (input) { return input.getAttribute("data-group"); });
       });
     }
@@ -3280,9 +3295,21 @@
     if (!host.saveEntries) host.saveEntries = new Map();
     var entry = host.saveEntries.get(key);
     if (!entry) {
-      entry = { host: host, input: input, controls: saveControls(input) };
+      entry = { host: host };
       host.saveEntries.set(key, entry);
     }
+    var old = entry.input;
+    // Results outlive their DOM binding. Recreated account fields inherit
+    // drafts and pending counts; queued completions use the current binding.
+    if (old && old !== input && (old.accountDirty || old.accountPending || entry.failure) && input.hasAttribute("data-account-field")) {
+      ["value", "accountSaved", "accountEdit", "accountDirty", "accountPending"].forEach(function (name) { input[name] = old[name]; });
+    }
+    entry.input = input;
+    entry.controls = saveControls(input);
+    entry.controls.forEach(function (control) {
+      if (entry.failure) control.setAttribute("aria-invalid", "true");
+      else control.removeAttribute("aria-invalid");
+    });
     return entry;
   }
 
@@ -3314,7 +3341,7 @@
     var latest = entries.filter(function (entry) { return entry.state; }).sort(function (a, b) { return b.order - a.order; })[0];
     failures.sort(function (a, b) { return b.failure.order - a.failure.order; });
     var failed = failures[0], state = failed ? "failed" : latest ? latest.state : "";
-    var text = failed ? translate("save_field_failed", saveItemLabel(failed.input), saveText(failed.failure.text)) : latest ? saveText(latest.text) : "";
+    var text = failed ? translate("save_field_failed", saveItemLabel(failed.input)) : latest ? saveText(latest.text) : "";
     entries.forEach(function (entry) {
       entry.controls.forEach(function (control) {
         if (entry.failure) control.setAttribute("aria-invalid", "true");
@@ -3326,12 +3353,24 @@
     node.setAttribute("data-state", state);
     clear(node);
     if (text) {
-      var message = el("span");
+      if (failed) {
+        var compact = el("span", { "data-save-part": "compact" });
+        compact.textContent = translate("save_failed_compact");
+        node.appendChild(compact);
+      }
+      var message = el("span", { "data-save-part": failed ? "summary" : "progress" });
       if (host.id === "account-order-state") maskedNodes(text).forEach(function (part) { message.appendChild(part); });
       else message.textContent = text;
       node.appendChild(message);
+      if (failed) {
+        var reason = el("span", { "data-save-part": "reason" });
+        var detail = translate("save_failure_reason", saveText(failed.failure.text));
+        if (host.id === "account-order-state") maskedNodes(detail).forEach(function (part) { reason.appendChild(part); });
+        else reason.textContent = detail;
+        node.appendChild(reason);
+      }
       if (failures.length > 1) {
-        var count = el("span");
+        var count = el("span", { "data-save-part": "count" });
         count.textContent = translate("save_more_failed", failures.length - 1);
         node.appendChild(count);
       }
@@ -3378,15 +3417,26 @@
     return values.every(isFinite) && values[0] >= values[1] && values[1] >= values[2];
   }
 
-  // Edits by top-level key: a counter that grows with every edit and save
-  // of the key's fields. A save refills its fields with the values the
-  // plugin uses only while no later edit of the same key exists, so a late
-  // confirmation does not overwrite a newer edit, saved or not.
-  var editGen = {};
+  // Each control owns an edit generation, including changes made while a
+  // different control of the same top-level key is awaiting confirmation.
+  function noteEdit(input) {
+    var controls = input.type === "radio" ? saveControls(input) : [input];
+    controls.forEach(function (control) { control.settingsEdit = (control.settingsEdit || 0) + 1; });
+  }
 
-  function noteEdit(top) {
-    editGen[top] = (editGen[top] || 0) + 1;
-    return editGen[top];
+  // Clear only drafts actually submitted by this save and unchanged since
+  // its intent was captured. Independent failures remain owned by their item.
+  function refillSaved(intent) {
+    var keys = {}, any = false;
+    intent.submitted.forEach(function (input) {
+      var saved = intent.states[intent.inputs.indexOf(input)];
+      if (!saved || (input.settingsEdit || 0) !== saved.edit || input.hasAttribute("aria-invalid")) return;
+      input.settingsDirty = false;
+      keys[inputTop(input)] = true;
+      any = true;
+    });
+    if (any) fillSettings(keys);
+    if (keys.ignition) renderIgnitionOff();
   }
 
   function saveField(event) {
@@ -3440,19 +3490,8 @@
     }
     if (input.name === "ignition.enabled") renderIgnitionOff();
     var say = claimState(host, input);
-    var gens = {};
-    tops.forEach(function (name) { gens[name] = noteEdit(name); });
+    noteEdit(input);
     var intent = captureIntent(tops);
-    // Refills only the keys not edited since this change.
-    var refill = function () {
-      var keys = {}, any = false;
-      tops.forEach(function (name) { if (editGen[name] === gens[name]) { keys[name] = true; any = true; } });
-      if (any) {
-        saveControls(input).forEach(function (control) { if (keys[inputTop(control)]) control.settingsDirty = false; });
-        fillSettings(keys);
-      }
-      if (keys["ignition"]) renderIgnitionOff();
-    };
     saveQueue = saveQueue.then(function () { return checked; }).then(function (check) {
       // A key edited again during the check is checked by its own change event.
       if (input.type === "password" && input.value.trim() !== value) return;
@@ -3467,7 +3506,7 @@
       });
       return patchConfig(patch).then(function (token) {
         // Once applied, the fields show the values the plugin uses.
-        showApplied(say, token, check, /^mcp_/.test(top)).then(function (applied) { if (applied) refill(); });
+        showApplied(say, token, check, /^mcp_/.test(top)).then(function (applied) { if (applied) refillSaved(intent); });
         return loadConfig();
       }).catch(function (err) {
         say("failed", err.message);
@@ -3843,7 +3882,7 @@
       e.target.accountEdit = (e.target.accountEdit || 0) + 1;
     } else e.target.settingsDirty = true;
     var top = inputTop(e.target);
-    if (top) noteEdit(top);
+    if (top) noteEdit(e.target);
     var host = accountField ? accountFieldHost(e.target) : top ? saveHost(e.target) : null;
     if (host) editSaveState(host, e.target);
     if (e.target.name === "mcp_listen") renderMcp();
