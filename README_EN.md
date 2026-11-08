@@ -55,7 +55,7 @@ When the plan of an account changes, for example when Google AI Pro expires or i
 
 ## Requirements
 
-- CPA v8.0.4 or later with plugins enabled (`plugins.enabled: true`). The plugin is built for Linux amd64/arm64, macOS amd64/arm64 and Windows amd64; the macOS builds are only built and tested in CI and have not been tried on a running CPA.
+- CPA v8.0.4 or later with plugins enabled (`plugins.enabled: true`). The plugin is built for Linux amd64/arm64, macOS amd64/arm64 and Windows amd64; the macOS builds have not been tried on a running CPA.
 - A CPA API key reserved for Lamplighter. The plugin reads the model list with it to pick ignition models.
 - For notifications, an iPhone with Bark or a service that accepts webhooks.
 
@@ -106,9 +106,13 @@ A 5-hour window starts with the first request after a reset. If nobody uses the 
 
 - Times use the plugin time zone, which follows the CPA server by default.
 - The first ignition each day is at `07:00`; after that, 3 seconds after each reset, until `22:30`. A reset later than that waits for 07:00 the next day.
-- The request asks the model to reply `OK`, declares no tools and allows at most 4 output tokens.
+- The request asks the model to reply `OK`, declares no tools and sets no output-token limit. The first nonempty streamed output (text, visible reasoning or tool arguments) starts an independent 2-second timer that closes the upstream stream. A stream that ends sooner is cleaned up immediately. Heartbeats and lifecycle events do not start the timer, and this deliberate cutoff does not trigger model fallback.
 - Models are picked automatically: the newest Luna for ChatGPT, the newest Haiku for Claude, and the newest Flash for Antigravity's Gemini group. A model is used from the first ignition after CPA lists it; when the provider refuses it, that ignition falls back to the next candidate; when the fallback works, an event is recorded and the quota group skips the refused model for 24 hours. They can also be set in the config.
 - An ignition counts as successful only when the 5-hour window afterwards has a fixed reset time in the future.
+
+Before the first output, waiting follows CPA's own behavior; `request_timeout_seconds` does not limit model startup. Stopping the plugin closes requests whose stream IDs are available; a request still starting must wait for CPA to return its stream ID. See [Streaming and cancellation (in Chinese)](./docs/architecture.md#流式执行与取消) for these limits.
+
+After each model call, the CPA server log records the service, model, correlation identifiers, received text, host-reported usage and its completeness, end reason, time to first output and total duration. Text, including visible reasoning and tool arguments, is capped at 4096 Unicode characters and marked when truncated. Usage retains CPA's numbers without estimating tokens. CPA translation may fill missing counters with zeros or combine token categories, so Antigravity usage is marked partial even after a natural end. Other completeness labels describe host-protocol accounting only; they do not guarantee that all upstream usage or breakdowns were returned. Records exclude credentials, full requests and encrypted reasoning, and are not added to page events or quota history.
 
 **Failure protection**:
 
@@ -151,7 +155,7 @@ With no failures, the heading shows the most recent save's progress. A failed sa
 | `timezone` | empty | Time zone for displayed times and the ignition window, such as `Asia/Shanghai`; empty follows the CPA server (set by `TZ` in the official Docker image) |
 | `timezone_offset_hours` | empty | Fixed UTC offset such as `8`; used only when `timezone` is empty |
 | `poll_interval_seconds` | `300` | Active query interval, at least 60 |
-| `request_timeout_seconds` | `20` | Timeout of one upstream request |
+| `request_timeout_seconds` | `20` | Timeout for HTTP requests such as quota queries and notifications; does not limit ignition model startup or time to first output |
 | `passive_skip_seconds` | `60` | Skip the query when passive data arrived this many seconds before it; `0` never skips |
 | `passive_skip_max_minutes` | `30` | Longest run of skipped queries for one account |
 | `models_api_key` | empty | CPA API key for reading the model list; without it ignition cannot pick a model. The management key does not work here; the page does not save the management key or a key CPA does not accept, and says why |

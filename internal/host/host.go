@@ -50,7 +50,9 @@ func StatusOf(err error) int {
 type Host interface {
 	AuthList() ([]pluginapi.HostAuthFileEntry, error)
 	AuthGet(authIndex string) (json.RawMessage, error)
-	ModelExecute(req pluginapi.HostModelExecutionRequest) (pluginapi.HostModelExecutionResponse, error)
+	ModelExecuteStream(req pluginapi.HostModelExecutionRequest) (pluginapi.HostModelStreamResponse, error)
+	ModelStreamRead(streamID string) (pluginapi.HostModelStreamReadResponse, error)
+	ModelStreamClose(streamID string) error
 	HTTPDo(ctx context.Context, req pluginapi.HTTPRequest, timeout time.Duration) (pluginapi.HTTPResponse, error)
 	Log(level, message string, fields map[string]any)
 }
@@ -127,11 +129,25 @@ func (r RPC) AuthGet(authIndex string) (json.RawMessage, error) {
 	return resp.JSON, nil
 }
 
-// ModelExecute runs one non-streaming request through CPA's model executor.
-func (r RPC) ModelExecute(req pluginapi.HostModelExecutionRequest) (pluginapi.HostModelExecutionResponse, error) {
-	var resp pluginapi.HostModelExecutionResponse
-	err := r.call(pluginabi.MethodHostModelExecute, req, &resp)
+// ModelExecuteStream waits synchronously for CPA to open a model stream.
+// The SDK exposes no cancellation handle until this call returns a stream ID.
+func (r RPC) ModelExecuteStream(req pluginapi.HostModelExecutionRequest) (pluginapi.HostModelStreamResponse, error) {
+	var resp pluginapi.HostModelStreamResponse
+	err := r.call(pluginabi.MethodHostModelExecuteStream, req, &resp)
 	return resp, err
+}
+
+// ModelStreamRead waits for a chunk. ModelStreamClose may run concurrently to
+// cancel the upstream request and unblock a pending read.
+func (r RPC) ModelStreamRead(streamID string) (pluginapi.HostModelStreamReadResponse, error) {
+	var resp pluginapi.HostModelStreamReadResponse
+	err := r.call(pluginabi.MethodHostModelStreamRead, pluginapi.HostModelStreamReadRequest{StreamID: streamID}, &resp)
+	return resp, err
+}
+
+// ModelStreamClose releases the host stream and cancels its upstream request.
+func (r RPC) ModelStreamClose(streamID string) error {
+	return r.call(pluginabi.MethodHostModelStreamClose, pluginapi.HostModelStreamCloseRequest{StreamID: streamID}, nil)
 }
 
 type httpRequest struct {

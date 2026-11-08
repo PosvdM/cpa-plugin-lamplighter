@@ -45,12 +45,19 @@ func (f *fakeHost) AuthGet(authIndex string) (json.RawMessage, error) {
 	return json.RawMessage(raw), nil
 }
 
-func (f *fakeHost) ModelExecute(req pluginapi.HostModelExecutionRequest) (pluginapi.HostModelExecutionResponse, error) {
+func (f *fakeHost) ModelExecuteStream(req pluginapi.HostModelExecutionRequest) (pluginapi.HostModelStreamResponse, error) {
 	f.mu.Lock()
 	f.executed = append(f.executed, req)
 	f.mu.Unlock()
-	return f.execute(req)
+	resp, err := f.execute(req)
+	return pluginapi.HostModelStreamResponse{StatusCode: resp.StatusCode, Headers: resp.Headers, StreamID: "test-stream"}, err
 }
+
+func (f *fakeHost) ModelStreamRead(string) (pluginapi.HostModelStreamReadResponse, error) {
+	return pluginapi.HostModelStreamReadResponse{Payload: []byte("data: [DONE]\n\n"), Done: true}, nil
+}
+
+func (f *fakeHost) ModelStreamClose(string) error { return nil }
 
 func (f *fakeHost) HTTPDo(_ context.Context, req pluginapi.HTTPRequest, _ time.Duration) (pluginapi.HTTPResponse, error) {
 	f.mu.Lock()

@@ -11,12 +11,13 @@
 ```bash
 go vet ./internal/...
 go test ./internal/...
+go test -race ./internal/...
 node --check internal/web/page.js
 ```
 
 测试使用假的宿主和 HTTP 服务器，不会发送真实请求。
 
-推送到 `main` 和 PR 时，GitHub Actions（`.github/workflows/ci.yml`）在 Linux 上检查 `gofmt -l .` 的输出为空，并运行上面三条命令。只改动 Markdown、`docs/` 或 `assets/` 的提交不触发。同一分支的新提交会取消仍在运行的旧任务。macOS 和 Windows 上的测试只在发布时运行，见“发布”一节。
+推送到 `main` 和 PR 时，GitHub Actions（`.github/workflows/ci.yml`）在 Linux 上检查 `gofmt -l .` 的输出为空，并运行 vet、普通测试和 Node.js 语法检查；race 检查用于本地验证。只改动 Markdown、`docs/` 或 `assets/` 的提交不触发。同一分支的新提交会取消仍在运行的旧任务。macOS 和 Windows 上的测试只在发布时运行，见“发布”一节。
 
 测试覆盖：
 
@@ -24,6 +25,7 @@ node --check internal/web/page.js
 - 网络出口选择，包括无效 `proxy_url` 不退回直连；
 - 点火时间、滑动重置判断、错误分类和失败保护；
 - 候选模型顺序和模型列表读取；
+- 点火请求无输出 token 上限、Claude/Responses SSE 分片和宿主 Chat JSON chunk 解析、首次可见输出计时、阻塞读取期间关闭上游、自然结束及真实错误与 deadline 同时就绪时的确定性终止仲裁、取消/停止/watchdog panic 的所有权和关闭错误优先级、单次关闭及 watchdog 退出、主动断流不换模型且仍须确认窗口，以及日志中的 Unicode 截断、宿主 usage 来源、转换后补零或缺少推理细分时的保守完整性标记、Claude/Codex 原生最终 usage 和敏感字段过滤；
 - 额度提醒、按窗口的恢复通知和重置提醒、套餐变化后重新记录基线并保留已发送的重置提醒、Bark 请求格式，以及 Did Codex Reset 的去重、过滤和排期时间；
 - webhook 的占位符转义、内置请求体、`success_json`、设置检查和错误中的密钥隐藏，多渠道发送时只要一个渠道成功就算送达，以及没有渠道时关闭推送、只有无效的 webhook 时按失败重试；
 - 引擎：账号后缀和名称、被动数据跳过规则、被动数据不新增窗口、早于当前读数的被动数据被丢弃且不重复提醒、重置前后的查询、点火确认、换模型重试、Kimi 别名账号的识别、Kimi 和 Grok 不点火、暂停通知、历史采样、历史接口的窗口筛选、分段长度和范围开始前的最后一个样本、状态接口的服务列表和新版本、打开页面时的新版本检查及其 1 分钟限流和不等待进行中的读取，账号套餐的识别和每天一次的 Claude 账号资料请求，以及额度窗口增减后（包括重启后）重读套餐、读取失败时暂缓额度提醒（从未读到套餐的账号不暂缓）、连续失败 1 小时后恢复额度提醒并在 15 分钟后再读套餐、套餐变化的通知及其重试、通知在 1 小时后放弃和送达前变回原套餐时取消、不受影响的其他账号；
@@ -65,7 +67,7 @@ CPA 插件商店从最新的 Release 安装插件：它按上面的名称查找 
 - 升级 `go.mod` 中的 CPA 版本时，对照 CPA 的 `internal/runtime/executor` 更新 `internal/providers` 中 Codex 和 Claude 的 User-Agent 常量。插件无法在运行时读取 CPA 编译进去的常量。
 - 修改额度请求的地址或请求头时，对照 CPA 管理中心的 `src/utils/quota/constants.ts`，并更新 [架构文档](./architecture.md) 中的表格。
 - 修改轮询、跳过规则、点火时间或失败保护时，同步更新测试、README 和架构文档。
-- 后台循环中新增的 goroutine 必须有 `recover`，网络请求必须有超时。
+- 后台循环中的 goroutine 必须有 `recover`，取消监视器必须在调用结束前退出。HTTP 请求设置超时；模型启动阶段的取消能力受 CPA SDK 限制，见[流式执行与取消](./architecture.md#流式执行与取消)，不能用遗留后台请求的超时返回替代真实取消。
 - 修改页面时保持 HTML、CSS、JS 分文件；文字插入 DOM 时使用 `textContent`。新增或修改页面文字时，同时修改 `page.js` 中 `I18N` 的中文和英文词条；新增或修改推送文字时，同时修改 `internal/notify/text.go` 的两列。增加一种语言时，两处各加一份。图表颜色只表示剩余额度的高低，使用与额度条相同的三档变量。
 - 用户可见的行为、配置和限制写进 README（中英文同步），实现细节写进 `docs/`。
 

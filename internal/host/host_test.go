@@ -14,7 +14,7 @@ func TestErrorEnvelopeCarriesStatus(t *testing.T) {
 	rpc := RPC{Call: func(method string, payload []byte) ([]byte, error) {
 		return []byte(`{"ok":false,"error":{"code":"host_call_failed","message":"auth_not_found: no auth available","http_status":503}}`), nil
 	}}
-	_, err := rpc.ModelExecute(pluginapi.HostModelExecutionRequest{Model: "m"})
+	_, err := rpc.ModelExecuteStream(pluginapi.HostModelExecutionRequest{Model: "m", Stream: true})
 	if err == nil || StatusOf(err) != 503 {
 		t.Fatalf("err %v status %d", err, StatusOf(err))
 	}
