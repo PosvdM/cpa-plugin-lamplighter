@@ -76,14 +76,14 @@ test("drag targets use layout midpoints rather than animated rectangles", () => 
 
 test("queued inline weights merge changes and an empty field removes only its own override", async () => {
   const states = [], writes = [];
-  const ctx = context(["saveAccountField", "accountNote", "fmtWeight"], {
+  const ctx = context(["saveAccountField", "accountFieldHost", "accountNote", "fmtWeight"], {
     rawConfig: {}, saveQueue: Promise.resolve(), history: null,
     translate: (key) => key, setSaveState: (...args) => states.push(args),
     claimState: () => () => {}, showApplied: () => {},
     patchConfig: async (patch) => { writes.push(plain(patch)); Object.assign(ctx.rawConfig, patch); return "token"; },
     loadConfig: async () => {}, renderAccounts: () => {},
   });
-  const input = (value) => ({ value, accountSaved: "", accountEdit: 1, accountDirty: true, validity: { badInput: false }, getAttribute: () => "weight" });
+  const input = (value) => ({ value, parentNode: { firstChild: {} }, accountSaved: "", accountEdit: 1, accountDirty: true, validity: { badInput: false }, getAttribute: () => "weight" });
   const a = input("2.5"), b = input("7");
   ctx.saveAccountField(a, { account: { name: "a" } });
   ctx.saveAccountField(b, { account: { name: "b" } });
@@ -104,18 +104,91 @@ test("queued inline weights merge changes and an empty field removes only its ow
 });
 
 test("an earlier account name save does not overwrite a newer unsaved edit", async () => {
-  const ctx = context(["saveAccountField", "accountNote", "fmtWeight"], {
+  const ctx = context(["saveAccountField", "accountFieldHost", "accountNote", "fmtWeight"], {
     saveQueue: Promise.resolve(), history: null,
     claimState: () => () => {}, translate: (key) => key, renderAccounts: () => {},
     saveAccountName: async () => {},
   });
-  const input = { value: "first", accountSaved: "old", accountEdit: 1, accountDirty: true, getAttribute: () => "name" };
+  const input = { value: "first", parentNode: { firstChild: {} }, accountSaved: "old", accountEdit: 1, accountDirty: true, getAttribute: () => "name" };
   ctx.saveAccountField(input, { account: { name: "a", note: "old\nrest" } });
   input.value = "new unsaved draft"; input.accountEdit++;
   await ctx.saveQueue;
   assert.equal(input.value, "new unsaved draft");
   assert.equal(input.accountDirty, true);
   assert.equal(input.accountPending, 0);
+});
+
+// Each account field and the order heading own a separate save state.
+function accountSaveContext(fail) {
+  const heading = {};
+  const ctx = context(["saveAccountField", "accountFieldHost", "accountNote", "fmtWeight", "claimState", "saveAccountOrder"], {
+    rawConfig: {}, saveQueue: Promise.resolve(), history: null, pendingOrder: null,
+    $: () => heading, translate: (key) => key, toast: () => {},
+    setSaveState: (host, state, text) => {
+      host.node ||= {};
+      Object.assign(host.node, { state, text, owner: null });
+      return host.node;
+    },
+    showApplied: (say) => say("saved", "applied"),
+    saveAccountName: async () => { if (fail === "name" || fail === "unauthorized") throw new Error(fail); },
+    patchConfig: async (patch) => {
+      if (fail === "weight" && patch.account_weights || fail === "order" && patch.account_order) throw new Error("failed");
+      Object.assign(ctx.rawConfig, patch);
+      return "token";
+    },
+    loadConfig: async () => {}, sortAccounts: () => {}, renderAccounts: () => {},
+  });
+  const field = (kind, value) => ({
+    value, accountSaved: "", accountEdit: 1, accountDirty: true,
+    validity: { badInput: false }, parentNode: { firstChild: {} },
+    getAttribute: () => kind,
+  });
+  const name = field("name", "unsaved name"), weight = field("weight", "2.5");
+  const row = { account: { name: "a", note: "old" } };
+  return { ctx, heading, row, name, weight, host: (input) => input.parentNode.firstChild };
+}
+
+test("a failed name save survives a later successful weight and order save", async () => {
+  const { ctx, heading, row, name, weight, host } = accountSaveContext("name");
+  ctx.saveAccountField(name, row);
+  ctx.saveAccountField(weight, row);
+  ctx.saveAccountOrder(["a"]);
+  await ctx.saveQueue;
+  assert.equal(host(name).node.state, "failed");
+  assert.equal(host(weight).node.state, "saved");
+  assert.equal(heading.node.state, "saved");
+  assert.equal(name.value, "unsaved name");
+  assert.equal(name.accountDirty, true);
+  assert.equal(name.accountPending, 0);
+  assert.equal(weight.accountDirty, false);
+});
+
+test("weight and order failures are not hidden by a successful name save", async () => {
+  for (const fail of ["weight", "order"]) {
+    const { ctx, heading, row, name, weight, host } = accountSaveContext(fail);
+    if (fail === "weight") ctx.saveAccountField(weight, row);
+    else ctx.saveAccountOrder(["a"]);
+    ctx.saveAccountField(name, row);
+    await ctx.saveQueue;
+    assert.equal(host(name).node.state, "saved");
+    assert.equal((fail === "weight" ? host(weight) : heading).node.state, "failed");
+    if (fail === "weight") {
+      assert.equal(weight.value, "2.5");
+      assert.equal(weight.accountDirty, true);
+    }
+  }
+});
+
+test("invalid weights and unauthorized saves report only their own field state", async () => {
+  const { ctx, row, name, weight, host } = accountSaveContext("unauthorized");
+  ctx.saveAccountField(name, row);
+  weight.value = "0";
+  ctx.saveAccountField(weight, row);
+  await ctx.saveQueue;
+  assert.equal(host(name).node.state, "failed");
+  assert.equal(host(weight).node.state, "failed");
+  assert.equal(host(weight).node.text, "weight_invalid");
+  assert.equal(name.accountDirty, true);
 });
 
 const HOUR = 3600, DAY = 86400, WEEK = 7 * DAY;

@@ -44,21 +44,41 @@ func describeTime(t, now time.Time) *modelTime {
 	return &modelTime{t.UTC().Format(time.RFC3339), relative}
 }
 
-// maskEmail keeps the last two characters of the email user name, the same
-// characters the page uses to tell accounts apart, such as "***rk". The
-// domain and the length of the user name are left out.
+// maskEmail keeps the last two characters of the unquoted email local part,
+// such as "***rk". The domain and the length of the local part are left out.
 func maskEmail(email string) string {
-	local, _, _ := strings.Cut(email, "@")
-	runes := []rune(local)
+	local := email
+	if at := strings.LastIndexByte(email, '@'); at >= 0 {
+		local = email[:at]
+	}
+	runes := []rune(strings.ReplaceAll(local, "\"", ""))
 	if len(runes) > 2 {
 		runes = runes[len(runes)-2:]
 	}
 	return "***" + string(runes)
 }
 
-// noteEmail matches email addresses embedded in account names, including
-// internationalized names and domains. Punctuation around an address is kept.
-var noteEmail = regexp.MustCompile("[\\p{L}\\p{N}.!#$%&'*+/=?^_`{|}~-]+@[\\p{L}\\p{N}](?:[\\p{L}\\p{N}-]*[\\p{L}\\p{N}])?(?:\\.[\\p{L}\\p{N}](?:[\\p{L}\\p{N}-]*[\\p{L}\\p{N}])?)*")
+// noteEmail matches entire non-whitespace fragments containing @, including
+// quoted local parts and domain literals. Unicode whitespace also separates fragments.
+var noteEmail = regexp.MustCompile(`[^\s\p{Z}\x{0085}\x{000B}]*@[^\s\p{Z}\x{0085}\x{000B}]*`)
+
+const retiredAccountLabel = "retired account"
+
+func accountEmailReplacer(accounts []AccountStatus) *strings.Replacer {
+	emails := make([]string, 0, len(accounts))
+	for _, a := range accounts {
+		if a.Email != "" {
+			emails = append(emails, a.Email)
+		}
+	}
+	// Prefer a full address over another address that is its prefix.
+	sort.SliceStable(emails, func(i, j int) bool { return len(emails[i]) > len(emails[j]) })
+	pairs := make([]string, 0, 2*len(emails))
+	for _, email := range emails {
+		pairs = append(pairs, email, maskEmail(email))
+	}
+	return strings.NewReplacer(pairs...)
+}
 
 func accountNoteName(a AccountStatus) string {
 	return strings.TrimSpace(strings.SplitN(a.Note, "\n", 2)[0])
@@ -66,8 +86,10 @@ func accountNoteName(a AccountStatus) string {
 
 // baseAccountLabel names an account by the first line of its note with
 // embedded emails masked, else by its masked email, else by its position.
-func baseAccountLabel(a AccountStatus, index int) string {
+func baseAccountLabel(a AccountStatus, index int, emails *strings.Replacer) string {
 	if name := accountNoteName(a); name != "" {
+		// Known addresses can contain spaces, so replace them before fragments.
+		name = emails.Replace(name)
 		return noteEmail.ReplaceAllStringFunc(name, maskEmail)
 	}
 	if a.Email != "" {
@@ -77,16 +99,17 @@ func baseAccountLabel(a AccountStatus, index int) string {
 }
 
 // accountLabels returns the label of each account. Accounts whose base
-// labels are equal get "#1", "#2" and so on, so that every label names one
-// account.
+// labels are equal or reserved get "#1", "#2" and so on, so that every label
+// names one current account and cannot identify retired accounts.
 func accountLabels(accounts []AccountStatus) []string {
+	emails := accountEmailReplacer(accounts)
 	base := make([]string, len(accounts))
 	count := map[string]int{}
 	for i, a := range accounts {
-		base[i] = baseAccountLabel(a, i)
+		base[i] = baseAccountLabel(a, i, emails)
 		count[base[i]]++
 	}
-	taken := map[string]bool{}
+	taken := map[string]bool{retiredAccountLabel: true}
 	// Reserve every base, including duplicated ones, so a generated label
 	// cannot shadow another account's shared base filter.
 	for _, label := range base {
@@ -95,7 +118,7 @@ func accountLabels(accounts []AccountStatus) []string {
 	out := make([]string, len(accounts))
 	next := map[string]int{}
 	for i, label := range base {
-		if count[label] == 1 {
+		if count[label] == 1 && label != retiredAccountLabel {
 			out[i] = label
 			continue
 		}
@@ -114,8 +137,8 @@ func accountLabels(accounts []AccountStatus) []string {
 
 // matchesAccount also accepts the original note name and full email, which
 // only the caller can know. selectedAccounts gives exact labels priority.
-func matchesAccount(a AccountStatus, index int, label, filter string) bool {
-	return filter == "" || filter == label || filter == baseAccountLabel(a, index) ||
+func matchesAccount(a AccountStatus, index int, label, filter string, emails *strings.Replacer) bool {
+	return filter == "" || filter == label || filter == baseAccountLabel(a, index, emails) ||
 		filter == accountNoteName(a) || a.Email != "" && filter == a.Email
 }
 func safeQueryError(a AccountStatus) string {
@@ -133,7 +156,11 @@ func safeQueryError(a AccountStatus) string {
 }
 func selectedAccounts(s Status, args map[string]string) map[string]string {
 	out := map[string]string{}
+	if args["account"] == retiredAccountLabel {
+		return out
+	}
 	labels := accountLabels(s.Accounts)
+	emails := accountEmailReplacer(s.Accounts)
 	// A returned label always identifies exactly one account, even if it
 	// also happens to be another account's original (unmasked) note name.
 	for i, label := range labels {
@@ -146,7 +173,7 @@ func selectedAccounts(s Status, args map[string]string) map[string]string {
 		}
 	}
 	for i, a := range s.Accounts {
-		if (args["provider"] == "" || args["provider"] == a.Provider) && matchesAccount(a, i, labels[i], args["account"]) {
+		if (args["provider"] == "" || args["provider"] == a.Provider) && matchesAccount(a, i, labels[i], args["account"], emails) {
 			out[a.AuthIndex] = labels[i]
 		}
 	}
@@ -575,7 +602,7 @@ func (b *MCPBackend) history(ctx context.Context, args map[string]string) (any, 
 		if _, ok := selected[parts[1]]; ok {
 			return true
 		}
-		if args["account"] != "retired account" {
+		if args["account"] != retiredAccountLabel {
 			return false
 		}
 		for _, account := range s.Accounts {
@@ -614,7 +641,7 @@ func (b *MCPBackend) history(ctx context.Context, args map[string]string) (any, 
 				}
 			}
 		}
-		if !ok && (args["account"] == "" || args["account"] == "retired account") {
+		if !ok && (args["account"] == "" || args["account"] == retiredAccountLabel) {
 			parts := strings.SplitN(series.Group, ":", 3)
 			if len(parts) == 3 && providers.Lookup(parts[0]) != nil && (args["provider"] == "" || args["provider"] == parts[0]) {
 				known := false
@@ -625,7 +652,7 @@ func (b *MCPBackend) history(ctx context.Context, args map[string]string) (any, 
 					}
 				}
 				if !known {
-					label, provider, groupLabel, ok = "retired account", parts[0], "retired quota pool", true
+					label, provider, groupLabel, ok = retiredAccountLabel, parts[0], "retired quota pool", true
 				}
 			}
 		}

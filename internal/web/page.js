@@ -172,7 +172,7 @@
       refresh: "刷新", refreshed: "已刷新 {0}",
       account_settings: "账号", rename: "名称",
       rename_hint: "名称写入 CPA 凭证备注的第一行，保留其余各行。留空则按邮箱区分账号；备注有多行时，清空名称须确认删除整条备注。",
-      account_order_hint: "拖动手柄或使用上移、下移按钮调整顺序，额度卡片和图表默认顺序随之调整。拖动时按 Esc 可取消。",
+      account_order_hint: "拖动手柄调整顺序，额度卡片和图表默认顺序随之调整。拖动时按 Esc 可取消。",
       account_name_aria: "{0} 的名称", account_weight_aria: "{0} 的权重", weight_default: "套餐默认值 {0}",
       rename_clear_note: "这个账号的备注还有其他内容。清空名称会删除整条备注，继续吗？",
       weight: "权重", weight_hint: "同一服务有多个账号时，可设置各账号的权重，合计按权重平均剩余额度。权重须大于 0，可带小数；留空使用输入框中提示的套餐默认值。",
@@ -223,7 +223,7 @@
       level_full: "满", level_high: "高", level_medium: "中", level_low: "低", level_empty: "空",
       inactive: "已停用", inactive_suffix: "（已停用）", stat_last: "最后读数",
       legend_inactive: "已停用：账号不再报告这个窗口，保留到最后一个数据点移出所选范围",
-      drag_handle: "拖动调整顺序", move_up: "上移", move_down: "下移", move_up_aria: "上移 {0}", move_down_aria: "下移 {0}",
+      drag_handle: "拖动调整顺序",
       order_failed: "账号顺序保存失败：{0}",
       view_nav: "页面", advanced: "高级",
       notify_channels: "通知渠道", webhook_advanced: "高级：请求方法、请求头、请求体和成功条件", alert_rules: "提醒规则",
@@ -331,7 +331,7 @@
       refresh: "Refresh", refreshed: "Refreshed {0}",
       account_settings: "Accounts", rename: "Name",
       rename_hint: "Names are saved as the first line of the CPA credential note; other lines are kept. Leave the name empty to distinguish accounts by email. Clearing a name on a multiline note requires confirmation to delete the whole note.",
-      account_order_hint: "Drag a handle or use the move-up and move-down buttons to set the default order of quota cards and charts. Press Esc during a drag to cancel.",
+      account_order_hint: "Drag a handle to set the default order of quota cards and charts. Press Esc during a drag to cancel.",
       account_name_aria: "Name of {0}", account_weight_aria: "Weight of {0}", weight_default: "Plan default: {0}",
       rename_clear_note: "The note of this account has more lines. Clearing the name deletes the whole note. Continue?",
       weight: "Weight", weight_hint: "For services with several accounts, the total averages their remaining quota by weight. Weights must be above 0; decimals are allowed. Leave a field empty to use the plan default shown in it.",
@@ -382,7 +382,7 @@
       level_full: "Full", level_high: "High", level_medium: "Medium", level_low: "Low", level_empty: "Empty",
       inactive: "Inactive", inactive_suffix: " (inactive)", stat_last: "Last reading",
       legend_inactive: "Inactive: the account no longer reports this window; it shows until its last sample leaves the range",
-      drag_handle: "Drag to reorder", move_up: "Move up", move_down: "Move down", move_up_aria: "Move {0} up", move_down_aria: "Move {0} down",
+      drag_handle: "Drag to reorder",
       order_failed: "Could not save the account order: {0}",
       view_nav: "Page", advanced: "Advanced",
       notify_channels: "Notification channels", webhook_advanced: "Advanced: method, headers, body and success condition", alert_rules: "Alert rules",
@@ -997,8 +997,8 @@
 
   // Saves the full list of credential file names in their new order through
   // the save queue. Cards and chart show it at once.
-  function saveAccountOrder(names, host) {
-    var say = host ? claimState(host) : function () {};
+  function saveAccountOrder(names) {
+    var say = claimState($("account-order-state"));
     pendingOrder = names.slice();
     rawConfig.account_order = names.slice();
     sortAccounts();
@@ -1011,10 +1011,8 @@
         return loadConfig();
       }).catch(function (err) {
         if (pendingOrder && pendingOrder.join("\n") === names.join("\n")) pendingOrder = null;
-        if (err.message !== "unauthorized") {
-          say("failed", translate("save_failed_short", err.message));
-          toast(translate("order_failed", err.message));
-        }
+        say("failed", translate("save_failed_short", err.message));
+        if (err.message !== "unauthorized") toast(translate("order_failed", err.message));
         return loadConfig().catch(function () {}).then(function () {
           sortAccounts();
           renderAccounts();
@@ -1023,8 +1021,6 @@
       });
     });
   }
-
-  function accountNames() { return status.accounts.map(function (a) { return a.name; }); }
 
   function reducedMotion() { return window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches; }
 
@@ -1044,19 +1040,6 @@
           { duration: 180, easing: getComputedStyle(row).getPropertyValue("--ease-out-strong").trim() });
       }
     });
-  }
-
-  // Keyed settings rows keep their inputs and buttons through reorders, so
-  // repeated keyboard moves retain focus, including at the list boundaries.
-  function moveAccount(name, delta) {
-    if (accountDrag) return;
-    var names = accountNames(), from = names.indexOf(name), to = from + delta;
-    if (from < 0 || to < 0 || to >= names.length) return;
-    names.splice(to, 0, names.splice(from, 1)[0]);
-    var row = accountRows().filter(function (r) { return r.getAttribute("data-account") === name; })[0];
-    var button = row && row.querySelector("[data-move='" + (delta < 0 ? "up" : "down") + "']");
-    animateAccountRows(function () { saveAccountOrder(names, row); });
-    if (button) button.focus({ preventScroll: true });
   }
 
   // The original row is a placeholder; an inert fixed copy follows the
@@ -1141,7 +1124,7 @@
       var names = accountRows().map(function (row) { return row.getAttribute("data-account"); });
       var before = drag.before.map(function (row) { return row.getAttribute("data-account"); });
       accountDrag = null;
-      if (!cancelled && names.join("\n") !== before.join("\n")) saveAccountOrder(names, drag.row);
+      if (!cancelled && names.join("\n") !== before.join("\n")) saveAccountOrder(names);
       else if (accountsBehind) renderAccounts();
       else renderAccountSettings();
     };
@@ -1155,7 +1138,7 @@
   }
 
   function makeAccountSetting(account) {
-    var row = el("div", { class: "account-setting save-host", "data-account": account.name });
+    var row = el("div", { class: "account-setting", "data-account": account.name });
     var handle = el("span", { class: "drag-handle", "aria-hidden": "true" });
     handle.addEventListener("pointerdown", function (e) { startAccountDrag(e, row, handle); });
     row.appendChild(handle);
@@ -1168,12 +1151,10 @@
         "data-account-field": kind, autocomplete: "off", spellcheck: "false" });
       if (kind === "weight") { input.step = "any"; input.min = "0"; }
       input.addEventListener("change", function () { saveAccountField(input, row); });
-      row.appendChild(el("label", {}, [el("span", { class: "field-label", text: translate(kind === "name" ? "rename" : "weight") }), input]));
+      row.appendChild(el("label", {}, [el("span", { class: "field-label save-host" }, [
+        el("span", { text: translate(kind === "name" ? "rename" : "weight") })
+      ]), input]));
     });
-    row.appendChild(el("span", { class: "order-buttons" }, [-1, 1].map(function (delta) {
-      return el("button", { type: "button", class: "btn btn-ghost btn-icon", "data-move": delta < 0 ? "up" : "down", text: delta < 0 ? "↑" : "↓",
-        onclick: function () { moveAccount(account.name, delta); } });
-    })));
     return row;
   }
 
@@ -1203,7 +1184,7 @@
       row.querySelector(".drag-handle").title = translate("drag_handle");
       Array.prototype.forEach.call(row.querySelectorAll("[data-account-field]"), function (input) {
         var kind = input.getAttribute("data-account-field"), weight = kind === "weight";
-        input.parentNode.firstChild.textContent = translate(weight ? "weight" : "rename");
+        input.parentNode.firstChild.firstChild.textContent = translate(weight ? "weight" : "rename");
         input.setAttribute("aria-label", translate(weight ? "account_weight_aria" : "account_name_aria", spoken));
         input.parentNode.classList.toggle("account-weight-empty", weight && counts[account.provider] <= 1);
         input.disabled = weight && counts[account.provider] <= 1;
@@ -1214,12 +1195,6 @@
           input.accountSaved = value;
         }
         if (weight) input.placeholder = translate("weight_default", fmtWeight(Number(account.default_weight) > 0 ? Number(account.default_weight) : 1));
-      });
-      Array.prototype.forEach.call(row.querySelectorAll("[data-move]"), function (button) {
-        var up = button.getAttribute("data-move") === "up";
-        button.title = translate(up ? "move_up" : "move_down");
-        button.setAttribute("aria-label", translate(up ? "move_up_aria" : "move_down_aria", spoken));
-        button.setAttribute("aria-disabled", (up ? index === 0 : index === status.accounts.length - 1) ? "true" : "false");
       });
     });
     existing.forEach(function (row) { row.remove(); });
@@ -1543,15 +1518,19 @@
     return name ? (name + "\n" + rest).trim() : "";
   }
 
+  function accountFieldHost(input) { return input.parentNode.firstChild; }
+
   // Account fields have no config input name: names go to CPA credentials,
   // and weights patch a shared map built from the preceding queued save.
   // Dirty or pending fields survive polling, sorting and earlier saves.
+  // Each field owns the save state beside its label, independently of order.
   function saveAccountField(input, row) {
+    var host = accountFieldHost(input);
     var account = row.account, kind = input.getAttribute("data-account-field"), weight = kind === "weight";
     var answer = weight ? input.value.trim() : input.value.replace(/\s+/g, " ").trim();
     var value = Number(answer), gen = input.accountEdit || 0;
     if (weight && (input.validity.badInput || (answer !== "" && (!isFinite(value) || value <= 0)))) {
-      setSaveState(row, "failed", translate("weight_invalid"));
+      setSaveState(host, "failed", translate("weight_invalid"));
       return;
     }
     if (answer === input.accountSaved && !input.accountPending) {
@@ -1565,7 +1544,7 @@
       return;
     }
     var note = !weight ? accountNote(account.note, answer) : "";
-    var say = claimState(row);
+    var say = claimState(host);
     input.accountPending = (input.accountPending || 0) + 1;
     saveQueue = saveQueue.then(function () {
       if (!weight) return saveAccountName(account, note).then(function () { say("saved", translate("save_saved")); });
@@ -1583,7 +1562,8 @@
         input.accountDirty = false;
       }
     }).catch(function (err) {
-      if (err.message !== "unauthorized") say("failed", translate("save_failed_short", err.message));
+      if ((input.accountEdit || 0) === gen) input.accountDirty = true;
+      say("failed", translate("save_failed_short", err.message));
     }).then(function () {
       input.accountPending--;
       renderAccounts();
@@ -3275,7 +3255,7 @@
     clearTimeout(node.timer);
     node.owner = null;
     node.setAttribute("data-state", state);
-    if (host.classList.contains("account-setting")) {
+    if (host.closest(".account-setting") || host.id === "account-order-state") {
       clear(node);
       maskedNodes(text).forEach(function (part) { node.appendChild(part); });
     } else node.textContent = text;
@@ -3768,7 +3748,7 @@
     }
     var top = inputTop(e.target);
     if (top) noteEdit(top);
-    var host = accountField ? e.target.closest(".save-host") : top ? saveHost(e.target) : null;
+    var host = accountField ? accountFieldHost(e.target) : top ? saveHost(e.target) : null;
     if (host) Array.prototype.forEach.call(host.children, function (child) {
       if (!child.classList.contains("save-state")) return;
       clearTimeout(child.timer);
