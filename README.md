@@ -55,7 +55,7 @@ Kimi 的额度查询按 CPA 管理中心的实现编写，解析用一位用户�
 
 ## 要求
 
-- CPA v8.0.4 或更新版本，并开启插件（`plugins.enabled: true`）。插件提供 Linux amd64/arm64、macOS amd64/arm64 和 Windows amd64 版本；macOS 版本只在 CI 中构建和测试，还没有在实际运行的 CPA 上验证。
+- CPA v8.0.4 或更新版本，并开启插件（`plugins.enabled: true`）。插件提供 Linux amd64/arm64、macOS amd64/arm64 和 Windows amd64 版本；macOS 版本还没有在实际运行的 CPA 上验证。
 - 一个专门给 Lamplighter 用的 CPA API key。插件用它读取模型列表来选择点火模型。
 - 需要通知时，一台装有 Bark 的 iPhone，或者一个能接收 webhook 的服务。
 
@@ -106,9 +106,13 @@ Claude 和 Codex 的额度无论主动还是被动获取，都精确到 1%；Ant
 
 - 时间均按插件时区计算，默认跟随 CPA 服务器。
 - 每天 `07:00` 第一次点火，之后在每次重置后 3 秒点火，最晚到 `22:30`。晚于这个时间的重置顺延到第二天 07:00。
-- 请求只要求模型回复 `OK`，不带工具，最多输出 4 个 token。
+- 请求只要求模型回复 `OK`，不带工具，也不设置输出 token 上限。流式接收首次非空输出（正文、可见推理或工具参数）后，独立计时 2 秒并关闭上游流；提前结束时立即收尾。心跳和生命周期事件不启动计时，主动断流不触发换模型。
 - 点火模型自动选择：ChatGPT 用最新的 Luna，Claude 用最新的 Haiku，Antigravity 的 Gemini 组用最新的 Flash。CPA 列出新模型后，下一次点火就会使用它；上游拒绝这个模型时，这次点火改用下一个候选模型；换用成功时在事件中记录，这个额度组 24 小时内不再尝试被拒的模型。也可以在配置中指定。
 - 请求发出后，插件确认 5 小时窗口有了一个固定的未来重置时间，才算点火成功。
+
+首输出前沿用 CPA 自身的等待行为；`request_timeout_seconds` 不限制模型启动等待。插件停止时，已取得流标识的请求会关闭；仍在启动的请求须等待 CPA 返回流标识。具体边界见[流式执行与取消](./docs/architecture.md#流式执行与取消)。
+
+每次模型调用结束后，CPA 服务器日志记录服务、模型、关联标识、收到的正文、宿主提供的 usage 及其完整性、结束原因、首输出等待和总耗时。正文（含可见推理和工具参数）最多保留 4096 个 Unicode 字符，超出时标记截断。usage 保留 CPA 给出的数字，不估算 token；CPA 转换可能补零或合并计数，因此 Antigravity 的 usage 即使自然结束也标为不完整。其他完整性标记只描述宿主协议中的统计，不保证上游所有用量及细分项均已返回。记录不包含凭证、完整请求或加密推理，也不写入页面事件和额度历史。
 
 **失败保护**：
 
@@ -151,7 +155,7 @@ Claude 和 Codex 的额度无论主动还是被动获取，都精确到 1%；Ant
 | `timezone` | 空 | 显示时间和点火时段使用的时区，如 `Asia/Shanghai`；为空时跟随 CPA 服务器的时区（官方 Docker 镜像由 `TZ` 设置） |
 | `timezone_offset_hours` | 空 | 固定的 UTC 偏移，例如 `8`；只在 `timezone` 为空时使用 |
 | `poll_interval_seconds` | `300` | 主动查询间隔，最小 60 |
-| `request_timeout_seconds` | `20` | 单次上游请求超时 |
+| `request_timeout_seconds` | `20` | 额度查询、通知等 HTTP 请求的超时；不限制点火模型的启动或首输出等待 |
 | `passive_skip_seconds` | `60` | 整点前多少秒内有被动数据时跳过主动查询；`0` 表示不跳过 |
 | `passive_skip_max_minutes` | `30` | 同一账号最多连续跳过多少分钟 |
 | `models_api_key` | 空 | 读取模型列表用的 CPA API key；未设置时自动点火无法选择模型。不能使用管理密钥；在页面上修改时，管理密钥和 CPA 不接受的 key 不会保存，页面会提示原因 |

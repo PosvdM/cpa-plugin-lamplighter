@@ -183,8 +183,9 @@ func TestClampPercentDropsFloatNoise(t *testing.T) {
 }
 
 func TestTriggerPromptIsStrict(t *testing.T) {
-	if !strings.Contains(TriggerPrompt, "Reply with exactly OK and nothing else.") {
-		t.Fatal("trigger prompt must ask for exactly OK")
+	const want = "Do not think, reason, deliberate, use tools, or perform any other task. Reply with exactly OK and nothing else."
+	if TriggerPrompt != want {
+		t.Fatalf("trigger prompt = %q, want %q", TriggerPrompt, want)
 	}
 }
 
@@ -201,6 +202,14 @@ func TestRequestUsesMinimalBodies(t *testing.T) {
 		json.Unmarshal(raw, &body)
 		if body["model"] != "m" || !strings.Contains(string(raw), "exactly OK") {
 			t.Fatalf("%s body %s", p.ID, raw)
+		}
+		if body["stream"] != true {
+			t.Fatalf("%s must request streaming", p.ID)
+		}
+		for _, key := range []string{"max_tokens", "max_output_tokens", "max_completion_tokens", "maxOutputTokens", "max_new_tokens"} {
+			if _, exists := body[key]; exists {
+				t.Fatalf("%s contains output limit %s", p.ID, key)
+			}
 		}
 		if strings.Contains(string(raw), `"tools":[{`) {
 			t.Fatalf("%s must not declare tools", p.ID)

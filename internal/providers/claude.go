@@ -37,9 +37,9 @@ var claude = &Provider{
 		Protocol: "claude",
 		Body: func(model string) map[string]any {
 			return map[string]any{
-				"model":      model,
-				"max_tokens": 4,
-				"messages":   []any{map[string]any{"role": "user", "content": TriggerPrompt}},
+				"model":    model,
+				"stream":   true,
+				"messages": []any{map[string]any{"role": "user", "content": TriggerPrompt}},
 			}
 		},
 		Candidates: claudeCandidates,

@@ -10,7 +10,7 @@ Lamplighter 是用 Go 编写、以 `-buildmode=c-shared` 构建的 CPA 原生插
 | `internal/plugin` | 插件 RPC 方法：注册、重新配置、暂停、管理接口、`usage.handle` |
 | `internal/engine` | 后台循环：主动查询、被动数据、点火、通知、历史和状态页数据；`mcp.go` 提供模型可读 DTO 和额度预测 |
 | `internal/mcp` | 独立 HTTP 监听器、MCP Streamable HTTP 协议、Bearer 鉴权和 Origin 校验 |
-| `internal/host` | 宿主回调的 Go 封装，以及 `host.http.do` 的超时控制 |
+| `internal/host` | 宿主回调的 Go 封装、模型流打开/读取/关闭，以及 `host.http.do` 的超时控制 |
 | `internal/config` | 插件配置解析、默认值和取值范围；读取 CPA 配置判断插件是否启用、计算默认数据目录 |
 | `internal/providers` | 每个服务一个文件：额度请求和解析、响应头解析、点火请求、候选模型、默认设置；注册表，见下文“服务” |
 | `internal/quota` | 额度窗口和上游请求的类型，窗口种类判断，时间解析 |
@@ -107,7 +107,7 @@ MCP 设置读取 `status.mcp` 显示监听状态；开启时没有有效密钥�
 | --- | --- |
 | `host.auth.list` | 凭证列表，含 `auth_index`、运行时 ID、邮箱、备注（`note`）、停用状态，以及 CPA 冷却状态（`unavailable`、`next_retry_after`） |
 | `host.auth.get` | 凭证文件 JSON，取 access token、Codex 账号 ID、Antigravity 的 `project_id` 和 `user_agent`、Kimi 的 `domain` 和 `base_url`、Grok 的 `sub`、`proxy_url` |
-| `host.model.execute` | 点火，带 `auth_id` 和 `forced_provider` |
+| `host.model.execute_stream` / `host.model.stream_read` / `host.model.stream_close` | 流式点火，带 `auth_id` 和 `forced_provider`，关闭流时取消上游请求 |
 | `host.http.operation_open` / `host.http.do` / `host.http.cancel` | 没有账号代理时的额度请求，以及读取 Antigravity Hub 更新清单 |
 | `host.log` | 写入 CPA 日志 |
 
@@ -160,7 +160,7 @@ CPA 的 `sdk/cliproxy/auth` 在请求执行中应用模型别名、会话亲和�
 
 ## 后台循环
 
-`engine.Engine` 用一个 goroutine 完成所有网络工作，避免查询、点火和通知交叉修改状态：
+`engine.Engine` 用一个后台循环串行处理查询、点火和通知状态；HTTP 取消和模型流 watchdog 在独立 goroutine 中执行，不修改额度状态：
 
 1. 插件注册后启动，先等 20 秒，让 CPA 加载凭证和执行器。
 2. 打开数据目录，取得 `instance.lock`。
@@ -261,13 +261,39 @@ Antigravity、Kimi 和 Grok 的响应头里没有额度。
 
 ### 请求
 
-点火通过 `host.model.execute` 发送，`auth_id` 为凭证的运行时 ID，`forced_provider` 为 CPA 报告的服务名（`Cred.HostProvider`）。请求体由各服务的 `Ignition.Body` 给出，经 `providers.Request` 编码。Kimi 和 Grok 没有点火：Kimi 订阅的 5 小时和 7 天窗口从开通时间起按固定时间切换，不论是否使用；Grok 的每周额度在上一周期结束时自动开始。其余服务的请求如下：
+点火通过 `host.model.execute_stream` 发送，`auth_id` 为凭证的运行时 ID，`forced_provider` 为 CPA 报告的服务名（`Cred.HostProvider`）。请求体由各服务的 `Ignition.Body` 给出，经 `providers.Request` 编码。Kimi 和 Grok 没有点火：Kimi 订阅的 5 小时和 7 天窗口从开通时间起按固定时间切换，不论是否使用；Grok 的每周额度在上一周期结束时自动开始。其余服务的请求如下：
 
 | 服务 | 入口协议 | 请求要点 |
 | --- | --- | --- |
-| Codex | `openai-response` | `reasoning.effort: none`，`tools: []`，`max_output_tokens: 4` |
-| Claude | `claude` | `max_tokens: 4` |
-| Antigravity | `openai` | `max_tokens: 4`，`temperature: 0`，`reasoning_effort: none` |
+| Codex | `openai-response` | `reasoning.effort: none`，`tools: []`，`stream: true` |
+| Claude | `claude` | `stream: true` |
+| Antigravity | `openai` | `temperature: 0`，`reasoning_effort: none`，`stream: true` |
+
+所有点火请求都省略输出 token 上限字段。唯一的提示词由 `providers.TriggerPrompt` 给出：
+
+```text
+Do not think, reason, deliberate, use tools, or perform any other task. Reply with exactly OK and nothing else.
+```
+
+### 流式执行与取消
+
+`engine.executeStream` 同步打开模型流，取得 `stream_id` 后逐块读取；响应头保留给 `confirm`。`stream_parse.go` 按宿主接口的实际格式解析：OpenAI Chat Completions（Antigravity）每个 chunk 是 JSON 对象，HTTP handler 才会添加 `data:` 和 `[DONE]`；Responses 和 Claude 的 chunk 已带 SSE。SSE 允许跨 chunk 的行、事件和 UTF-8 字符，单行及单事件缓冲各最多 1 MiB，单个 Chat JSON chunk 同样限为 1 MiB。首次非空文本、可见 reasoning 或工具参数增量触发 `onOutput`，心跳、角色、生命周期和加密 reasoning 不触发。
+
+独立 watchdog 从首次输出的单调时钟时间起计时 2 秒（`ignitionOutputWindow`），到期调用 `host.model.stream_close`。这个回调取消 CPA 的上游 HTTP context，因此下一次 `stream_read` 阻塞时仍可关闭。自然终止、读取或解析错误、调用 context 取消及插件停止时同样释放流。读路径和 watchdog 通过互斥锁争取单一终止所有权，只有仍活动的流能被 watchdog 截断；已确定的完成或错误不会被迟到的 deadline、取消或 watchdog panic 覆盖。deadline 分支发现取消或停止已就绪时按取消处理。`sync.Once` 保证只关闭一次，调用返回前等待 watchdog 退出；关闭错误或 panic 记为 `close_error`，同时保留已确定的执行错误。主动 2 秒断流记为 `output_timeout`，不触发候选模型 fallback，随后仍走额度窗口确认。Claude/Responses 终止事件前的 EOF 作为异常处理；Chat 收到 `finish_reason` 后继续读取可能独立返回的 usage，随后 EOF 才视为正常终止。
+
+流打开后的宿主 `chunk.Error`、协议 `error` 和 `response.failed` 统一转为 `host.Error`，交给 `ignite.Classify`、`ignite.ModelRejected` 和既有失败保护处理。只保留白名单内的 HTTP 状态码和协议 `code`/`type`；宿主字符串只解析 JSON 错误对象或开头的 `HTTP NNN` / `status NNN`，不从自由文本 message 中猜测分类。已知协议标识可补足状态码，例如 `rate_limit_exceeded` / `rate_limit_error` / `usage_limit_reached` 对应 429、`authentication_error` 对应 401、`model_not_found` 对应 404；显式状态码优先。流内明确的认证失败（`authentication_error` 或状态码 401）会丢弃 `auth_unavailable` 标识，避免被既有分类器误认为 CPA 本地冷却；未带认证失败信息的本地冷却及非流式路径沿用原有分类。未知标识、原始 message 和原始错误载荷均丢弃。流内 401/403/429 立即触发高风险失败保护，不换模型；400/404 沿用每次点火至多一次的模型 fallback。
+
+**启动限制及 TODO**：CPA SDK v8.0.4（检查至 v8.0.60 仍相同）没有公开的模型启动取消接口。`internal/pluginhost/host_model_stream_callbacks.go` 使用 `context.WithoutCancel`，`sdk/api/handlers/model_execution.go` 同步等待首个 raw chunk 后才返回流，`internal/pluginhost/model_stream_bridge.go` 随后登记 `stream_id`。raw chunk 可能只是生命周期事件，不等于首次输出。插件在 ID 返回前无法调用 close，沿用 CPA 自身的等待行为，停止也可能等到这一步结束；ID 返回后若已停止，立即关闭。`request_timeout_seconds` 的默认 20 秒只用于其他 HTTP 请求，不保护模型启动或首输出等待。后续需在 CPA 提供公开的启动操作取消句柄后，再实现启动等待超时和停止期间取消；不通过单独 goroutine 超时返回留下仍在运行的上游请求，也不为此升级到仍无该接口的 SDK。
+
+### 调用日志
+
+每次模型调用结束后写一条 `Lamplighter ignition` JSON 日志，启动失败也记录。JSON 放在 `host.Log` 的 Message 中，同时附带 structured fields：CPA 默认 formatter 会丢弃任意 fields，不能只依赖 fields。`json.Marshal` 转义换行及控制字符，正文不会伪造额外日志行。日志不写入 UI 事件、历史或状态文件。
+
+记录包含 `provider`、`model`、`auth_index`、随机 `correlation_id`、`stream_id`、HTTP 状态、`reply`、`reply_truncated`、`output_received`、`usage`、`usage_source`、`usage_completeness`、`end_reason`、`first_output_wait_ms` 和 `total_ms`。未收到输出时等待时间为 `null`，总耗时仍包含启动等待。`reply` 按收到顺序拼接文本、可见推理和工具参数，最多 4096 个 Unicode 字符；截断不截断 UTF-8 字符。只保留这些可见字段和白名单内的 usage 计数，不记录完整请求、凭证、原始错误载荷或 opaque 加密推理。
+
+`usage_source` 固定为 `cpa_host`。`usage` 保留宿主提供的白名单计数和已知细分项，插件不推算缺失值、不估算 token；这些数字可能已经过 CPA 转换，不能据此断言全部来自真实且完整的上游统计。Claude 的 `message_start` 和 `message_delta` 计数合并。
+
+`usage_completeness` 为 `missing`（没有计数）、`partial` 或 `complete`。只有 Claude/`claude` 和 Codex/`openai-response` 原生点火路由正常终止，且收到最终输入和输出计数时标为 `complete`；它表示宿主协议的最终计数齐全，不保证每个上游细分项均存在。其余有计数的调用均为 `partial`，包括主动断流及 Antigravity/Chat 的自然结束。CPA 的 Antigravity→OpenAI translator 会为缺失计数补零，不同转换路径对推理 token 的合并和细分也可能不同；字段齐全或收到 `finish_reason` 不足以验证上游统计完整性，插件不把补出的零解释为确定的零用量。结束原因区分正常完成、主动断流、取消、启动/HTTP/读取/解析错误、异常 EOF 和关闭失败。
 
 ### 模型选择
 
@@ -290,7 +316,7 @@ CPA 的模型列表来自它内置并定期更新的模型表，同一服务的�
 
 ### 确认
 
-点火请求返回 2xx 后，插件确认 5 小时窗口在请求之后观测到了固定的未来重置时间：
+点火请求返回 2xx，且流正常结束或被 2 秒计时主动关闭后，插件确认 5 小时窗口在请求之后观测到了固定的未来重置时间。收到正文或 usage 本身不能确认成功：
 
 1. Claude 的响应头里直接带新的重置时间，立即确认。
 2. Codex 的额度信息通过同一请求的用量记录到达；等待期间继续处理被动数据。
@@ -370,7 +396,7 @@ Did Codex Reset 每 `poll_seconds` 秒（最少 300 秒，对齐时间边界）�
 
 ## 设计约束
 
-- 点火只通过 `host.model.execute` 发送，并锁定到具体凭证；不要在插件中拼装服务的模型请求。
+- 点火只通过 `host.model.execute_stream` 发送，并锁定到具体凭证；不要在插件中拼装服务的模型请求。
 - 额度请求的出口必须与 CPA 模型请求一致；出口无法确定时跳过请求，不能退回直连。
 - 不在日志、事件、状态接口或磁盘中输出 access token、`bark_url`、`webhook` 的地址、请求头和请求体，以及 `models_api_key`、`mcp_key`。
 - 宿主回调的 JSON 字段以 CPA v8.0.4 的 `sdk/pluginapi` 和 `internal/pluginhost` 为准；修改前对照 CPA 源码。
