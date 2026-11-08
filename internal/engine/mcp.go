@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -42,6 +43,7 @@ func describeTime(t, now time.Time) *modelTime {
 	}
 	return &modelTime{t.UTC().Format(time.RFC3339), relative}
 }
+
 // maskEmail keeps the last two characters of the email user name, the same
 // characters the page uses to tell accounts apart, such as "***rk". The
 // domain and the length of the user name are left out.
@@ -54,11 +56,19 @@ func maskEmail(email string) string {
 	return "***" + string(runes)
 }
 
-// baseAccountLabel names an account by the first line of its note, else by
-// its masked email, else by its position.
+// noteEmail matches email addresses embedded in account names, including
+// internationalized names and domains. Punctuation around an address is kept.
+var noteEmail = regexp.MustCompile("[\\p{L}\\p{N}.!#$%&'*+/=?^_`{|}~-]+@[\\p{L}\\p{N}](?:[\\p{L}\\p{N}-]*[\\p{L}\\p{N}])?(?:\\.[\\p{L}\\p{N}](?:[\\p{L}\\p{N}-]*[\\p{L}\\p{N}])?)*")
+
+func accountNoteName(a AccountStatus) string {
+	return strings.TrimSpace(strings.SplitN(a.Note, "\n", 2)[0])
+}
+
+// baseAccountLabel names an account by the first line of its note with
+// embedded emails masked, else by its masked email, else by its position.
 func baseAccountLabel(a AccountStatus, index int) string {
-	if name := strings.TrimSpace(strings.SplitN(a.Note, "\n", 2)[0]); name != "" {
-		return name
+	if name := accountNoteName(a); name != "" {
+		return noteEmail.ReplaceAllStringFunc(name, maskEmail)
 	}
 	if a.Email != "" {
 		return maskEmail(a.Email)
@@ -77,10 +87,10 @@ func accountLabels(accounts []AccountStatus) []string {
 		count[base[i]]++
 	}
 	taken := map[string]bool{}
+	// Reserve every base, including duplicated ones, so a generated label
+	// cannot shadow another account's shared base filter.
 	for _, label := range base {
-		if count[label] == 1 {
-			taken[label] = true
-		}
+		taken[label] = true
 	}
 	out := make([]string, len(accounts))
 	next := map[string]int{}
@@ -102,10 +112,11 @@ func accountLabels(accounts []AccountStatus) []string {
 	return out
 }
 
-// matchesAccount accepts the label, the shared base label of accounts with
-// the same name, and the full email, which only the caller can know.
+// matchesAccount also accepts the original note name and full email, which
+// only the caller can know. selectedAccounts gives exact labels priority.
 func matchesAccount(a AccountStatus, index int, label, filter string) bool {
-	return filter == "" || filter == label || filter == baseAccountLabel(a, index) || a.Email != "" && filter == a.Email
+	return filter == "" || filter == label || filter == baseAccountLabel(a, index) ||
+		filter == accountNoteName(a) || a.Email != "" && filter == a.Email
 }
 func safeQueryError(a AccountStatus) string {
 	if a.Error == "" {
@@ -123,6 +134,17 @@ func safeQueryError(a AccountStatus) string {
 func selectedAccounts(s Status, args map[string]string) map[string]string {
 	out := map[string]string{}
 	labels := accountLabels(s.Accounts)
+	// A returned label always identifies exactly one account, even if it
+	// also happens to be another account's original (unmasked) note name.
+	for i, label := range labels {
+		if args["account"] != "" && args["account"] == label {
+			a := s.Accounts[i]
+			if args["provider"] == "" || args["provider"] == a.Provider {
+				out[a.AuthIndex] = label
+			}
+			return out
+		}
+	}
 	for i, a := range s.Accounts {
 		if (args["provider"] == "" || args["provider"] == a.Provider) && matchesAccount(a, i, labels[i], args["account"]) {
 			out[a.AuthIndex] = labels[i]
@@ -145,13 +167,19 @@ const startupRetrySeconds = 30
 func (b *MCPBackend) notReady(needPoll bool) map[string]any {
 	e := b.engine
 	e.mu.Lock()
-	enabled, running := e.enabled, e.running
+	defer e.mu.Unlock()
+	return b.notReadyLocked(needPoll)
+}
+
+// notReadyLocked requires engine.mu; refresh keeps this check and the
+// rate-limit reservation atomic with respect to engine shutdown.
+func (b *MCPBackend) notReadyLocked(needPoll bool) map[string]any {
+	e := b.engine
 	polled := !e.lastPoll.IsZero() || e.pollErrs[""] != ""
-	e.mu.Unlock()
 	switch {
-	case !enabled:
+	case !e.enabled:
 		return map[string]any{"ready": false, "state": "disabled", "certain": false, "note": "Lamplighter is disabled in the CPA config and reports no quota data."}
-	case !running || needPoll && !polled:
+	case !e.running || e.stopped || needPoll && !polled:
 		return map[string]any{"ready": false, "state": "starting", "certain": false, "retry_after_seconds": startupRetrySeconds, "note": "Lamplighter is starting and has not loaded quota data yet; this is not an empty quota list. Retry after retry_after_seconds."}
 	}
 	return nil
@@ -162,9 +190,8 @@ func (b *MCPBackend) CallTool(ctx context.Context, name string, args map[string]
 		return nil, err
 	}
 	switch name {
-	case "list_quotas", "get_quota_history", "get_quota_events", "refresh_quotas":
-		// A refresh only needs the running engine; it is itself a poll.
-		if result := b.notReady(name != "refresh_quotas"); result != nil {
+	case "list_quotas", "get_quota_history", "get_quota_events":
+		if result := b.notReady(true); result != nil {
 			return result, nil
 		}
 	}
@@ -623,6 +650,10 @@ func (b *MCPBackend) history(ctx context.Context, args map[string]string) (any, 
 	return map[string]any{"from": describeTime(history.From, s.Now), "to": describeTime(history.To, s.Now), "max_points": 2000, "series": out}, nil
 }
 func (b *MCPBackend) refresh(ctx context.Context, args map[string]string) (any, error) {
+	// A refresh only needs the running engine; it is itself a poll.
+	if result := b.notReady(false); result != nil {
+		return result, nil
+	}
 	s := b.engine.Status()
 	auth := ""
 	if args["account"] != "" {
@@ -635,21 +666,23 @@ func (b *MCPBackend) refresh(ctx context.Context, args map[string]string) (any, 
 		}
 	}
 	b.mu.Lock()
-	now := b.engine.now()
+	e := b.engine
+	e.mu.Lock()
+	if result := b.notReadyLocked(false); result != nil {
+		e.mu.Unlock()
+		b.mu.Unlock()
+		return result, nil
+	}
+	now := e.now()
 	if b.nextRefresh.After(now) {
 		seconds := int(math.Ceil(b.nextRefresh.Sub(now).Seconds()))
+		e.mu.Unlock()
 		b.mu.Unlock()
 		return map[string]any{"ok": false, "retry_after_seconds": seconds, "retry_at": describeTime(now.Add(time.Duration(seconds)*time.Second), now)}, nil
 	}
 	b.nextRefresh = now.Add(time.Minute)
-	b.mu.Unlock()
-	e := b.engine
-	e.mu.Lock()
-	ready := e.running && e.enabled
 	e.mu.Unlock()
-	if !ready {
-		return nil, errors.New("Quota engine is not running")
-	}
+	b.mu.Unlock()
 	ctx, cancel := context.WithTimeout(ctx, commandTimeout)
 	defer cancel()
 	cmd := command{kind: "refresh", arg: auth, reply: make(chan commandReply, 1)}
