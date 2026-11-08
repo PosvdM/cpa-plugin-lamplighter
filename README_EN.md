@@ -114,7 +114,7 @@ Before the first output, waiting follows CPA's own behavior; `request_timeout_se
 
 After each model call, the CPA server log records the service, model, correlation identifiers, received text, host-reported usage and its completeness, end reason, time to first output and total duration. Text, including visible reasoning and tool arguments, is capped at 4096 Unicode characters and marked when truncated. Usage retains CPA's numbers without estimating tokens. CPA translation may fill missing counters with zeros or combine token categories, so Antigravity usage is marked partial even after a natural end. Other completeness labels describe host-protocol accounting only; they do not guarantee that all upstream usage or breakdowns were returned. Records exclude credentials, full requests and encrypted reasoning, and are not added to page events or quota history.
 
-**Failure protection**:
+**Failure protection**: the retry and pause rules below apply to scheduled ignition. A failed "Ignite now" request only displays the error and records an event. It does not retry automatically, count toward failure protection, or change the existing automatic schedule. Successful manual ignition is recorded as usual.
 
 - Authentication failures, rate limits (429), unavailable models, or a request that succeeded without starting the window pause ignition for that quota group until 07:00 the next day, with one notification.
 - Network and server errors are retried after 5 and 15 minutes; a third failure also pauses until the next day.

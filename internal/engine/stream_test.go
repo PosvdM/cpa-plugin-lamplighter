@@ -31,6 +31,7 @@ type streamHost struct {
 	openErr   error
 	open      func()
 	messages  []string
+	lineMode  bool
 }
 
 func newStreamHost() *streamHost {
@@ -74,8 +75,16 @@ func (h *streamHost) Log(_ string, message string, _ map[string]any) {
 	h.messages = append(h.messages, message)
 }
 
+func (h *streamHost) raw(s string) {
+	h.chunks <- pluginapi.HostModelStreamReadResponse{Payload: []byte(s)}
+}
+
 func (h *streamHost) event(s string) {
-	h.chunks <- pluginapi.HostModelStreamReadResponse{Payload: []byte("data: " + s + "\n\n")}
+	if h.lineMode {
+		h.raw("data: " + s)
+		return
+	}
+	h.raw("data: " + s + "\n\n")
 }
 
 func streamTarget() target {
@@ -107,6 +116,8 @@ func streamRecord(t *testing.T, h *streamHost) map[string]any {
 
 func TestIgnitionStreamWatchdogClosesBlockedRead(t *testing.T) {
 	h := newStreamHost()
+	h.lineMode = true
+	h.raw("event: response.output_text.delta")
 	h.event(`{"type":"response.output_text.delta","delta":"OK"}`)
 	e := New(Options{Host: h})
 	started := time.Now()
@@ -144,6 +155,63 @@ func TestIgnitionStreamNaturalEndAndLog(t *testing.T) {
 	}
 	if object(r["usage"])["output_tokens"] != float64(19) {
 		t.Fatal("usage must be reported, not estimated")
+	}
+}
+
+func TestIgnitionCodexScannerLines(t *testing.T) {
+	for _, metadata := range []bool{false, true} {
+		t.Run(strconv.FormatBool(metadata), func(t *testing.T) {
+			h := newStreamHost()
+			h.lineMode = true
+			for _, event := range []struct{ name, data string }{
+				{"response.created", `{"type":"response.created"}`},
+				{"response.output_text.delta", `{"type":"response.output_text.delta","delta":"OK"}`},
+				{"response.completed", `{"type":"response.completed","response":{"usage":{"input_tokens":12,"output_tokens":3}}}`},
+			} {
+				if metadata {
+					h.raw("event: " + event.name)
+				}
+				h.event(event.data)
+			}
+			if metadata {
+				h.raw(": keepalive")
+			}
+			h.chunks <- pluginapi.HostModelStreamReadResponse{Done: true}
+			e := New(Options{Host: h})
+			_, err := e.executeStream(context.Background(), streamTarget(), streamRequest(), ignitionOutputWindow)
+			if err != nil || h.closes != 1 {
+				t.Fatalf("err=%v closes=%d", err, h.closes)
+			}
+			r := streamRecord(t, h)
+			if r["end_reason"] != "completed" || r["reply"] != "OK" || r["usage_completeness"] != "complete" || object(r["usage"])["output_tokens"] != float64(3) {
+				t.Fatal(r)
+			}
+		})
+	}
+}
+
+func TestIgnitionCodexScannerFailures(t *testing.T) {
+	for _, typ := range []string{"response.failed", "response.incomplete", "response.created", "response.output_text.delta"} {
+		t.Run(typ, func(t *testing.T) {
+			h := newStreamHost()
+			h.lineMode = true
+			h.raw(": keepalive")
+			h.raw("event: " + typ)
+			h.event(`{"type":"` + typ + `","delta":"OK"}`)
+			h.chunks <- pluginapi.HostModelStreamReadResponse{Done: true}
+			e := New(Options{Host: h})
+			_, err := e.executeStream(context.Background(), streamTarget(), streamRequest(), ignitionOutputWindow)
+			if err == nil || h.closes != 1 {
+				t.Fatalf("err=%v closes=%d", err, h.closes)
+			}
+			r := streamRecord(t, h)
+			if r["end_reason"] == "completed" || r["usage_completeness"] != "missing" {
+				t.Fatal(r)
+			}
+			if (typ == "response.created" || typ == "response.output_text.delta") && !strings.Contains(err.Error(), "without terminal event") {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 
@@ -540,7 +608,7 @@ func TestIgnitionStreamErrorsKeepFailureProtection(t *testing.T) {
 				if chosen.cred == nil {
 					t.Fatal("missing Claude target")
 				}
-				err := e.igniteTarget(context.Background(), e.config(), chosen, true)
+				err := e.igniteTarget(context.Background(), e.config(), chosen, false)
 				ts := e.state.Target(chosen.group.Key)
 				if failure == "model_not_found" {
 					if err != nil || h.calls != 2 || h.closes != 2 || ts.LastSuccessEpoch == 0 || len(e.refused) != 1 {
@@ -585,6 +653,9 @@ func TestIgnitionCutoffConfirmsQuotaWindow(t *testing.T) {
 	ts := e.state.Target(chosen.group.Key)
 	if ts.LastSuccessEpoch == 0 || ts.ConsecutiveFailures != 0 || ts.CircuitOpenUntilEpoch != 0 || !e.confirmed(chosen.group.Key, c.t, c.t) {
 		t.Fatalf("quota window not confirmed: %+v", ts)
+	}
+	if ev := e.events[len(e.events)-1]; ev.Kind != "ignite_manual" || ev.Params["model"] == "" {
+		t.Fatalf("manual success was not recorded: %+v", ev)
 	}
 	var record map[string]any
 	for _, message := range h.messages {

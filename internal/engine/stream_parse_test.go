@@ -54,6 +54,82 @@ func TestStreamCaptureProtocols(t *testing.T) {
 	}
 }
 
+func TestStreamCaptureFramingBoundaries(t *testing.T) {
+	wire := ": ping\r\nevent: response.output_text.delta\r\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"你好🙂\"}\r\n\r\nevent: response.completed\r\ndata: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":2,\"output_tokens\":1}}}\r\n\r\n"
+	for _, protocol := range []string{"claude", "openai-response"} {
+		for split := 0; split <= len(wire); split++ {
+			var s streamCapture
+			// Responses must see a newline before arbitrary byte fragments.
+			if err := s.feedChunk(protocol, []byte(": start\n\n")); err != nil {
+				t.Fatal(err)
+			}
+			for _, chunk := range []string{wire[:split], wire[split:]} {
+				if err := s.feedChunk(protocol, []byte(chunk)); err != nil {
+					t.Fatalf("protocol=%s split=%d: %v", protocol, split, err)
+				}
+			}
+			if err := s.finish(); err != nil || s.reply.String() != "你好🙂" || !s.terminal || !s.usageFinal {
+				t.Fatalf("protocol=%s split=%d err=%v reply=%q terminal=%v", protocol, split, err, s.reply.String(), s.terminal)
+			}
+		}
+	}
+}
+
+func TestStreamCaptureMetadataFramingBoundaries(t *testing.T) {
+	for _, prefix := range []string{":", "event:"} {
+		for _, data := range []string{
+			`{"type":"response.completed","response":{"usage":{"input_tokens":2,"output_tokens":1}}}`,
+			`{"type":"response.output_text.delta","delta":"unexpected"}`,
+		} {
+			wire := prefix + "data: " + data
+			for split := 0; split <= len(wire); split++ {
+				for _, protocol := range []string{"claude", "openai-response"} {
+					var s streamCapture
+					chunks := []string{wire[:split], wire[split:], "\n\n"}
+					if protocol == "openai-response" {
+						chunks = append([]string{"\n"}, chunks...)
+					}
+					for _, chunk := range chunks {
+						if err := s.feedChunk(protocol, []byte(chunk)); err != nil {
+							t.Fatalf("prefix=%q split=%d protocol=%s: %v", prefix, split, protocol, err)
+						}
+						if s.output || s.terminal || s.usage != nil {
+							t.Fatalf("metadata dispatched before EOF: prefix=%q split=%d protocol=%s", prefix, split, protocol)
+						}
+					}
+					if err := s.finish(); err != nil || s.output || s.terminal || s.usageFinal || s.reply.Len() != 0 || s.usage != nil {
+						t.Fatalf("metadata dispatched: prefix=%q split=%d protocol=%s err=%v", prefix, split, protocol, err)
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestStreamCaptureProtocolLineBoundaries(t *testing.T) {
+	for _, protocol := range []string{"claude", "openai-response"} {
+		var s streamCapture
+		data := []byte(`data: {"type":"response.completed","response":{"usage":{"input_tokens":2,"output_tokens":1}}}`)
+		if err := s.feedChunk(protocol, data); err != nil {
+			t.Fatal(err)
+		}
+		if s.terminal != (protocol == "openai-response") {
+			t.Fatalf("protocol=%s terminal=%v before newline", protocol, s.terminal)
+		}
+		if protocol == "claude" {
+			if err := s.feedChunk(protocol, []byte("\n")); err != nil || s.terminal {
+				t.Fatalf("Claude dispatched before blank line: err=%v terminal=%v", err, s.terminal)
+			}
+			if err := s.feedChunk(protocol, []byte("\n")); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if !s.terminal || !s.usageFinal || s.usage["output_tokens"] != float64(1) {
+			t.Fatalf("protocol=%s lost completed usage: %+v", protocol, s.usage)
+		}
+	}
+}
+
 func TestStreamCaptureFirstOutputHook(t *testing.T) {
 	calls := 0
 	s := streamCapture{onOutput: func() { calls++ }}
@@ -247,11 +323,11 @@ func TestStreamCaptureErrors(t *testing.T) {
 		}
 	}
 	var s streamCapture
-	if err := s.feed([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"OK\"}}]}")); err != nil {
+	if err := s.feedChunk("claude", []byte("data: {\"choices\":[{\"delta\":{\"content\":\"OK\"}}]}")); err != nil {
 		t.Fatal(err)
 	}
 	if s.output {
-		t.Fatal("incomplete frame dispatched early")
+		t.Fatal("Claude dispatched an undelimited data line")
 	}
 	if err := s.finish(); err != nil || s.reply.String() != "OK" {
 		t.Fatalf("reply=%q err=%v", s.reply.String(), err)

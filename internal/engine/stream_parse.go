@@ -111,6 +111,7 @@ func streamError(v map[string]any) error {
 // opaque reasoning. Only visible text is included in the bounded log reply.
 type streamCapture struct {
 	pending      []byte
+	byteStream   bool
 	eventData    []byte
 	reply        strings.Builder
 	replyChars   int
@@ -148,8 +149,17 @@ func (s *streamCapture) markOutput(v string) {
 
 // feedChunk follows the model callback wire format. OpenAI chat chunks are
 // JSON objects; the public HTTP handler adds SSE framing and [DONE] later.
-// Claude and Responses chunks already carry SSE framing.
+// Claude always carries SSE bytes. Responses carries complete scanner lines
+// until a chunk with a newline identifies standard SSE bytes.
 func (s *streamCapture) feedChunk(protocol string, payload []byte) error {
+	if protocol == "openai-response" {
+		if bytes.IndexByte(payload, '\n') >= 0 {
+			s.byteStream = true
+		}
+		if !s.byteStream && len(s.pending) == 0 {
+			return s.scannerLine(payload)
+		}
+	}
 	if protocol != "openai" {
 		return s.feed(payload)
 	}
@@ -159,9 +169,26 @@ func (s *streamCapture) feedChunk(protocol string, payload []byte) error {
 	return s.event(bytes.TrimSpace(payload))
 }
 
+// scannerLine receives one whole line with its newline removed by CPA.
+// Complete data events dispatch immediately because empty lines are omitted.
+func (s *streamCapture) scannerLine(payload []byte) error {
+	if len(payload) > streamFrameLimit {
+		return errors.New("ignition stream frame too large")
+	}
+	if err := s.line(bytes.TrimSuffix(payload, []byte{'\r'})); err != nil {
+		return err
+	}
+	data := bytes.TrimSpace(s.eventData)
+	if json.Valid(data) || bytes.Equal(data, []byte("[DONE]")) {
+		s.eventData = nil
+		return s.event(data)
+	}
+	return nil
+}
+
 func (s *streamCapture) feed(payload []byte) error {
-	// Chunks may split a UTF-8 sequence, line, or SSE event. Normalize CRLF
-	// only after a complete line arrives.
+	// Standard SSE may split JSON, UTF-8, CRLF, or metadata at any byte.
+	// Preserve the current line until its delimiter arrives.
 	for len(payload) > 0 {
 		i := bytes.IndexByte(payload, '\n')
 		if i < 0 {
