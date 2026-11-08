@@ -78,12 +78,13 @@ test("queued inline weights merge changes and an empty field removes only its ow
   const states = [], writes = [];
   const ctx = context(["saveAccountField", "accountFieldHost", "accountNote", "fmtWeight"], {
     rawConfig: {}, saveQueue: Promise.resolve(), history: null,
+    saveHost: () => ({}),
     translate: (key) => key, setSaveState: (...args) => states.push(args),
     claimState: () => () => {}, showApplied: () => {},
     patchConfig: async (patch) => { writes.push(plain(patch)); Object.assign(ctx.rawConfig, patch); return "token"; },
     loadConfig: async () => {}, renderAccounts: () => {},
   });
-  const input = (value) => ({ value, parentNode: { firstChild: {} }, accountSaved: "", accountEdit: 1, accountDirty: true, validity: { badInput: false }, getAttribute: () => "weight" });
+  const input = (value) => ({ value, parentNode: { firstChild: {} }, accountSaved: "", accountEdit: 1, accountDirty: true, validity: { badInput: false }, hasAttribute: () => false, getAttribute: () => "weight" });
   const a = input("2.5"), b = input("7");
   ctx.saveAccountField(a, { account: { name: "a" } });
   ctx.saveAccountField(b, { account: { name: "b" } });
@@ -105,7 +106,7 @@ test("queued inline weights merge changes and an empty field removes only its ow
 
 test("an earlier account name save does not overwrite a newer unsaved edit", async () => {
   const ctx = context(["saveAccountField", "accountFieldHost", "accountNote", "fmtWeight"], {
-    saveQueue: Promise.resolve(), history: null,
+    saveQueue: Promise.resolve(), history: null, saveHost: () => ({}),
     claimState: () => () => {}, translate: (key) => key, renderAccounts: () => {},
     saveAccountName: async () => {},
   });
@@ -118,77 +119,208 @@ test("an earlier account name save does not overwrite a newer unsaved edit", asy
   assert.equal(input.accountPending, 0);
 });
 
-// Each account field and the order heading own a separate save state.
-function accountSaveContext(fail) {
-  const heading = {};
-  const ctx = context(["saveAccountField", "accountFieldHost", "accountNote", "fmtWeight", "claimState", "saveAccountOrder"], {
-    rawConfig: {}, saveQueue: Promise.resolve(), history: null, pendingOrder: null,
-    $: () => heading, translate: (key) => key, toast: () => {},
-    setSaveState: (host, state, text) => {
-      host.node ||= {};
-      Object.assign(host.node, { state, text, owner: null });
-      return host.node;
+// Minimal DOM doubles exercise the actual state aggregation and save queue.
+function saveNode(tagName, attrs = {}) {
+  return {
+    tagName, id: attrs.id || "", name: attrs.name || "", children: [], attrs: { ...attrs },
+    value: "", validity: { badInput: false }, accountSaved: "", accountEdit: 1, accountDirty: true,
+    get textContent() { return (this.text || "") + this.children.map(n => n.textContent).join(""); },
+    set textContent(value) { this.text = value; this.children = []; },
+    getAttribute(name) { return this.attrs[name] ?? null; },
+    hasAttribute(name) { return name in this.attrs; },
+    setAttribute(name, value) { this.attrs[name] = value; },
+    removeAttribute(name) { delete this.attrs[name]; },
+    appendChild(node) { this.children.push(node); return node; },
+    querySelector(selector) { return selector === ".save-state" ? this.children[0] : null; },
+    closest() { return null; },
+  };
+}
+
+const saveFunctions = ["saveHost", "saveControls", "saveItemKey", "saveEntry", "renderSaveState",
+  "updateSaveEntry", "setSaveState", "claimState", "editSaveState"];
+function stateContext(names = [], globals = {}) {
+  return context([...saveFunctions, ...names], {
+    saveSerial: 0,
+    translate: (key, ...args) => {
+      if (key === "save_field_failed") return "✕ " + args[0] + " save failed: " + args[1];
+      if (key === "save_more_failed") return " (" + args[0] + " more failed)";
+      return key;
     },
-    showApplied: (say) => say("saved", "applied"),
-    saveAccountName: async () => { if (fail === "name" || fail === "unauthorized") throw new Error(fail); },
-    patchConfig: async (patch) => {
-      if (fail === "weight" && patch.account_weights || fail === "order" && patch.account_order) throw new Error("failed");
+    saveText: text => text,
+    saveItemLabel: input => input.id === "account-order-state" ? "Order" : input.getAttribute("data-account-field") || input.name,
+    el: (tag, attrs) => saveNode(tag.toUpperCase(), attrs),
+    clear: node => { node.textContent = ""; },
+    maskedNodes: text => [{ textContent: text }],
+    ...globals,
+  });
+}
+
+function accountSaveContext(fail) {
+  const heading = saveNode("H2", { id: "account-order-state" });
+  const section = { tagName: "SECTION", querySelector: selector => { assert.equal(selector, ".card-title"); return heading; } };
+  const row = { account: { name: "a", note: "old" }, getAttribute: () => "a" };
+  const ctx = stateContext(["saveAccountField", "accountFieldHost", "accountNote", "fmtWeight", "saveAccountOrder"], {
+    fail, rawConfig: {}, saveQueue: Promise.resolve(), history: null, pendingOrder: null,
+    $: () => heading, toast: () => {},
+    showApplied: say => { say("waiting", "waiting"); say("saved", "applied"); },
+    saveAccountName: async () => { if (ctx.fail === "name" || ctx.fail === "unauthorized") throw new Error(ctx.fail); },
+    patchConfig: async patch => {
+      if (ctx.fail === "weight" && patch.account_weights || ctx.fail === "order" && patch.account_order) throw new Error("failed");
       Object.assign(ctx.rawConfig, patch);
       return "token";
     },
     loadConfig: async () => {}, sortAccounts: () => {}, renderAccounts: () => {},
   });
-  const field = (kind, value) => ({
-    value, accountSaved: "", accountEdit: 1, accountDirty: true,
-    validity: { badInput: false }, parentNode: { firstChild: {} },
-    getAttribute: () => kind,
-  });
-  const name = field("name", "unsaved name"), weight = field("weight", "2.5");
-  const row = { account: { name: "a", note: "old" } };
-  return { ctx, heading, row, name, weight, host: (input) => input.parentNode.firstChild };
+  const field = (kind, value) => {
+    const input = saveNode("INPUT", { "data-account-field": kind });
+    input.value = value;
+    input.closest = selector => selector === ".account-setting" ? row : selector === ".settings-section" ? section : null;
+    return input;
+  };
+  return { ctx, heading, row, name: field("name", "unsaved name"), weight: field("weight", "2.5") };
 }
 
-test("a failed name save survives a later successful weight and order save", async () => {
-  const { ctx, heading, row, name, weight, host } = accountSaveContext("name");
+test("a failed name save stays in the heading after successful weight and order saves", async () => {
+  const { ctx, heading, row, name, weight } = accountSaveContext("name");
   ctx.saveAccountField(name, row);
   ctx.saveAccountField(weight, row);
   ctx.saveAccountOrder(["a"]);
   await ctx.saveQueue;
-  assert.equal(host(name).node.state, "failed");
-  assert.equal(host(weight).node.state, "saved");
-  assert.equal(heading.node.state, "saved");
+  assert.equal(heading.children.length, 1);
+  assert.equal(heading.children[0].getAttribute("data-state"), "failed");
+  assert.match(heading.textContent, /name save failed/);
+  assert.equal(name.getAttribute("aria-invalid"), "true");
+  assert.equal(weight.hasAttribute("aria-invalid"), false);
   assert.equal(name.value, "unsaved name");
   assert.equal(name.accountDirty, true);
   assert.equal(name.accountPending, 0);
   assert.equal(weight.accountDirty, false);
+  ctx.fail = null;
+  ctx.saveAccountField(name, row);
+  await ctx.saveQueue;
+  assert.equal(name.hasAttribute("aria-invalid"), false);
+  assert.equal(heading.children[0].getAttribute("data-state"), "saved");
+  assert.doesNotMatch(heading.textContent, /failed/);
 });
 
-test("weight and order failures are not hidden by a successful name save", async () => {
+test("weight and order failures survive a successful name save", async () => {
   for (const fail of ["weight", "order"]) {
-    const { ctx, heading, row, name, weight, host } = accountSaveContext(fail);
+    const { ctx, heading, row, name, weight } = accountSaveContext(fail);
     if (fail === "weight") ctx.saveAccountField(weight, row);
     else ctx.saveAccountOrder(["a"]);
     ctx.saveAccountField(name, row);
     await ctx.saveQueue;
-    assert.equal(host(name).node.state, "saved");
-    assert.equal((fail === "weight" ? host(weight) : heading).node.state, "failed");
+    assert.equal(heading.children[0].getAttribute("data-state"), "failed");
+    assert.match(heading.textContent, fail === "weight" ? /weight save failed/ : /Order save failed/);
     if (fail === "weight") {
+      assert.equal(weight.getAttribute("aria-invalid"), "true");
       assert.equal(weight.value, "2.5");
       assert.equal(weight.accountDirty, true);
     }
   }
 });
 
-test("invalid weights and unauthorized saves report only their own field state", async () => {
-  const { ctx, row, name, weight, host } = accountSaveContext("unauthorized");
-  ctx.saveAccountField(name, row);
-  weight.value = "0";
+test("reverting a failed account field to its saved value still retries and clears the failure", async () => {
+  const { ctx, heading, row, weight } = accountSaveContext("weight");
   ctx.saveAccountField(weight, row);
   await ctx.saveQueue;
-  assert.equal(host(name).node.state, "failed");
-  assert.equal(host(weight).node.state, "failed");
-  assert.equal(host(weight).node.text, "weight_invalid");
-  assert.equal(name.accountDirty, true);
+  assert.equal(weight.getAttribute("aria-invalid"), "true");
+  ctx.fail = null;
+  weight.value = weight.accountSaved;
+  ctx.saveAccountField(weight, row);
+  await ctx.saveQueue;
+  assert.equal(weight.hasAttribute("aria-invalid"), false);
+  assert.equal(heading.children[0].getAttribute("data-state"), "saved");
+  assert.equal(ctx.rawConfig.account_weights, null);
+});
+
+test("multiple failures show the latest reason and count, with every failed control marked", async () => {
+  const { ctx, heading, row, name, weight } = accountSaveContext("unauthorized");
+  ctx.saveAccountField(name, row);
+  await ctx.saveQueue;
+  weight.value = "0";
+  ctx.saveAccountField(weight, row);
+  assert.match(heading.textContent, /weight save failed: weight_invalid \(1 more failed\)/);
+  assert.equal(name.getAttribute("aria-invalid"), "true");
+  assert.equal(weight.getAttribute("aria-invalid"), "true");
+  ctx.editSaveState(heading, name);
+  assert.match(heading.textContent, /1 more failed/);
+  ctx.fail = null;
+  ctx.saveAccountField(name, row);
+  await ctx.saveQueue;
+  assert.equal(name.hasAttribute("aria-invalid"), false);
+  assert.equal(weight.getAttribute("aria-invalid"), "true");
+  assert.doesNotMatch(heading.textContent, /more failed/);
+  weight.value = "3";
+  ctx.saveAccountField(weight, row);
+  await ctx.saveQueue;
+  assert.equal(weight.hasAttribute("aria-invalid"), false);
+  assert.equal(heading.children[0].getAttribute("data-state"), "saved");
+});
+
+test("all settings resolve to section headings or their own advanced legends", () => {
+  const ctx = stateContext();
+  for (const advanced of [false, true]) {
+    for (const name of ["bark_url", "ignition.start_hour", "providers.codex.monitor", "remember_chart_filters", "mcp_enabled"]) {
+      const heading = saveNode(advanced ? "LEGEND" : "H2");
+      const group = { tagName: advanced ? "FIELDSET" : "SECTION", querySelector: selector => {
+        assert.equal(selector, advanced ? "legend" : ".card-title"); return heading;
+      } };
+      const input = saveNode("INPUT", { name });
+      input.closest = selector => selector === (advanced ? "fieldset" : ".settings-section") ? group : null;
+      assert.equal(ctx.saveHost(input), heading);
+      ctx.setSaveState(heading, "failed", "reason", input);
+      assert.equal(heading.children.length, 1);
+      assert.equal(heading.children[0].attrs.class, "save-state");
+      assert.equal(input.children.length, 0);
+      assert.equal(input.getAttribute("aria-invalid"), "true");
+    }
+  }
+  const html = fs.readFileSync(path.join(__dirname, "page.html"), "utf8");
+  assert.match(html, /<form id="settings">\s*<section[^>]+>\s*<h2[^>]+id="account-order-state"/);
+  assert.doesNotMatch(html, /data-save-in/);
+});
+
+test("ordinary settings keep A's failure through B's save and reject stale replies after editing", () => {
+  const ctx = stateContext(), heading = saveNode("H2");
+  const a = saveNode("INPUT", { name: "a" }), b = saveNode("INPUT", { name: "b" });
+  const sayA = ctx.claimState(heading, a);
+  sayA("failed", "A failed");
+  const sayB = ctx.claimState(heading, b);
+  sayB("saved", "B saved");
+  assert.match(heading.textContent, /a save failed: A failed/);
+  assert.equal(a.getAttribute("aria-invalid"), "true");
+  ctx.editSaveState(heading, a);
+  assert.equal(sayA("saved", "late reply"), false);
+  assert.match(heading.textContent, /A failed/);
+  const retry = ctx.claimState(heading, a);
+  assert.match(heading.textContent, /A failed/);
+  retry("waiting", "saved, waiting");
+  assert.equal(a.hasAttribute("aria-invalid"), false);
+  retry("saved", "applied");
+  assert.equal(heading.textContent, "applied");
+});
+
+test("an older confirmation cannot replace a more recent save's progress", () => {
+  const ctx = stateContext(), heading = saveNode("H2");
+  const a = saveNode("INPUT", { name: "a" }), b = saveNode("INPUT", { name: "b" });
+  const sayA = ctx.claimState(heading, a), sayB = ctx.claimState(heading, b);
+  sayB("waiting", "B waiting");
+  sayA("saved", "A applied");
+  assert.equal(heading.textContent, "B waiting");
+});
+
+test("saved messages and dynamic failure reasons follow language changes", () => {
+  const code = source.slice(source.indexOf("  var I18N ="), source.indexOf("\n  function translate("));
+  assert.match(code, /save_field_failed/);
+  const globals = vm.createContext({});
+  vm.runInContext(code, globals);
+  globals.translate = (key, value) => globals.I18N.en[key].replace("{0}", value);
+  const ctx = context(["saveText"], globals);
+  assert.equal(ctx.saveText(globals.I18N.zh.save_applied), globals.I18N.en.save_applied);
+  assert.equal(ctx.saveText(globals.I18N.zh.weight_invalid), globals.I18N.en.weight_invalid);
+  assert.equal(ctx.saveText(globals.I18N.zh.mcp_error.replace("{0}", "bind failed")), globals.I18N.en.mcp_error.replace("{0}", "bind failed"));
+  assert.equal(ctx.saveText("HTTP 500 upstream error"), "HTTP 500 upstream error");
 });
 
 const HOUR = 3600, DAY = 86400, WEEK = 7 * DAY;

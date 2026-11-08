@@ -152,7 +152,7 @@
       codex_reset_pending: "首次开启时推送当前待生效的排期",
       chart_prefs: "额度图表", remember_chart_filters: "记住筛选条件",
       remember_chart_filters_hint: "在当前浏览器中记住上次选择的额度窗口、时间范围和排序；关闭后每次打开页面都使用默认选择。",
-      save_hint: "修改后自动保存到 CPA 的 config.yaml，插件几秒内应用。文本和数字在离开输入框或按回车时保存，保存结果显示在各项旁边。",
+      save_hint: "修改后自动保存到 CPA 的 config.yaml，插件几秒内应用。文本和数字在离开输入框或按回车时保存，保存结果显示在区块标题旁，高级设置按分组显示。",
       language_note: "通知语言跟随最近打开此页面时管理中心的语言，当前为{0}。",
       lang_zh: "中文", lang_en: "English",
       due: "已到", minutes: "{0} 分钟", hours_minutes: "{0} 小时 {1} 分", days: "{0} 天",
@@ -230,7 +230,8 @@
       ignition_off: "自动点火已关闭，这些设置暂不生效。",
       ignition_models_hint: "选择点火模型需要“高级”中的模型列表 API key。",
       monitor_hint: "勾选要监控额度的服务。",
-      save_saved: "已保存", save_saving: "保存中…", save_failed_short: "失败：{0}",
+      save_saved: "已保存", save_saving: "保存中…",
+      save_field_failed: "✕ {0}保存失败：{1}", save_more_failed: "（另有 {0} 项失败）", save_order: "排序",
       save_waiting: "已保存，等待生效", save_applied: "已生效", save_unconfirmed: "未确认生效",
       save_applied_verified: "已生效，验证通过", save_applied_unverified: "已生效，未能验证：{0}", network_error: "网络错误",
       mask_on: "打码账号", mask_off: "显示账号", account_n: "账号 {0}",
@@ -311,7 +312,7 @@
       codex_reset_pending: "When first turned on, send the pending schedule",
       chart_prefs: "Quota chart", remember_chart_filters: "Remember the filters",
       remember_chart_filters_hint: "This browser remembers the last quota window, time range and order. When off, the page opens with the default choices.",
-      save_hint: "Changes save to CPA's config.yaml automatically, and the plugin applies them within a few seconds. Text and numbers save when you leave the field or press Enter; each field shows whether it saved.",
+      save_hint: "Changes save to CPA's config.yaml automatically, and the plugin applies them within a few seconds. Text and numbers save when you leave the field or press Enter. Save results appear beside section headings or advanced group legends.",
       language_note: "Notifications use the Management Center language from the last time this page was opened, now {0}.",
       lang_zh: "中文", lang_en: "English",
       due: "due", minutes: "{0} min", hours_minutes: "{0} h {1} min", days: "{0} days",
@@ -389,7 +390,8 @@
       ignition_off: "Ignition is off, so these settings do not apply for now.",
       ignition_models_hint: "Picking ignition models needs the model list API key under Advanced.",
       monitor_hint: "Check the services whose quota to monitor.",
-      save_saved: "Saved", save_saving: "Saving…", save_failed_short: "Failed: {0}",
+      save_saved: "Saved", save_saving: "Saving…",
+      save_field_failed: "✕ {0} save failed: {1}", save_more_failed: " ({0} more failed)", save_order: "Order",
       save_waiting: "Saved; waiting to take effect", save_applied: "In effect", save_unconfirmed: "Not confirmed in effect",
       save_applied_verified: "In effect; CPA accepts the key", save_applied_unverified: "In effect, but could not verify: {0}", network_error: "network error",
       mask_on: "Blur accounts", mask_off: "Show accounts", account_n: "Account {0}",
@@ -453,6 +455,7 @@
     lang = next;
     languageApplied = true;
     applyStaticText();
+    renderSaveStates();
     renderRangeButtons();
     renderMaskButton();
     renderCardsSnapshot();
@@ -1011,7 +1014,7 @@
         return loadConfig();
       }).catch(function (err) {
         if (pendingOrder && pendingOrder.join("\n") === names.join("\n")) pendingOrder = null;
-        say("failed", translate("save_failed_short", err.message));
+        say("failed", err.message);
         if (err.message !== "unauthorized") toast(translate("order_failed", err.message));
         return loadConfig().catch(function () {}).then(function () {
           sortAccounts();
@@ -1151,7 +1154,7 @@
         "data-account-field": kind, autocomplete: "off", spellcheck: "false" });
       if (kind === "weight") { input.step = "any"; input.min = "0"; }
       input.addEventListener("change", function () { saveAccountField(input, row); });
-      row.appendChild(el("label", {}, [el("span", { class: "field-label save-host" }, [
+      row.appendChild(el("label", {}, [el("span", { class: "field-label" }, [
         el("span", { text: translate(kind === "name" ? "rename" : "weight") })
       ]), input]));
     });
@@ -1518,22 +1521,22 @@
     return name ? (name + "\n" + rest).trim() : "";
   }
 
-  function accountFieldHost(input) { return input.parentNode.firstChild; }
+  function accountFieldHost(input) { return saveHost(input); }
 
   // Account fields have no config input name: names go to CPA credentials,
   // and weights patch a shared map built from the preceding queued save.
   // Dirty or pending fields survive polling, sorting and earlier saves.
-  // Each field owns the save state beside its label, independently of order.
+  // Each field owns its result; the heading summarizes failures and progress.
   function saveAccountField(input, row) {
     var host = accountFieldHost(input);
     var account = row.account, kind = input.getAttribute("data-account-field"), weight = kind === "weight";
     var answer = weight ? input.value.trim() : input.value.replace(/\s+/g, " ").trim();
     var value = Number(answer), gen = input.accountEdit || 0;
     if (weight && (input.validity.badInput || (answer !== "" && (!isFinite(value) || value <= 0)))) {
-      setSaveState(host, "failed", translate("weight_invalid"));
+      setSaveState(host, "failed", translate("weight_invalid"), input);
       return;
     }
-    if (answer === input.accountSaved && !input.accountPending) {
+    if (answer === input.accountSaved && !input.accountPending && !input.hasAttribute("aria-invalid")) {
       input.value = answer;
       input.accountDirty = false;
       return;
@@ -1544,7 +1547,7 @@
       return;
     }
     var note = !weight ? accountNote(account.note, answer) : "";
-    var say = claimState(host);
+    var say = claimState(host, input);
     input.accountPending = (input.accountPending || 0) + 1;
     saveQueue = saveQueue.then(function () {
       if (!weight) return saveAccountName(account, note).then(function () { say("saved", translate("save_saved")); });
@@ -1563,7 +1566,7 @@
       }
     }).catch(function (err) {
       if ((input.accountEdit || 0) === gen) input.accountDirty = true;
-      say("failed", translate("save_failed_short", err.message));
+      say("failed", err.message);
     }).then(function () {
       input.accountPending--;
       renderAccounts();
@@ -2975,10 +2978,12 @@
   function renderGroupChecks(p, selected) {
     var box = document.querySelector("[data-groups='" + p.id + "']");
     if (!box) return;
+    var existing = new Map();
+    Array.prototype.forEach.call(box.querySelectorAll("[data-group]"), function (input) { existing.set(input.getAttribute("data-group"), input); });
     clear(box);
     groupChoices(p, selected).forEach(function (name) {
-      var input = el("input", { type: "checkbox", "data-group": name });
-      input.checked = (selected || []).some(function (s) { return s.toLowerCase() === name.toLowerCase(); });
+      var input = existing.get(name) || el("input", { type: "checkbox", "data-group": name });
+      if (!input.settingsDirty && !input.hasAttribute("aria-invalid")) input.checked = (selected || []).some(function (s) { return s.toLowerCase() === name.toLowerCase(); });
       box.appendChild(el("label", { class: "inline" }, [input, document.createTextNode(name)]));
     });
   }
@@ -3064,6 +3069,7 @@
     Array.prototype.forEach.call($("settings").elements, function (input) {
       if (!input.name) return;
       if (keys && (!keys[topKey(input.name)] || input === active)) return;
+      if (input.settingsDirty || input.hasAttribute("aria-invalid")) return;
       fillInput(input, effective);
     });
     Array.prototype.forEach.call(document.querySelectorAll(".mode-switch"), function (box) { placeThumb(box, false); });
@@ -3228,40 +3234,138 @@
     return patch;
   }
 
-  // Settings save as they change: switches and checkboxes when clicked, text
-  // and number fields when they lose focus or on Enter. Saves run one at a
-  // time, so each patch starts from the config the previous one wrote. Once
-  // the plugin has applied a save, the saved fields show the effective
-  // values again. Each save shows its state beside the field: saving,
-  // waiting to apply, applied, unconfirmed or failed with the reason.
+  // Settings save serially. Each item owns its result and draft; section
+  // headings and advanced legends summarize progress without hiding failures.
   var saveQueue = Promise.resolve();
+  var saveSerial = 0;
 
-  // The element that shows the save state of a field: the one named by a
-  // data-save-in around it, or its label, table cell or .save-host.
   function saveHost(input) {
-    var named = input.closest("[data-save-in]");
-    if (named) return $(named.getAttribute("data-save-in"));
-    return input.closest(".save-host, label, td");
+    var group = input.closest("fieldset") || input.closest(".settings-section");
+    return group && group.querySelector(group.tagName === "FIELDSET" ? "legend" : ".card-title");
   }
 
-  function setSaveState(host, state, text) {
-    if (!host) return;
-    var node = null;
-    Array.prototype.forEach.call(host.children, function (child) { if (child.classList.contains("save-state")) node = child; });
-    if (!node) {
-      node = el("span", { class: "save-state", role: "status" });
-      host.appendChild(node);
+  function saveControls(input) {
+    var group = input.closest(".thresholds, .mode-switch");
+    if (group) return Array.prototype.slice.call(group.querySelectorAll("input"));
+    return /^(INPUT|SELECT|TEXTAREA|BUTTON)$/.test(input.tagName) ? [input] : [];
+  }
+
+  function saveItemKey(input) {
+    var kind = input.getAttribute("data-account-field");
+    if (kind) return input.closest(".account-setting").getAttribute("data-account") + ":" + kind;
+    if (input.closest(".thresholds")) return "thresholds";
+    if (input.hasAttribute("data-group")) return input.closest("[data-groups]").getAttribute("data-groups") + ":" + input.getAttribute("data-group");
+    return input.name || input.id;
+  }
+
+  function saveItemLabel(input) {
+    if (input.id === "account-order-state") return translate("save_order");
+    var kind = input.getAttribute("data-account-field");
+    if (kind) return translate(kind === "name" ? "rename" : "weight");
+    if (input.id === "mcp-key-new") return translate("mcp_key");
+    if (input.closest(".thresholds")) return translate("thresholds");
+    var mode = input.closest(".mode-switch");
+    if (mode) return mode.getAttribute("aria-label");
+    var service = input.getAttribute("data-service");
+    if (service) return providerTitle(service) + " · " + translate(input.getAttribute("data-label") || "col_ignition_model", providerTitle(service));
+    if (input.hasAttribute("data-group")) return providerTitle(input.closest("[data-groups]").getAttribute("data-groups")) + " · " + input.getAttribute("data-group");
+    var label = input.closest("label"), text = label && label.querySelector("span");
+    return text ? text.textContent : input.name || input.id;
+  }
+
+  function saveEntry(host, input) {
+    if (!host) return null;
+    input = input || host;
+    var key = saveItemKey(input);
+    if (!host.saveEntries) host.saveEntries = new Map();
+    var entry = host.saveEntries.get(key);
+    if (!entry) {
+      entry = { host: host, input: input, controls: saveControls(input) };
+      host.saveEntries.set(key, entry);
     }
-    clearTimeout(node.timer);
-    node.owner = null;
+    return entry;
+  }
+
+  // Re-render local status messages in the selected language; upstream text
+  // and browser validation messages remain verbatim.
+  function saveText(text) {
+    var keys = ["save_saved", "save_saving", "save_waiting", "save_applied", "save_unconfirmed",
+      "save_applied_verified", "save_applied_unverified", "mcp_error", "weight_invalid",
+      "thresholds_order", "management_key_refused", "api_key_refused", "headers_invalid", "json_invalid"];
+    for (var i = 0; i < keys.length; i++) {
+      var key = keys[i], languages = Object.keys(I18N);
+      for (var j = 0; j < languages.length; j++) {
+        var template = I18N[languages[j]][key], at = template.indexOf("{0}");
+        if (at < 0 && text === template) return translate(key);
+        if (at >= 0) {
+          var before = template.slice(0, at), after = template.slice(at + 3);
+          if (text.slice(0, before.length) === before && text.slice(text.length - after.length) === after) {
+            return translate(key, text.slice(before.length, text.length - after.length));
+          }
+        }
+      }
+    }
+    return text;
+  }
+
+  function renderSaveState(host) {
+    if (!host || !host.saveEntries) return;
+    var entries = Array.from(host.saveEntries.values()), failures = entries.filter(function (entry) { return entry.failure; });
+    var latest = entries.filter(function (entry) { return entry.state; }).sort(function (a, b) { return b.order - a.order; })[0];
+    failures.sort(function (a, b) { return b.failure.order - a.failure.order; });
+    var failed = failures[0], state = failed ? "failed" : latest ? latest.state : "";
+    var text = failed ? translate("save_field_failed", saveItemLabel(failed.input), saveText(failed.failure.text)) : latest ? saveText(latest.text) : "";
+    entries.forEach(function (entry) {
+      entry.controls.forEach(function (control) {
+        if (entry.failure) control.setAttribute("aria-invalid", "true");
+        else control.removeAttribute("aria-invalid");
+      });
+    });
+    var node = host.querySelector(".save-state");
+    if (!node) { node = el("span", { class: "save-state", role: "status" }); host.appendChild(node); }
     node.setAttribute("data-state", state);
-    if (host.closest(".account-setting") || host.id === "account-order-state") {
-      clear(node);
-      maskedNodes(text).forEach(function (part) { node.appendChild(part); });
-    } else node.textContent = text;
-    // A plain "saved" fades; failures and key checks stay until the next edit.
-    if (state === "saved") node.timer = setTimeout(function () { node.textContent = ""; node.removeAttribute("data-state"); }, 4000);
-    return node;
+    clear(node);
+    if (text) {
+      var message = el("span");
+      if (host.id === "account-order-state") maskedNodes(text).forEach(function (part) { message.appendChild(part); });
+      else message.textContent = text;
+      node.appendChild(message);
+      if (failures.length > 1) {
+        var count = el("span");
+        count.textContent = translate("save_more_failed", failures.length - 1);
+        node.appendChild(count);
+      }
+    }
+  }
+
+  function renderSaveStates() {
+    Array.prototype.forEach.call(document.querySelectorAll(".settings-section > .card-title, fieldset > legend"), renderSaveState);
+  }
+
+  function updateSaveEntry(entry, state, text) {
+    entry.state = state;
+    entry.text = text;
+    if (state === "failed") entry.failure = { text: text, order: ++saveSerial };
+    else if (state === "waiting" || state === "saved" || state === "verified" || state === "unverified") entry.failure = null;
+    renderSaveState(entry.host);
+  }
+
+  function setSaveState(host, state, text, input) {
+    var entry = saveEntry(host, input);
+    if (!entry) return null;
+    entry.owner = null;
+    entry.order = ++saveSerial;
+    updateSaveEntry(entry, state, text);
+    return entry;
+  }
+
+  // Edits invalidate late replies without clearing an unresolved failure.
+  function editSaveState(host, input) {
+    var entry = saveEntry(host, input);
+    if (!entry) return;
+    entry.owner = null;
+    if (!entry.failure) entry.state = "";
+    renderSaveState(host);
   }
 
   var THRESHOLDS = ["notice_threshold", "low_threshold", "critical_threshold"];
@@ -3295,8 +3399,8 @@
     // key, into password fields. A value the browser fills in while the field
     // is not focused comes from autofill on page load; it is not saved, and
     // the field shows the saved value again. The management key is refused
-    // with a message, and any other new key is saved only when CPA accepts it
-    // for /v1/models.
+    // with a message. Other new keys are checked against /v1/models before
+    // saving; refusals retain the draft and inconclusive checks allow saving.
     var checked = Promise.resolve(null);
     if (input.type === "password") {
       var value = input.value.trim();
@@ -3305,22 +3409,21 @@
         return;
       }
       if (key && value === key) {
-        setSaveState(host, "failed", translate("management_key_refused"));
-        fillInput(input, effectiveConfig());
+        setSaveState(host, "failed", translate("management_key_refused"), input);
         return;
       }
       if (value) checked = checkKey(value);
     }
     if (input.type === "number") {
       if (!input.checkValidity()) {
-        setSaveState(host, "failed", input.validationMessage);
+        setSaveState(host, "failed", input.validationMessage, input);
         input.reportValidity();
         return;
       }
       if (input.value === "") { fillInput(input, effectiveConfig()); return; }
     }
     if (THRESHOLDS.indexOf(top) >= 0) {
-      if (!thresholdsInOrder()) { setSaveState(host, "failed", translate("thresholds_order")); return; }
+      if (!thresholdsInOrder()) { setSaveState(host, "failed", translate("thresholds_order"), input); return; }
       tops = THRESHOLDS;
     }
     var format = input.getAttribute("data-format");
@@ -3331,12 +3434,12 @@
       } catch (err) {
         input.setCustomValidity(err.message);
         input.reportValidity();
-        setSaveState(host, "failed", err.message);
+        setSaveState(host, "failed", err.message, input);
         return;
       }
     }
     if (input.name === "ignition.enabled") renderIgnitionOff();
-    var say = claimState(host);
+    var say = claimState(host, input);
     var gens = {};
     tops.forEach(function (name) { gens[name] = noteEdit(name); });
     var intent = captureIntent(tops);
@@ -3344,14 +3447,17 @@
     var refill = function () {
       var keys = {}, any = false;
       tops.forEach(function (name) { if (editGen[name] === gens[name]) { keys[name] = true; any = true; } });
-      if (any) fillSettings(keys);
+      if (any) {
+        saveControls(input).forEach(function (control) { if (keys[inputTop(control)]) control.settingsDirty = false; });
+        fillSettings(keys);
+      }
       if (keys["ignition"]) renderIgnitionOff();
     };
     saveQueue = saveQueue.then(function () { return checked; }).then(function (check) {
       // A key edited again during the check is checked by its own change event.
       if (input.type === "password" && input.value.trim() !== value) return;
       if (check && check.refused) {
-        if (say("failed", translate("api_key_refused"))) fillInput(input, effectiveConfig());
+        say("failed", translate("api_key_refused"));
         return;
       }
       var patch = {};
@@ -3364,9 +3470,7 @@
         showApplied(say, token, check, /^mcp_/.test(top)).then(function (applied) { if (applied) refill(); });
         return loadConfig();
       }).catch(function (err) {
-        if (err.message === "unauthorized") return;
-        say("failed", translate("save_failed_short", err.message));
-        refill();
+        say("failed", err.message);
       });
     });
   }
@@ -3472,18 +3576,14 @@
     }, 1000);
   }
 
-  // Shows "saving" beside a field for a save made now, and returns the
-  // function that shows the later states of this save. Once a newer save or
-  // edit of the field shows a state of its own, or clears it, the function
-  // shows nothing and returns false, so an older save that completes late
-  // does not label the newer value.
-  function claimState(host) {
-    var node = setSaveState(host, "saving", translate("save_saving")), owner = {};
-    if (node) node.owner = owner;
+  // Ownership is per item, so a late reply cannot label a newer edit and a
+  // different item's success cannot clear this item's failure.
+  function claimState(host, input) {
+    var entry = setSaveState(host, "saving", translate("save_saving"), input), owner = {};
+    if (entry) entry.owner = owner;
     return function (state, text) {
-      if (!node || node.owner !== owner) return false;
-      setSaveState(host, state, text);
-      node.owner = owner;
+      if (!entry || entry.owner !== owner) return false;
+      updateSaveEntry(entry, state, text);
       return true;
     };
   }
@@ -3602,7 +3702,7 @@
   // Copies text, through a selected text area where the Clipboard API is
   // not available, as in an iframe without the permission.
   function copyText(text, button) {
-    var done = function () { setSaveState(button.parentNode, "saved", translate("copied")); };
+    var done = function () { toast(translate("copied")); };
     var fallback = function () {
       var area = el("textarea", { class: "copy-buffer", readonly: true });
       area.value = text;
@@ -3620,13 +3720,13 @@
   // A new key replaces the old one at once; replacing a key asks first.
   function generateMcpKey() {
     if (mcpKey() && !confirm(translate("mcp_regenerate_confirm"))) return;
-    var say = claimState($("mcp-key-field")), secret = newMcpKey();
+    var button = $("mcp-key-new"), say = claimState(saveHost(button), button), secret = newMcpKey();
     saveQueue = saveQueue.then(function () {
       return patchConfig({ mcp_key: secret }).then(function (token) {
         showApplied(say, token, null, true);
         return loadConfig();
       }).catch(function (err) {
-        if (err.message !== "unauthorized") say("failed", translate("save_failed_short", err.message));
+        say("failed", err.message);
       });
     });
   }
@@ -3735,25 +3835,17 @@
     }).then(function () { button.disabled = false; });
   });
   $("settings").addEventListener("change", saveField);
-  // Editing a field clears its last save state.
+  // Keep failed drafts visible while invalidating responses for older edits.
   $("settings").addEventListener("input", function (e) {
-    // The state beside a field describes the value it shows, so any edit,
-    // also while an earlier value is being saved, clears it and takes it
-    // from the earlier save until the new value is saved itself. Typing,
-    // pasting, checkboxes, radios and selects all fire input.
     var accountField = e.target.hasAttribute("data-account-field");
     if (accountField) {
       e.target.accountDirty = true;
       e.target.accountEdit = (e.target.accountEdit || 0) + 1;
-    }
+    } else e.target.settingsDirty = true;
     var top = inputTop(e.target);
     if (top) noteEdit(top);
     var host = accountField ? accountFieldHost(e.target) : top ? saveHost(e.target) : null;
-    if (host) Array.prototype.forEach.call(host.children, function (child) {
-      if (!child.classList.contains("save-state")) return;
-      clearTimeout(child.timer);
-      child.textContent = ""; child.removeAttribute("data-state"); child.owner = null;
-    });
+    if (host) editSaveState(host, e.target);
     if (e.target.name === "mcp_listen") renderMcp();
   });
   $("mask-toggle").addEventListener("click", toggleMask);

@@ -425,8 +425,6 @@ html[lang="en"] { --event-type-width: 140px; }
 .account-setting label { min-width: 0; }
 .account-setting .field-label { display: flex; align-items: baseline; gap: 8px; white-space: nowrap; }
 .account-setting .field-label > span:first-child { flex: none; }
-.account-setting .save-state { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#account-order-state .save-state { margin-left: 8px; }
 .account-weight-empty { visibility: hidden; }
 .account-setting.account-placeholder { border: 1px dashed var(--border-color); border-radius: 12px; }
 .account-placeholder > * { visibility: hidden; }
@@ -441,7 +439,10 @@ form fieldset {
   background: color-mix(in srgb, var(--bg-secondary) 50%, transparent);
   display: flex; flex-direction: column; gap: 14px; min-width: 0;
 }
-form legend { color: var(--text-primary); font-size: 13px; font-weight: 650; padding: 0 6px; }
+form legend { color: var(--text-primary); font-size: 13px; font-weight: 650; padding: 0 6px; max-width: 100%; }
+.settings-section > .card-title, form legend { display: flex; align-items: center; gap: 8px; min-width: 0; height: 22px; line-height: 22px; }
+.settings-section > .card-title > :first-child, form legend > :first-child { flex: none; }
+.settings-section > .card-title > .save-state, form legend > .save-state { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 18px; }
 form label { display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; font-weight: 600; color: var(--text-secondary); }
 form label.inline { flex-direction: row; align-items: center; gap: 8px; font-weight: 500; color: var(--text-primary); }
 .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 18px; }
@@ -452,17 +453,18 @@ form label.inline { flex-direction: row; align-items: center; gap: 8px; font-wei
 .webhook-grid input { font-family: var(--font-mono); }
 details.advanced > summary { margin-top: 0; }
 
-/* The save state beside a field: saving, saved, verified, unverified or
-   failed. */
-.save-state { font-size: 12px; font-weight: 500; color: var(--text-tertiary); }
+/* Headings summarize saves on one line; failed controls retain their border. */
+.save-state { display: flex; align-items: center; font-size: 12px; font-weight: 500; color: var(--text-tertiary); }
+.save-state > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.save-state > span + span, .save-state::before { flex: none; white-space: pre; }
 .save-state:empty { display: none; }
 .save-state[data-state="saved"], .save-state[data-state="verified"] { color: var(--success-badge-text); }
 .save-state[data-state="saved"]::before, .save-state[data-state="verified"]::before { content: "✓ "; }
 .save-state[data-state="unverified"] { color: var(--amber-text); }
 .save-state[data-state="waiting"] { color: var(--text-secondary); }
 .save-state[data-state="failed"] { color: var(--error-color); }
-label.inline .save-state, td .save-state, .mode-row .save-state, .snippet-head .save-state, .key-row .save-state { margin-left: 8px; }
-td .save-state { display: inline-block; }
+form [aria-invalid="true"] { border-color: var(--error-color); }
+form input[type="checkbox"][aria-invalid="true"], form input[type="radio"][aria-invalid="true"] { outline: 1px solid var(--error-color); outline-offset: 2px; }
 .mode-row { display: flex; flex-wrap: wrap; align-items: baseline; }
 
 .ignition-params { display: flex; flex-direction: column; gap: 14px; transition: opacity 150ms ease; }
