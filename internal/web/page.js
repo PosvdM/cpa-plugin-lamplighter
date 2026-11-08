@@ -152,7 +152,7 @@
       codex_reset_pending: "首次开启时推送当前待生效的排期",
       chart_prefs: "额度图表", remember_chart_filters: "记住筛选条件",
       remember_chart_filters_hint: "在当前浏览器中记住上次选择的额度窗口、时间范围和排序；关闭后每次打开页面都使用默认选择。",
-      save_hint: "修改后自动保存到 CPA 的 config.yaml，插件几秒内应用。文本和数字在离开输入框或按回车时保存，保存结果显示在各项旁边。",
+      save_hint: "修改后自动保存到 CPA 的 config.yaml，插件几秒内应用。文本和数字在离开输入框或按回车时保存，保存结果显示在区块标题旁，高级设置按分组显示。",
       language_note: "通知语言跟随最近打开此页面时管理中心的语言，当前为{0}。",
       lang_zh: "中文", lang_en: "English",
       due: "已到", minutes: "{0} 分钟", hours_minutes: "{0} 小时 {1} 分", days: "{0} 天",
@@ -170,10 +170,13 @@
       no_accounts: "没有可监控的 {0} 凭证。",
       first_query: "CPA 启动约 20 秒后开始第一次查询。",
       refresh: "刷新", refreshed: "已刷新 {0}",
-      rename: "命名", rename_prompt: "{0} 的名称，写入 CPA 凭证备注的第一行。留空则按邮箱区分账号。", renamed: "已保存 {0} 的名称",
+      account_settings: "账号", rename: "名称",
+      rename_hint: "名称写入 CPA 凭证备注的第一行，保留其余各行。留空则按邮箱区分账号；备注有多行时，清空名称须确认删除整条备注。",
+      account_order_hint: "拖动手柄调整顺序，额度卡片和图表默认顺序随之调整。拖动时按 Esc 可取消。",
+      account_name_aria: "{0} 的名称", account_weight_aria: "{0} 的权重", weight_default: "套餐默认值 {0}",
       rename_clear_note: "这个账号的备注还有其他内容。清空名称会删除整条备注，继续吗？",
-      weight: "权重", weight_prompt: "{0} 的权重，多账号合计按权重平均各账号的剩余额度。留空则使用套餐的默认值 {1}。",
-      weight_saved: "已保存 {0} 的权重", plan: "套餐：{0}", weight_invalid: "权重必须是大于 0 的数字",
+      weight: "权重", weight_hint: "同一服务有多个账号时，可设置各账号的权重，合计按权重平均剩余额度。权重须大于 0，可带小数；留空使用输入框中提示的套餐默认值。",
+      plan: "套餐：{0}", weight_invalid: "权重必须是大于 0 的数字",
       cooldown_stale: "额度已恢复，但 CPA 仍冷却到 {0}，期间的请求和点火都会被拒绝；在 CPA 管理中心清除这个账号的冷却。",
       cooldown: "CPA 冷却到 {0}（{1}）",
       blocked_5h: "5 小时额度已用完", blocked_7d: "7 天额度已用完", blocked_other: "{0}额度已用完",
@@ -220,14 +223,15 @@
       level_full: "满", level_high: "高", level_medium: "中", level_low: "低", level_empty: "空",
       inactive: "已停用", inactive_suffix: "（已停用）", stat_last: "最后读数",
       legend_inactive: "已停用：账号不再报告这个窗口，保留到最后一个数据点移出所选范围",
-      drag_handle: "拖动调整顺序", move_up: "上移", move_down: "下移", move_up_aria: "上移 {0}", move_down_aria: "下移 {0}",
+      drag_handle: "拖动调整顺序",
       order_failed: "账号顺序保存失败：{0}",
       view_nav: "页面", advanced: "高级",
       notify_channels: "通知渠道", webhook_advanced: "高级：请求方法、请求头、请求体和成功条件", alert_rules: "提醒规则",
       ignition_off: "自动点火已关闭，这些设置暂不生效。",
       ignition_models_hint: "选择点火模型需要“高级”中的模型列表 API key。",
       monitor_hint: "勾选要监控额度的服务。",
-      save_saving: "保存中…", save_failed_short: "失败：{0}",
+      save_saved: "已保存", save_saving: "保存中…",
+      save_field_failed: "✕ {0}保存失败", save_failure_reason: "：{0}", save_failed_compact: "✕ 保存失败", save_more_failed: "（另有 {0} 项失败）", save_order: "排序",
       save_waiting: "已保存，等待生效", save_applied: "已生效", save_unconfirmed: "未确认生效",
       save_applied_verified: "已生效，验证通过", save_applied_unverified: "已生效，未能验证：{0}", network_error: "网络错误",
       mask_on: "打码账号", mask_off: "显示账号", account_n: "账号 {0}",
@@ -308,7 +312,7 @@
       codex_reset_pending: "When first turned on, send the pending schedule",
       chart_prefs: "Quota chart", remember_chart_filters: "Remember the filters",
       remember_chart_filters_hint: "This browser remembers the last quota window, time range and order. When off, the page opens with the default choices.",
-      save_hint: "Changes save to CPA's config.yaml automatically, and the plugin applies them within a few seconds. Text and numbers save when you leave the field or press Enter; each field shows whether it saved.",
+      save_hint: "Changes save to CPA's config.yaml automatically, and the plugin applies them within a few seconds. Text and numbers save when you leave the field or press Enter. Save results appear beside section headings or advanced group legends.",
       language_note: "Notifications use the Management Center language from the last time this page was opened, now {0}.",
       lang_zh: "中文", lang_en: "English",
       due: "due", minutes: "{0} min", hours_minutes: "{0} h {1} min", days: "{0} days",
@@ -326,10 +330,13 @@
       no_accounts: "No {0} credentials to monitor.",
       first_query: "The first query runs about 20 seconds after CPA starts.",
       refresh: "Refresh", refreshed: "Refreshed {0}",
-      rename: "Name", rename_prompt: "Name of {0}, saved as the first line of the CPA credential note. Leave it empty to tell accounts apart by email.", renamed: "Saved the name of {0}",
+      account_settings: "Accounts", rename: "Name",
+      rename_hint: "Names are saved as the first line of the CPA credential note; other lines are kept. Leave the name empty to distinguish accounts by email. Clearing a name on a multiline note requires confirmation to delete the whole note.",
+      account_order_hint: "Drag a handle to set the default order of quota cards and charts. Press Esc during a drag to cancel.",
+      account_name_aria: "Name of {0}", account_weight_aria: "Weight of {0}", weight_default: "Plan default: {0}",
       rename_clear_note: "The note of this account has more lines. Clearing the name deletes the whole note. Continue?",
-      weight: "Weight", weight_prompt: "Weight of {0}. The total of several accounts averages their remaining quota by weight. Leave it empty to use the default of the plan, {1}.",
-      weight_saved: "Saved the weight of {0}", plan: "Plan: {0}", weight_invalid: "The weight must be a number above 0",
+      weight: "Weight", weight_hint: "For services with several accounts, the total averages their remaining quota by weight. Weights must be above 0; decimals are allowed. Leave a field empty to use the plan default shown in it.",
+      plan: "Plan: {0}", weight_invalid: "The weight must be a number above 0",
       cooldown_stale: "Quota is back, but CPA cools this account down until {0} and rejects requests and ignition until then. Clear the cooldown in the CPA Management Center.",
       cooldown: "CPA cooldown until {0} ({1})",
       blocked_5h: "5-hour quota used up", blocked_7d: "7-day quota used up", blocked_other: "{0} quota used up",
@@ -376,14 +383,15 @@
       level_full: "Full", level_high: "High", level_medium: "Medium", level_low: "Low", level_empty: "Empty",
       inactive: "Inactive", inactive_suffix: " (inactive)", stat_last: "Last reading",
       legend_inactive: "Inactive: the account no longer reports this window; it shows until its last sample leaves the range",
-      drag_handle: "Drag to reorder", move_up: "Move up", move_down: "Move down", move_up_aria: "Move {0} up", move_down_aria: "Move {0} down",
+      drag_handle: "Drag to reorder",
       order_failed: "Could not save the account order: {0}",
       view_nav: "Page", advanced: "Advanced",
       notify_channels: "Notification channels", webhook_advanced: "Advanced: method, headers, body and success condition", alert_rules: "Alert rules",
       ignition_off: "Ignition is off, so these settings do not apply for now.",
       ignition_models_hint: "Picking ignition models needs the model list API key under Advanced.",
       monitor_hint: "Check the services whose quota to monitor.",
-      save_saving: "Saving…", save_failed_short: "Failed: {0}",
+      save_saved: "Saved", save_saving: "Saving…",
+      save_field_failed: "✕ {0} save failed", save_failure_reason: ": {0}", save_failed_compact: "✕ Save failed", save_more_failed: " ({0} more failed)", save_order: "Order",
       save_waiting: "Saved; waiting to take effect", save_applied: "In effect", save_unconfirmed: "Not confirmed in effect",
       save_applied_verified: "In effect; CPA accepts the key", save_applied_unverified: "In effect, but could not verify: {0}", network_error: "network error",
       mask_on: "Blur accounts", mask_off: "Show accounts", account_n: "Account {0}",
@@ -447,6 +455,7 @@
     lang = next;
     languageApplied = true;
     applyStaticText();
+    renderSaveStates();
     renderRangeButtons();
     renderMaskButton();
     renderCardsSnapshot();
@@ -667,7 +676,7 @@
   // Text that names accounts carries SENSITIVE, which .mask-accounts
   // blurs; chart text in SVG gets the mask-blur filter instead. Masked,
   // title tooltips that name accounts are left out and labels for screen
-  // readers number the accounts. Prompts and confirmations keep the names.
+  // readers number the accounts. Confirmations keep the names.
   var SENSITIVE = "account-sensitive";
   var masked = false;
 
@@ -742,8 +751,9 @@
     return node;
   }
 
-  function renderMaskButton() {
-    var button = $("mask-toggle");
+  // The header button and the eye buttons beside the screenshot buttons all
+  // switch the same masking, so a screenshot needs no trip to the top.
+  function drawMaskButton(button) {
     var label = translate(masked ? "mask_off" : "mask_on");
     button.setAttribute("aria-pressed", masked ? "true" : "false");
     button.setAttribute("title", label);
@@ -754,15 +764,30 @@
     icon.appendChild(svg("circle", { cx: 8, cy: 8, r: 2.1 }));
     if (masked) icon.appendChild(svg("path", { d: "M2.5 2.5l11 11" }));
     button.appendChild(icon);
+    return button;
+  }
+
+  function renderMaskButton() {
+    Array.prototype.forEach.call(document.querySelectorAll(".mask-toggle"), drawMaskButton);
+  }
+
+  // An eye button for beside a screenshot button; screenshots leave it out.
+  function maskButton() {
+    return drawMaskButton(el("button", { type: "button", class: "btn btn-ghost btn-icon mask-toggle no-snapshot", onclick: toggleMask }));
   }
 
   function toggleMask() {
+    var detailFocus = document.activeElement === $("chart-detail-head").querySelector(".mask-toggle");
     masked = !masked;
     document.documentElement.classList.toggle("mask-accounts", masked);
     renderMaskButton();
     if (!status) return;
     renderStatus();
     if (history) renderChart();
+    if (detailFocus) {
+      var eye = $("chart-detail-head").querySelector(".mask-toggle");
+      if (eye) eye.focus({ preventScroll: true });
+    }
   }
 
   // ---- Screenshots ----
@@ -794,7 +819,6 @@
       Array.prototype.forEach.call(copy.querySelectorAll(".no-snapshot, .tooltip, [visibility='visible'][pointer-events='none']"), function (n) {
         n.parentNode.removeChild(n);
       });
-      if (copy.classList) copy.classList.remove("dragging");
       frame.appendChild(copy);
     });
     // Measured off screen, with the page's layout.
@@ -845,6 +869,11 @@
     button.id = "snapshot-cards";
     if (old) old.parentNode.replaceChild(button, old);
     else $("refresh-all").parentNode.insertBefore(button, $("refresh-all"));
+    if (!$("mask-cards")) {
+      var eye = maskButton();
+      eye.id = "mask-cards";
+      button.parentNode.insertBefore(eye, button);
+    }
   }
 
   // A camera button that copies a screenshot of the nodes nodesOf returns.
@@ -972,17 +1001,20 @@
   // Saves the full list of credential file names in their new order through
   // the save queue. Cards and chart show it at once.
   function saveAccountOrder(names) {
+    var say = claimState($("account-order-state"));
     pendingOrder = names.slice();
     rawConfig.account_order = names.slice();
     sortAccounts();
     renderAccounts();
     if (history) renderChart();
     saveQueue = saveQueue.then(function () {
-      return patchConfig({ account_order: names }).then(function () {
+      return patchConfig({ account_order: names }).then(function (token) {
+        showApplied(say, token);
         if (pendingOrder && pendingOrder.join("\n") === names.join("\n")) pendingOrder = null;
         return loadConfig();
       }).catch(function (err) {
-        pendingOrder = null;
+        if (pendingOrder && pendingOrder.join("\n") === names.join("\n")) pendingOrder = null;
+        say("failed", err.message);
         if (err.message !== "unauthorized") toast(translate("order_failed", err.message));
         return loadConfig().catch(function () {}).then(function () {
           sortAccounts();
@@ -993,73 +1025,194 @@
     });
   }
 
-  function accountNames() { return status.accounts.map(function (a) { return a.name; }); }
+  function reducedMotion() { return window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches; }
 
-  // The up and down buttons move a card by one place; the button keeps the
-  // focus, so the keyboard can move it again.
-  function moveAccount(name, delta) {
-    var names = accountNames(), from = names.indexOf(name), to = from + delta;
-    if (from < 0 || to < 0 || to >= names.length) return;
-    names.splice(to, 0, names.splice(from, 1)[0]);
-    saveAccountOrder(names);
-    var button = $("accounts").querySelector("[data-move='" + (delta < 0 ? "up" : "down") + "'][data-account='" + cssEscape(name) + "']");
-    if (button && !button.disabled) button.focus();
-    else {
-      var other = $("accounts").querySelector("[data-move][data-account='" + cssEscape(name) + "']:not([disabled])");
-      if (other) other.focus();
-    }
+  function accountRows() { return Array.prototype.slice.call($("account-rows").children); }
+
+  // FLIP begins at each row's current painted position, even if its previous
+  // move is unfinished. Drop targets use offsetTop instead, without transforms.
+  function animateAccountRows(change) {
+    var rows = accountRows(), before = rows.map(function (row) { return row.getBoundingClientRect().top; });
+    rows.forEach(function (row) { if (row.orderAnimation) row.orderAnimation.cancel(); });
+    change();
+    rows.forEach(function (row, i) {
+      if (row.classList.contains("account-placeholder")) return;
+      var dy = before[i] - row.getBoundingClientRect().top;
+      if (dy && row.animate && !reducedMotion()) {
+        row.orderAnimation = row.animate([{ transform: "translateY(" + dy + "px)" }, { transform: "none" }],
+          { duration: 180, easing: getComputedStyle(row).getPropertyValue("--ease-out-strong").trim() });
+      }
+    });
   }
 
-  function cssEscape(text) { return window.CSS && CSS.escape ? CSS.escape(text) : String(text).replace(/["'\\]/g, "\\$&"); }
-
-  // Dragging a card by its handle moves the card itself through the grid:
-  // over another card, it takes that card's place. The order is saved when
-  // the pointer is released. Pointer events cover mouse, pen and touch. A
-  // status refresh during the drag would rebuild the cards, so it waits
-  // until the drag ends.
+  // The original row is a placeholder; an inert fixed copy follows the
+  // pointer. Status refreshes wait through both dragging and settling.
   var accountDrag = null;
   var accountsBehind = false;
 
-  function startAccountDrag(e, card, handle) {
-    if (e.button !== 0 || accountDrag) return;
+  function startAccountDrag(e, row, handle) {
+    if (e.button !== 0 || e.isPrimary === false || accountDrag) return;
     e.preventDefault();
-    accountDrag = { card: card, handle: handle, pointer: e.pointerId, before: accountNames().join("\n") };
-    card.classList.add("dragging");
-    $("accounts").classList.add("sorting");
+    var active = document.activeElement;
+    if (active && active.closest("#account-rows") && active.tagName === "INPUT") active.blur();
+    if (row.orderAnimation) row.orderAnimation.cancel();
+    var rect = row.getBoundingClientRect(), copy = row.cloneNode(true);
+    copy.classList.add("account-floating");
+    copy.setAttribute("aria-hidden", "true");
+    copy.setAttribute("inert", "");
+    copy.style.width = rect.width + "px";
+    copy.style.height = rect.height + "px";
+    copy.style.left = rect.left + "px";
+    copy.style.top = rect.top + "px";
+    $("settings").appendChild(copy);
+    accountDrag = { row: row, copy: copy, handle: handle, pointer: e.pointerId,
+      before: accountRows(), top: rect.top, grab: e.clientY - rect.top, y: e.clientY, settling: false };
+    row.classList.add("account-placeholder");
+    $("account-rows").classList.add("sorting");
+    handle.setPointerCapture(e.pointerId);
     document.addEventListener("pointermove", moveAccountDrag);
     document.addEventListener("pointerup", endAccountDrag);
     document.addEventListener("pointercancel", endAccountDrag);
+    document.addEventListener("keydown", cancelAccountDrag);
+    window.addEventListener("scroll", scrollAccountDrag, true);
+  }
+
+  // The index is determined by the other rows' layout midpoints. Animated
+  // transforms never feed back into hit testing, so a stationary pointer
+  // cannot make rows oscillate between positions.
+  function accountDropIndex(rows, y, top) {
+    var index = 0;
+    rows.forEach(function (row) { if (y > top + row.offsetTop + row.offsetHeight / 2) index++; });
+    return index;
   }
 
   function moveAccountDrag(e) {
-    if (!accountDrag || e.pointerId !== accountDrag.pointer) return;
-    var box = $("accounts");
-    var target = document.elementFromPoint(e.clientX, e.clientY);
-    var over = target && target.closest ? target.closest(".card.account") : null;
-    if (!over || over === accountDrag.card || over.parentNode !== box) return;
-    var cards = Array.prototype.slice.call(box.children);
-    if (cards.indexOf(over) > cards.indexOf(accountDrag.card)) box.insertBefore(accountDrag.card, over.nextSibling);
-    else box.insertBefore(accountDrag.card, over);
+    var drag = accountDrag;
+    if (!drag || drag.settling || e.pointerId !== drag.pointer) return;
+    drag.y = e.clientY;
+    drag.copy.style.transform = "translateY(" + (e.clientY - drag.grab - drag.top) + "px)";
+    var box = $("account-rows"), rows = accountRows().filter(function (row) { return row !== drag.row; });
+    var index = accountDropIndex(rows, e.clientY, box.getBoundingClientRect().top);
+    var next = rows[index] || null;
+    if (drag.row.nextElementSibling !== next) animateAccountRows(function () { box.insertBefore(drag.row, next); });
+  }
+
+  function scrollAccountDrag() {
+    if (accountDrag) moveAccountDrag({ pointerId: accountDrag.pointer, clientY: accountDrag.y });
+  }
+
+  function cancelAccountDrag(e) {
+    if (e.key !== "Escape" || !accountDrag) return;
+    e.preventDefault();
+    endAccountDrag({ pointerId: accountDrag.pointer, type: "pointercancel" });
   }
 
   function endAccountDrag(e) {
-    if (!accountDrag || e.pointerId !== accountDrag.pointer) return;
     var drag = accountDrag;
-    accountDrag = null;
+    if (!drag || drag.settling || e.pointerId !== drag.pointer) return;
+    drag.settling = true;
     document.removeEventListener("pointermove", moveAccountDrag);
     document.removeEventListener("pointerup", endAccountDrag);
     document.removeEventListener("pointercancel", endAccountDrag);
-    drag.card.classList.remove("dragging");
-    $("accounts").classList.remove("sorting");
-    var names = Array.prototype.map.call($("accounts").querySelectorAll(".card.account"), function (card) { return card.getAttribute("data-account"); });
-    if (names.join("\n") !== drag.before && e.type !== "pointercancel") saveAccountOrder(names);
-    else if (accountsBehind || e.type === "pointercancel") renderAccounts();
+    document.removeEventListener("keydown", cancelAccountDrag);
+    window.removeEventListener("scroll", scrollAccountDrag, true);
+    if (drag.handle.hasPointerCapture(drag.pointer)) drag.handle.releasePointerCapture(drag.pointer);
+    var cancelled = e.type === "pointercancel", box = $("account-rows");
+    if (cancelled) animateAccountRows(function () { drag.before.forEach(function (row) { box.appendChild(row); }); });
+    var rect = drag.row.getBoundingClientRect(), from = drag.copy.getBoundingClientRect();
+    var finish = function () {
+      drag.copy.remove();
+      drag.row.classList.remove("account-placeholder");
+      box.classList.remove("sorting");
+      var names = accountRows().map(function (row) { return row.getAttribute("data-account"); });
+      var before = drag.before.map(function (row) { return row.getAttribute("data-account"); });
+      accountDrag = null;
+      if (!cancelled && names.join("\n") !== before.join("\n")) saveAccountOrder(names);
+      else if (accountsBehind) renderAccounts();
+      else renderAccountSettings();
+    };
+    if (drag.copy.animate && !reducedMotion()) {
+      var animation = drag.copy.animate([
+        { transform: "translateY(" + (from.top - drag.top) + "px)" },
+        { transform: "translate(" + (rect.left - from.left) + "px," + (rect.top - drag.top) + "px)" }
+      ], { duration: 180, easing: getComputedStyle(drag.copy).getPropertyValue("--ease-out-strong").trim(), fill: "forwards" });
+      animation.finished.then(finish, finish);
+    } else finish();
+  }
+
+  function makeAccountSetting(account) {
+    var row = el("div", { class: "account-setting", "data-account": account.name });
+    var handle = el("span", { class: "drag-handle", "aria-hidden": "true" });
+    handle.addEventListener("pointerdown", function (e) { startAccountDrag(e, row, handle); });
+    row.appendChild(handle);
+    row.appendChild(el("span", { class: "type-badge" }));
+    row.appendChild(el("div", { class: "account-identity" }, [
+      el("span", { class: "strong " + SENSITIVE }), el("span", { class: "account-email " + SENSITIVE })
+    ]));
+    ["name", "weight"].forEach(function (kind) {
+      var input = el("input", { type: kind === "weight" ? "number" : "text", class: SENSITIVE,
+        "data-account-field": kind, autocomplete: "off", spellcheck: "false" });
+      if (kind === "weight") { input.step = "any"; input.min = "0"; }
+      input.addEventListener("change", function () { saveAccountField(input, row); });
+      row.appendChild(el("label", {}, [el("span", { class: "field-label" }, [
+        el("span", { text: translate(kind === "name" ? "rename" : "weight") })
+      ]), input]));
+    });
+    return row;
+  }
+
+  function renderAccountSettings() {
+    if (accountDrag) { accountsBehind = true; return; }
+    var box = $("account-rows"), counts = {}, existing = new Map();
+    var active = box.contains(document.activeElement) ? document.activeElement : null;
+    var selection = active && active.type === "text" ? [active.selectionStart, active.selectionEnd] : null;
+    status.accounts.forEach(function (a) { counts[a.provider] = (counts[a.provider] || 0) + 1; });
+    accountRows().forEach(function (row) { existing.set(row.getAttribute("data-account"), row); });
+    status.accounts.forEach(function (account, index) {
+      var row = existing.get(account.name) || makeAccountSetting(account);
+      existing.delete(account.name);
+      row.account = account;
+      // Avoid moving unchanged nodes: reparenting a focused input blurs it.
+      if (box.children[index] !== row) box.insertBefore(row, box.children[index] || null);
+      var spoken = masked ? accountAlias(index) : account.email || account.name;
+      var badge = row.querySelector(".type-badge");
+      badge.className = "type-badge type-" + account.provider;
+      badge.textContent = providerTitle(account.provider);
+      var identity = row.querySelector(".account-identity");
+      identity.firstChild.textContent = account.title;
+      identity.lastChild.textContent = account.email || account.name;
+      [identity.firstChild, identity.lastChild].forEach(function (node) {
+        if (masked) node.removeAttribute("title"); else node.title = node.textContent;
+      });
+      row.querySelector(".drag-handle").title = translate("drag_handle");
+      Array.prototype.forEach.call(row.querySelectorAll("[data-account-field]"), function (input) {
+        var kind = input.getAttribute("data-account-field"), weight = kind === "weight";
+        input.parentNode.firstChild.firstChild.textContent = translate(weight ? "weight" : "rename");
+        input.setAttribute("aria-label", translate(weight ? "account_weight_aria" : "account_name_aria", spoken));
+        input.parentNode.classList.toggle("account-weight-empty", weight && counts[account.provider] <= 1);
+        input.disabled = weight && counts[account.provider] <= 1;
+        saveEntry(saveHost(input), input);
+        var saved = rawConfig.account_weights && Number(rawConfig.account_weights[account.name]);
+        var value = weight ? (saved > 0 ? fmtWeight(saved) : "") : (account.note || "").split(/\r?\n/)[0].trim();
+        if (!input.accountDirty && !input.accountPending && document.activeElement !== input) {
+          input.value = value;
+          input.accountSaved = value;
+        }
+        if (weight) input.placeholder = translate("weight_default", fmtWeight(Number(account.default_weight) > 0 ? Number(account.default_weight) : 1));
+      });
+    });
+    existing.forEach(function (row) { row.remove(); });
+    if (active && active.isConnected && document.activeElement !== active) {
+      active.focus({ preventScroll: true });
+      if (selection) active.setSelectionRange(selection[0], selection[1]);
+    }
   }
 
   function renderAccounts() {
     // Rebuilding the cards would drop the one being dragged.
     if (accountDrag) { accountsBehind = true; return; }
     accountsBehind = false;
+    renderAccountSettings();
     var box = $("accounts");
     clear(box);
     if (!status.accounts.length) {
@@ -1072,38 +1225,17 @@
     // several accounts.
     var counts = {};
     status.accounts.forEach(function (a) { counts[a.provider] = (counts[a.provider] || 0) + 1; });
-    var last = status.accounts.length - 1;
     status.accounts.forEach(function (account, index) {
-      // Masked, the labels for screen readers number the accounts instead.
-      var spoken = masked ? accountAlias(index) : account.email || account.name;
       var card = el("div", { class: "card account", "data-account": account.name });
-      var handle = el("span", { class: "drag-handle no-snapshot", title: translate("drag_handle"), "aria-hidden": "true" });
-      handle.addEventListener("pointerdown", function (e) { startAccountDrag(e, card, handle); });
-      var moves = el("span", { class: "order-buttons no-snapshot" }, [
-        el("button", { type: "button", class: "btn btn-ghost btn-icon", "data-move": "up", "data-account": account.name, disabled: index === 0,
-          title: translate("move_up"), "aria-label": translate("move_up_aria", spoken), text: "↑",
-          onclick: function () { moveAccount(account.name, -1); } }),
-        el("button", { type: "button", class: "btn btn-ghost btn-icon", "data-move": "down", "data-account": account.name, disabled: index === last,
-          title: translate("move_down"), "aria-label": translate("move_down_aria", spoken), text: "↓",
-          onclick: function () { moveAccount(account.name, 1); } })
-      ]);
       var pooledAccount = counts[account.provider] > 1, weight = accountWeight(account);
       var refresh = el("button", { type: "button", class: "btn btn-ghost btn-sm no-snapshot", text: translate("refresh"), onclick: function () {
         runAction(refresh, API + "/refresh", { auth_index: account.auth_index }, translate("refreshed", account.title));
       } });
-      var rename = el("button", { type: "button", class: "btn btn-ghost btn-sm no-snapshot", text: translate("rename"), onclick: function () {
-        renameAccount(rename, account);
-      } });
-      var weigh = pooledAccount ? el("button", { type: "button", class: "btn btn-ghost btn-sm no-snapshot", text: translate("weight"), onclick: function () {
-        setWeight(weigh, account);
-      } }) : null;
       card.appendChild(el("div", { class: "account-head" }, [
-        handle,
-        el("span", { class: "type-badge type-" + account.provider }, maskedNodes(account.title)),
-        pooledAccount && weight !== 1 ? el("span", { class: "account-weight", title: translate("weight"), text: "×" + fmtWeight(weight) }) : null,
-        el("span", { class: "account-email " + SENSITIVE, title: masked ? null : account.email || account.name, text: account.email || account.name }),
-        moves, rename, weigh, refresh,
-        snapshotButton("snapshot_card", function () { return [card]; })
+        el("span", { class: "type-badge type-" + account.provider }, maskedNodes(account.title).concat(
+          pooledAccount && weight !== 1 ? [el("span", { class: "account-weight", title: translate("weight"), text: "×" + fmtWeight(weight) })] : []
+        )),
+        el("span", { class: "account-email " + SENSITIVE, title: masked ? null : account.email || account.name, text: account.email || account.name })
       ]));
       (account.groups || []).forEach(function (group) {
         var block = el("div", { class: "quota-group" });
@@ -1115,7 +1247,6 @@
         if (foot) block.appendChild(foot);
         card.appendChild(block);
       });
-      if (account.plan) card.appendChild(el("div", { class: "cell-note", text: translate("plan", account.plan) }));
       var cooldown = parseTime(account.cooldown_until);
       if (cooldown && account.stale_cooldown) {
         card.appendChild(el("div", { class: "error-text", text: translate("cooldown_stale", fmtDateTime(cooldown)) }));
@@ -1123,6 +1254,11 @@
         card.appendChild(el("div", { class: "cell-note", text: translate("cooldown", fmtDateTime(cooldown), fmtIn(cooldown)) }));
       }
       if (account.error) card.appendChild(el("div", { class: "error-text" }, maskedNodes(account.error)));
+      card.appendChild(el("div", { class: "account-head cell-note" }, [
+        el("span", { class: "cell-note", text: account.plan ? translate("plan", account.plan) : "" }),
+        refresh,
+        snapshotButton("snapshot_card", function () { return [card]; })
+      ]));
       box.appendChild(card);
     });
   }
@@ -1373,60 +1509,75 @@
   // reads the new note at once. The quota query of the refresh can fail for
   // reasons unrelated to the name, which the plugin applies anyway, so its
   // result only updates the page.
-  function renameAccount(button, account) {
-    var lines = (account.note || "").split(/\r?\n/);
-    var name = prompt(translate("rename_prompt", account.title), lines[0].trim());
-    if (name === null) return;
-    name = name.replace(/\s+/g, " ").trim();
-    var rest = lines.slice(1).join("\n").trim();
-    if (!name && rest && !confirm(translate("rename_clear_note"))) return;
-    var note = name ? (name + "\n" + rest).trim() : "";
-    button.disabled = true;
-    api("PATCH", "/v0/management/auth-files/fields", { name: account.name, note: note }).then(function () {
+  function saveAccountName(account, note) {
+    return api("PATCH", "/v0/management/auth-files/fields", { name: account.name, note: note }).then(function () {
+      (status.accounts || []).forEach(function (a) { if (a.name === account.name) a.note = note; });
       return api("POST", API + "/refresh", { auth_index: account.auth_index }).then(function (data) {
         if (data.status) { status = data.status; renderStatus(); }
-      }, function () { /* the name shows after the next poll */ }).then(function () {
-        toast(translate("renamed", account.email || account.name));
-        loadHistory(true);
-      });
-    }).catch(function (err) {
-      if (err.message !== "unauthorized") toast(translate("failed", err.message));
-    }).then(function () { button.disabled = false; });
+      }, function () { /* the name shows after the next poll */ }).then(function () { loadHistory(true); });
+    });
   }
 
   function fmtWeight(weight) { return String(Math.round(weight * 100) / 100); }
 
-  // Weights are saved in account_weights by credential file name, which a
-  // rename does not change. An empty answer removes the weight, so the
-  // account uses the default of its plan. The page applies the saved weight
-  // at once.
-  function setWeight(button, account) {
-    var saved = rawConfig.account_weights && typeof rawConfig.account_weights === "object" ? rawConfig.account_weights : {};
-    var current = Number(saved[account.name]);
-    var fallback = Number(account.default_weight) > 0 ? Number(account.default_weight) : 1;
-    var answer = prompt(translate("weight_prompt", account.title, fmtWeight(fallback)), current > 0 ? fmtWeight(current) : "");
-    if (answer === null) return;
-    answer = answer.trim();
-    var value = Number(answer);
-    if (answer !== "" && (!isFinite(value) || value <= 0)) { toast(translate("weight_invalid")); return; }
-    button.disabled = true;
-    // The object is built in the queue, from the config the previous save
-    // wrote, so saving two weights in a row keeps both.
+  function accountNote(note, name) {
+    var rest = (note || "").split(/\r?\n/).slice(1).join("\n").trim();
+    return name ? (name + "\n" + rest).trim() : "";
+  }
+
+  function accountFieldHost(input) { return saveHost(input); }
+
+  // Account fields have no config input name: names go to CPA credentials,
+  // and weights patch a shared map built from the preceding queued save.
+  // Dirty or pending fields survive polling, sorting and earlier saves.
+  // Each field owns its result; the heading summarizes failures and progress.
+  function saveAccountField(input, row) {
+    var host = accountFieldHost(input), binding = saveEntry(host, input);
+    var account = row.account, kind = input.getAttribute("data-account-field"), weight = kind === "weight";
+    var answer = weight ? input.value.trim() : input.value.replace(/\s+/g, " ").trim();
+    var value = Number(answer), gen = input.accountEdit || 0;
+    if (weight && (input.validity.badInput || (answer !== "" && (!isFinite(value) || value <= 0)))) {
+      setSaveState(host, "failed", translate("weight_invalid"), input);
+      return;
+    }
+    if (answer === input.accountSaved && !input.accountPending && !input.hasAttribute("aria-invalid")) {
+      input.value = answer;
+      input.accountDirty = false;
+      return;
+    }
+    if (!weight && !answer && (account.note || "").split(/\r?\n/).slice(1).join("\n").trim() && !confirm(translate("rename_clear_note"))) {
+      input.value = input.accountSaved;
+      input.accountDirty = false;
+      return;
+    }
+    var note = !weight ? accountNote(account.note, answer) : "";
+    var say = claimState(host, input);
+    input.accountPending = (input.accountPending || 0) + 1;
     saveQueue = saveQueue.then(function () {
+      if (!weight) return saveAccountName(account, note).then(function () { say("saved", translate("save_saved")); });
       var latest = rawConfig.account_weights;
       var weights = latest && typeof latest === "object" ? JSON.parse(JSON.stringify(latest)) : {};
-      if (answer === "") delete weights[account.name];
-      else weights[account.name] = value;
-      return patchConfig({ account_weights: Object.keys(weights).length ? weights : null }).then(function () {
-        return loadConfig().then(function () {
-          toast(translate("weight_saved", account.title));
-          renderAccounts();
-          if (history) renderChart();
-        });
-      }).catch(function (err) {
-        if (err.message !== "unauthorized") toast(translate("save_failed", err.message));
-        button.disabled = false;
+      if (answer === "") delete weights[account.name]; else weights[account.name] = value;
+      return patchConfig({ account_weights: Object.keys(weights).length ? weights : null }).then(function (token) {
+        showApplied(say, token);
+        return loadConfig();
       });
+    }).then(function () {
+      input = binding.input;
+      if ((input.accountEdit || 0) === gen) {
+        input.value = weight && answer !== "" ? fmtWeight(value) : answer;
+        input.accountSaved = input.value;
+        input.accountDirty = false;
+      }
+    }).catch(function (err) {
+      input = binding.input;
+      if ((input.accountEdit || 0) === gen) input.accountDirty = true;
+      say("failed", err.message);
+    }).then(function () {
+      input = binding.input;
+      input.accountPending--;
+      renderAccounts();
+      if (history) renderChart();
     });
   }
 
@@ -2278,7 +2429,7 @@
     head.appendChild(el("span", { class: "detail-name" }, (row.orphan ? [el("span", { class: SENSITIVE, text: row.name })] : maskedNodes(row.name)).concat([" · " + translate(historyWindow === "5h" ? "quota_5h" : "quota_7d")])));
     if (row.inactive) head.appendChild(badge("muted", translate("inactive")));
     head.appendChild(el("span", { class: "muted" + (group ? "" : " " + SENSITIVE), text: group ? translate("pooled_note", row.children.length) : row.sub }));
-    head.appendChild(snapshotButton("snapshot_detail", function () { return [head, box]; }));
+    head.appendChild(el("span", { class: "detail-tools" }, [maskButton(), snapshotButton("snapshot_detail", function () { return [head, box]; })]));
     if (row.inactive) {
       head.appendChild(el("span", { class: "detail-stat" }, [document.createTextNode(translate("stat_last")),
         el("strong", { text: pct(row.last) + " · " + fmtDateTime(unixDate(row.lastAt)) })]));
@@ -2834,10 +2985,12 @@
   function renderGroupChecks(p, selected) {
     var box = document.querySelector("[data-groups='" + p.id + "']");
     if (!box) return;
+    var existing = new Map();
+    Array.prototype.forEach.call(box.querySelectorAll("[data-group]"), function (input) { existing.set(input.getAttribute("data-group"), input); });
     clear(box);
     groupChoices(p, selected).forEach(function (name) {
-      var input = el("input", { type: "checkbox", "data-group": name });
-      input.checked = (selected || []).some(function (s) { return s.toLowerCase() === name.toLowerCase(); });
+      var input = existing.get(name) || el("input", { type: "checkbox", "data-group": name });
+      if (!input.settingsDirty && !input.hasAttribute("aria-invalid")) input.checked = (selected || []).some(function (s) { return s.toLowerCase() === name.toLowerCase(); });
       box.appendChild(el("label", { class: "inline" }, [input, document.createTextNode(name)]));
     });
   }
@@ -2923,6 +3076,8 @@
     Array.prototype.forEach.call($("settings").elements, function (input) {
       if (!input.name) return;
       if (keys && (!keys[topKey(input.name)] || input === active)) return;
+      if (input.settingsDirty || input.hasAttribute("aria-invalid")) return;
+      if (input.type === "radio" && saveControls(input).some(function (peer) { return peer.settingsDirty || peer.hasAttribute("aria-invalid"); })) return;
       fillInput(input, effective);
     });
     Array.prototype.forEach.call(document.querySelectorAll(".mode-switch"), function (box) { placeThumb(box, false); });
@@ -3017,11 +3172,11 @@
   // patch from these, so a refill of the fields in the meantime does not
   // change what it saves.
   function captureIntent(tops) {
-    var intent = { inputs: [], states: [] };
+    var intent = { inputs: [], states: [], submitted: [] };
     Array.prototype.forEach.call($("settings").elements, function (input) {
       if (tops.indexOf(inputTop(input)) < 0) return;
       intent.inputs.push(input);
-      intent.states.push({ value: input.value, checked: input.checked });
+      intent.states.push({ value: input.value, checked: input.checked, edit: input.settingsEdit || 0 });
     });
     return intent;
   }
@@ -3032,6 +3187,7 @@
   // save; without it the inputs are read as they are now.
   function buildPatch(top, intent) {
     var patch = {};
+    if (intent && !intent.submitted) intent.submitted = [];
     var base = rawConfig[top];
     var state = function (input) {
       var i = intent ? intent.inputs.indexOf(input) : -1;
@@ -3050,24 +3206,30 @@
           var parts = input.name.split(".");
           var parent = getPath(patch, parts.slice(0, -1).join("."));
           if (parent) delete parent[parts[parts.length - 1]];
+          if (intent) intent.submitted.push(input);
           return;
         }
       } else if (input.type === "checkbox") value = saved.checked;
       else if (input.type === "radio") {
         if (!saved.checked) return;
         value = saved.value;
+        if (intent) intent.inputs.forEach(function (peer) { if (peer !== input && peer.name === input.name) intent.submitted.push(peer); });
       } else if (input.type === "number") {
         if (saved.value === "") return;
         value = Number(saved.value);
       } else value = saved.value.trim();
       setPath(patch, input.name, value);
+      if (intent) intent.submitted.push(input);
     });
     if (top === "providers") {
       if (!patch.providers) patch.providers = {};
       providerList().forEach(function (p) { if (!patch.providers[p.id]) patch.providers[p.id] = {}; });
       providersWithGroups().forEach(function (p) {
         patch.providers[p.id].groups = Array.prototype.filter.call(
-          document.querySelectorAll("[data-groups='" + p.id + "'] [data-group]"), function (input) { return state(input).checked; }
+          document.querySelectorAll("[data-groups='" + p.id + "'] [data-group]"), function (input) {
+            if (intent) intent.submitted.push(input);
+            return state(input).checked;
+          }
         ).map(function (input) { return input.getAttribute("data-group"); });
       });
     }
@@ -3087,37 +3249,162 @@
     return patch;
   }
 
-  // Settings save as they change: switches and checkboxes when clicked, text
-  // and number fields when they lose focus or on Enter. Saves run one at a
-  // time, so each patch starts from the config the previous one wrote. Once
-  // the plugin has applied a save, the saved fields show the effective
-  // values again. Each save shows its state beside the field: saving,
-  // waiting to apply, applied, unconfirmed or failed with the reason.
+  // Settings save serially. Each item owns its result and draft; section
+  // headings and advanced legends summarize progress without hiding failures.
   var saveQueue = Promise.resolve();
+  var saveSerial = 0;
 
-  // The element that shows the save state of a field: the one named by a
-  // data-save-in around it, or its label, table cell or .save-host.
   function saveHost(input) {
-    var named = input.closest("[data-save-in]");
-    if (named) return $(named.getAttribute("data-save-in"));
-    return input.closest(".save-host, label, td");
+    var group = input.closest("fieldset") || input.closest(".settings-section");
+    return group && group.querySelector(group.tagName === "FIELDSET" ? "legend" : ".card-title");
   }
 
-  function setSaveState(host, state, text) {
-    if (!host) return;
-    var node = null;
-    Array.prototype.forEach.call(host.children, function (child) { if (child.classList.contains("save-state")) node = child; });
-    if (!node) {
-      node = el("span", { class: "save-state", role: "status" });
-      host.appendChild(node);
+  function saveControls(input) {
+    var group = input.closest(".thresholds, .mode-switch");
+    if (group) return Array.prototype.slice.call(group.querySelectorAll("input"));
+    return /^(INPUT|SELECT|TEXTAREA|BUTTON)$/.test(input.tagName) ? [input] : [];
+  }
+
+  function saveItemKey(input) {
+    var kind = input.getAttribute("data-account-field");
+    if (kind) return input.closest(".account-setting").getAttribute("data-account") + ":" + kind;
+    if (input.closest(".thresholds")) return "thresholds";
+    if (input.hasAttribute("data-group")) return input.closest("[data-groups]").getAttribute("data-groups") + ":" + input.getAttribute("data-group");
+    return input.name || input.id;
+  }
+
+  function saveItemLabel(input) {
+    if (input.id === "account-order-state") return translate("save_order");
+    var kind = input.getAttribute("data-account-field");
+    if (kind) return translate(kind === "name" ? "rename" : "weight");
+    if (input.id === "mcp-key-new") return translate("mcp_key");
+    if (input.closest(".thresholds")) return translate("thresholds");
+    var mode = input.closest(".mode-switch");
+    if (mode) return mode.getAttribute("aria-label");
+    var service = input.getAttribute("data-service");
+    if (service) return providerTitle(service) + " · " + translate(input.getAttribute("data-label") || "col_ignition_model", providerTitle(service));
+    if (input.hasAttribute("data-group")) return providerTitle(input.closest("[data-groups]").getAttribute("data-groups")) + " · " + input.getAttribute("data-group");
+    var label = input.closest("label"), text = label && label.querySelector("span");
+    return text ? text.textContent : input.name || input.id;
+  }
+
+  function saveEntry(host, input) {
+    if (!host) return null;
+    input = input || host;
+    var key = saveItemKey(input);
+    if (!host.saveEntries) host.saveEntries = new Map();
+    var entry = host.saveEntries.get(key);
+    if (!entry) {
+      entry = { host: host };
+      host.saveEntries.set(key, entry);
     }
-    clearTimeout(node.timer);
-    node.owner = null;
+    var old = entry.input;
+    // Results outlive their DOM binding. Recreated account fields inherit
+    // drafts and pending counts; queued completions use the current binding.
+    if (old && old !== input && (old.accountDirty || old.accountPending || entry.failure) && input.hasAttribute("data-account-field")) {
+      ["value", "accountSaved", "accountEdit", "accountDirty", "accountPending"].forEach(function (name) { input[name] = old[name]; });
+    }
+    entry.input = input;
+    entry.controls = saveControls(input);
+    entry.controls.forEach(function (control) {
+      if (entry.failure) control.setAttribute("aria-invalid", "true");
+      else control.removeAttribute("aria-invalid");
+    });
+    return entry;
+  }
+
+  // Re-render local status messages in the selected language; upstream text
+  // and browser validation messages remain verbatim.
+  function saveText(text) {
+    var keys = ["save_saved", "save_saving", "save_waiting", "save_applied", "save_unconfirmed",
+      "save_applied_verified", "save_applied_unverified", "mcp_error", "weight_invalid",
+      "thresholds_order", "management_key_refused", "api_key_refused", "headers_invalid", "json_invalid"];
+    for (var i = 0; i < keys.length; i++) {
+      var key = keys[i], languages = Object.keys(I18N);
+      for (var j = 0; j < languages.length; j++) {
+        var template = I18N[languages[j]][key], at = template.indexOf("{0}");
+        if (at < 0 && text === template) return translate(key);
+        if (at >= 0) {
+          var before = template.slice(0, at), after = template.slice(at + 3);
+          if (text.slice(0, before.length) === before && text.slice(text.length - after.length) === after) {
+            return translate(key, text.slice(before.length, text.length - after.length));
+          }
+        }
+      }
+    }
+    return text;
+  }
+
+  function renderSaveState(host) {
+    if (!host || !host.saveEntries) return;
+    var entries = Array.from(host.saveEntries.values()), failures = entries.filter(function (entry) { return entry.failure; });
+    var latest = entries.filter(function (entry) { return entry.state; }).sort(function (a, b) { return b.order - a.order; })[0];
+    failures.sort(function (a, b) { return b.failure.order - a.failure.order; });
+    var failed = failures[0], state = failed ? "failed" : latest ? latest.state : "";
+    var text = failed ? translate("save_field_failed", saveItemLabel(failed.input)) : latest ? saveText(latest.text) : "";
+    entries.forEach(function (entry) {
+      entry.controls.forEach(function (control) {
+        if (entry.failure) control.setAttribute("aria-invalid", "true");
+        else control.removeAttribute("aria-invalid");
+      });
+    });
+    var node = host.querySelector(".save-state");
+    if (!node) { node = el("span", { class: "save-state", role: "status" }); host.appendChild(node); }
     node.setAttribute("data-state", state);
-    node.textContent = text;
-    // A plain "saved" fades; failures and key checks stay until the next edit.
-    if (state === "saved") node.timer = setTimeout(function () { node.textContent = ""; node.removeAttribute("data-state"); }, 4000);
-    return node;
+    clear(node);
+    if (text) {
+      if (failed) {
+        var compact = el("span", { "data-save-part": "compact" });
+        compact.textContent = translate("save_failed_compact");
+        node.appendChild(compact);
+      }
+      var message = el("span", { "data-save-part": failed ? "summary" : "progress" });
+      if (host.id === "account-order-state") maskedNodes(text).forEach(function (part) { message.appendChild(part); });
+      else message.textContent = text;
+      node.appendChild(message);
+      if (failed) {
+        var reason = el("span", { "data-save-part": "reason" });
+        var detail = translate("save_failure_reason", saveText(failed.failure.text));
+        if (host.id === "account-order-state") maskedNodes(detail).forEach(function (part) { reason.appendChild(part); });
+        else reason.textContent = detail;
+        node.appendChild(reason);
+      }
+      if (failures.length > 1) {
+        var count = el("span", { "data-save-part": "count" });
+        count.textContent = translate("save_more_failed", failures.length - 1);
+        node.appendChild(count);
+      }
+    }
+  }
+
+  function renderSaveStates() {
+    Array.prototype.forEach.call(document.querySelectorAll(".settings-section > .card-title, fieldset > legend"), renderSaveState);
+  }
+
+  function updateSaveEntry(entry, state, text) {
+    entry.state = state;
+    entry.text = text;
+    if (state === "failed") entry.failure = { text: text, order: ++saveSerial };
+    else if (state === "waiting" || state === "saved" || state === "verified" || state === "unverified") entry.failure = null;
+    renderSaveState(entry.host);
+  }
+
+  function setSaveState(host, state, text, input) {
+    var entry = saveEntry(host, input);
+    if (!entry) return null;
+    entry.owner = null;
+    entry.order = ++saveSerial;
+    updateSaveEntry(entry, state, text);
+    return entry;
+  }
+
+  // Edits invalidate late replies without clearing an unresolved failure.
+  function editSaveState(host, input) {
+    var entry = saveEntry(host, input);
+    if (!entry) return;
+    entry.owner = null;
+    if (!entry.failure) entry.state = "";
+    renderSaveState(host);
   }
 
   var THRESHOLDS = ["notice_threshold", "low_threshold", "critical_threshold"];
@@ -3130,15 +3417,26 @@
     return values.every(isFinite) && values[0] >= values[1] && values[1] >= values[2];
   }
 
-  // Edits by top-level key: a counter that grows with every edit and save
-  // of the key's fields. A save refills its fields with the values the
-  // plugin uses only while no later edit of the same key exists, so a late
-  // confirmation does not overwrite a newer edit, saved or not.
-  var editGen = {};
+  // Each control owns an edit generation, including changes made while a
+  // different control of the same top-level key is awaiting confirmation.
+  function noteEdit(input) {
+    var controls = input.type === "radio" ? saveControls(input) : [input];
+    controls.forEach(function (control) { control.settingsEdit = (control.settingsEdit || 0) + 1; });
+  }
 
-  function noteEdit(top) {
-    editGen[top] = (editGen[top] || 0) + 1;
-    return editGen[top];
+  // Clear only drafts actually submitted by this save and unchanged since
+  // its intent was captured. Independent failures remain owned by their item.
+  function refillSaved(intent) {
+    var keys = {}, any = false;
+    intent.submitted.forEach(function (input) {
+      var saved = intent.states[intent.inputs.indexOf(input)];
+      if (!saved || (input.settingsEdit || 0) !== saved.edit || input.hasAttribute("aria-invalid")) return;
+      input.settingsDirty = false;
+      keys[inputTop(input)] = true;
+      any = true;
+    });
+    if (any) fillSettings(keys);
+    if (keys.ignition) renderIgnitionOff();
   }
 
   function saveField(event) {
@@ -3151,8 +3449,8 @@
     // key, into password fields. A value the browser fills in while the field
     // is not focused comes from autofill on page load; it is not saved, and
     // the field shows the saved value again. The management key is refused
-    // with a message, and any other new key is saved only when CPA accepts it
-    // for /v1/models.
+    // with a message. Other new keys are checked against /v1/models before
+    // saving; refusals retain the draft and inconclusive checks allow saving.
     var checked = Promise.resolve(null);
     if (input.type === "password") {
       var value = input.value.trim();
@@ -3161,22 +3459,21 @@
         return;
       }
       if (key && value === key) {
-        setSaveState(host, "failed", translate("management_key_refused"));
-        fillInput(input, effectiveConfig());
+        setSaveState(host, "failed", translate("management_key_refused"), input);
         return;
       }
       if (value) checked = checkKey(value);
     }
     if (input.type === "number") {
       if (!input.checkValidity()) {
-        setSaveState(host, "failed", input.validationMessage);
+        setSaveState(host, "failed", input.validationMessage, input);
         input.reportValidity();
         return;
       }
       if (input.value === "") { fillInput(input, effectiveConfig()); return; }
     }
     if (THRESHOLDS.indexOf(top) >= 0) {
-      if (!thresholdsInOrder()) { setSaveState(host, "failed", translate("thresholds_order")); return; }
+      if (!thresholdsInOrder()) { setSaveState(host, "failed", translate("thresholds_order"), input); return; }
       tops = THRESHOLDS;
     }
     var format = input.getAttribute("data-format");
@@ -3187,27 +3484,19 @@
       } catch (err) {
         input.setCustomValidity(err.message);
         input.reportValidity();
-        setSaveState(host, "failed", err.message);
+        setSaveState(host, "failed", err.message, input);
         return;
       }
     }
     if (input.name === "ignition.enabled") renderIgnitionOff();
-    var say = claimState(host);
-    var gens = {};
-    tops.forEach(function (name) { gens[name] = noteEdit(name); });
+    var say = claimState(host, input);
+    noteEdit(input);
     var intent = captureIntent(tops);
-    // Refills only the keys not edited since this change.
-    var refill = function () {
-      var keys = {}, any = false;
-      tops.forEach(function (name) { if (editGen[name] === gens[name]) { keys[name] = true; any = true; } });
-      if (any) fillSettings(keys);
-      if (keys["ignition"]) renderIgnitionOff();
-    };
     saveQueue = saveQueue.then(function () { return checked; }).then(function (check) {
       // A key edited again during the check is checked by its own change event.
       if (input.type === "password" && input.value.trim() !== value) return;
       if (check && check.refused) {
-        if (say("failed", translate("api_key_refused"))) fillInput(input, effectiveConfig());
+        say("failed", translate("api_key_refused"));
         return;
       }
       var patch = {};
@@ -3217,12 +3506,10 @@
       });
       return patchConfig(patch).then(function (token) {
         // Once applied, the fields show the values the plugin uses.
-        showApplied(say, token, check, /^mcp_/.test(top)).then(function (applied) { if (applied) refill(); });
+        showApplied(say, token, check, /^mcp_/.test(top)).then(function (applied) { if (applied) refillSaved(intent); });
         return loadConfig();
       }).catch(function (err) {
-        if (err.message === "unauthorized") return;
-        say("failed", translate("save_failed_short", err.message));
-        refill();
+        say("failed", err.message);
       });
     });
   }
@@ -3328,18 +3615,14 @@
     }, 1000);
   }
 
-  // Shows "saving" beside a field for a save made now, and returns the
-  // function that shows the later states of this save. Once a newer save or
-  // edit of the field shows a state of its own, or clears it, the function
-  // shows nothing and returns false, so an older save that completes late
-  // does not label the newer value.
-  function claimState(host) {
-    var node = setSaveState(host, "saving", translate("save_saving")), owner = {};
-    if (node) node.owner = owner;
+  // Ownership is per item, so a late reply cannot label a newer edit and a
+  // different item's success cannot clear this item's failure.
+  function claimState(host, input) {
+    var entry = setSaveState(host, "saving", translate("save_saving"), input), owner = {};
+    if (entry) entry.owner = owner;
     return function (state, text) {
-      if (!node || node.owner !== owner) return false;
-      setSaveState(host, state, text);
-      node.owner = owner;
+      if (!entry || entry.owner !== owner) return false;
+      updateSaveEntry(entry, state, text);
       return true;
     };
   }
@@ -3458,7 +3741,7 @@
   // Copies text, through a selected text area where the Clipboard API is
   // not available, as in an iframe without the permission.
   function copyText(text, button) {
-    var done = function () { setSaveState(button.parentNode, "saved", translate("copied")); };
+    var done = function () { toast(translate("copied")); };
     var fallback = function () {
       var area = el("textarea", { class: "copy-buffer", readonly: true });
       area.value = text;
@@ -3476,13 +3759,13 @@
   // A new key replaces the old one at once; replacing a key asks first.
   function generateMcpKey() {
     if (mcpKey() && !confirm(translate("mcp_regenerate_confirm"))) return;
-    var say = claimState($("mcp-key-field")), secret = newMcpKey();
+    var button = $("mcp-key-new"), say = claimState(saveHost(button), button), secret = newMcpKey();
     saveQueue = saveQueue.then(function () {
       return patchConfig({ mcp_key: secret }).then(function (token) {
         showApplied(say, token, null, true);
         return loadConfig();
       }).catch(function (err) {
-        if (err.message !== "unauthorized") say("failed", translate("save_failed_short", err.message));
+        say("failed", err.message);
       });
     });
   }
@@ -3591,20 +3874,17 @@
     }).then(function () { button.disabled = false; });
   });
   $("settings").addEventListener("change", saveField);
-  // Editing a field clears its last save state.
+  // Keep failed drafts visible while invalidating responses for older edits.
   $("settings").addEventListener("input", function (e) {
-    // The state beside a field describes the value it shows, so any edit,
-    // also while an earlier value is being saved, clears it and takes it
-    // from the earlier save until the new value is saved itself. Typing,
-    // pasting, checkboxes, radios and selects all fire input.
+    var accountField = e.target.hasAttribute("data-account-field");
+    if (accountField) {
+      e.target.accountDirty = true;
+      e.target.accountEdit = (e.target.accountEdit || 0) + 1;
+    } else e.target.settingsDirty = true;
     var top = inputTop(e.target);
-    if (top) noteEdit(top);
-    var host = top ? saveHost(e.target) : null;
-    if (host) Array.prototype.forEach.call(host.children, function (child) {
-      if (!child.classList.contains("save-state")) return;
-      clearTimeout(child.timer);
-      child.textContent = ""; child.removeAttribute("data-state"); child.owner = null;
-    });
+    if (top) noteEdit(e.target);
+    var host = accountField ? accountFieldHost(e.target) : top ? saveHost(e.target) : null;
+    if (host) editSaveState(host, e.target);
     if (e.target.name === "mcp_listen") renderMcp();
   });
   $("mask-toggle").addEventListener("click", toggleMask);

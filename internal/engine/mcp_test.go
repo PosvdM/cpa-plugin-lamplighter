@@ -34,6 +34,9 @@ func TestMCPDTOsAndTools(t *testing.T) {
 	}
 	apply("1", 50, true)
 	apply("2", 20, false)
+	e.mu.Lock()
+	e.running, e.lastPoll = true, c.t
+	e.mu.Unlock()
 	b := NewMCPBackend(e)
 	result, err := b.CallTool(context.Background(), "list_quotas", map[string]string{"provider": "codex", "model": "alias-with-unknown-route"})
 	if err != nil {
@@ -249,7 +252,8 @@ func TestHistoryDownsampleBounds(t *testing.T) {
 }
 
 func TestMCPRefreshFailureIsSanitized(t *testing.T) {
-	e := New(Options{})
+	now := time.Now().UTC()
+	e := New(Options{Now: func() time.Time { return now }})
 	e.running = true
 	b := NewMCPBackend(e)
 	go func() {
@@ -259,5 +263,9 @@ func TestMCPRefreshFailureIsSanitized(t *testing.T) {
 	_, err := b.refresh(context.Background(), nil)
 	if err == nil || strings.Contains(err.Error(), "secret") || strings.Contains(err.Error(), "/private") {
 		t.Fatalf("refresh error %v", err)
+	}
+	value, err := b.refresh(context.Background(), nil)
+	if err != nil || value.(map[string]any)["retry_after_seconds"] != 60 {
+		t.Fatalf("failed refresh must consume the limit: %#v, %v", value, err)
 	}
 }

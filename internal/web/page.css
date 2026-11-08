@@ -189,9 +189,11 @@ header .update path { fill: none; stroke: currentColor; stroke-width: 1.8; strok
 /* The switch between the quota and settings views, below the header. */
 .view-nav { margin: -4px 0 16px; display: flex; align-items: center; gap: 8px; }
 
-/* Account masking: the eye button beside the view switch blurs the text
-   that names accounts (.account-sensitive). */
+/* Account masking: the eye buttons beside the view switch and the
+   screenshot buttons blur the text that names accounts
+   (.account-sensitive). */
 .mask-toggle { padding: 6px 8px; color: var(--text-secondary); }
+.mask-toggle.no-snapshot { padding: 4px 6px; }
 .mask-toggle svg { display: block; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .mask-toggle[aria-pressed="true"] { background: var(--bg-tertiary); border-color: var(--border-color); color: var(--text-primary); }
 .mask-accounts .account-sensitive { filter: blur(5px); }
@@ -199,8 +201,8 @@ header .update path { fill: none; stroke: currentColor; stroke-width: 1.8; strok
 /* Screenshot buttons, and the off-screen copy measured for a screenshot. */
 .btn.snapshot { padding: 4px 6px; }
 .btn.snapshot svg { display: block; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linejoin: round; }
-.block-head .btn.snapshot { margin-left: auto; }
-.detail-head .btn.snapshot { order: 1; margin-left: auto; align-self: center; }
+.block-head .mask-toggle { margin-left: auto; }
+.detail-tools { order: 1; margin-left: auto; align-self: center; display: flex; gap: 4px; }
 .snapshot-host { position: fixed; left: -100000px; top: 0; pointer-events: none; }
 /* The frame of a screenshot. It applies both off screen, where page.js
    measures it, and in the image, so the two have the same size. */
@@ -276,29 +278,20 @@ input[type="checkbox"] { width: 16px; height: 16px; padding: 0; accent-color: va
   .card.account:hover { transform: translateY(-2px); border-color: var(--border-hover); box-shadow: 0 12px 26px -14px rgb(0 0 0 / 0.16); }
 }
 .account-head { display: flex; align-items: center; gap: 9px; min-width: 0; }
-.account-head .order-buttons { display: inline-flex; gap: 2px; }
+/* Preserve the heading height and the space occupied by the plan line. */
+.card.account > .account-head:first-child { min-height: 28.75px; }
+.card.account > .account-head.cell-note { margin: auto 0 0; min-height: 21.25px; max-width: none; }
+.account-head.cell-note > .cell-note { margin: 0; flex: 1; min-width: 0; max-width: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-head.cell-note > .btn { flex: none; padding: 1px 6px; font-size: 11.5px; line-height: 1.5; min-height: 21.25px; }
+.type-badge > .account-weight { margin-left: 6px; }
 .btn-icon { padding: 2px 7px; font-size: 13px; line-height: 1.4; }
-/* The handle stays faint until hovered. With a mouse, the order buttons show
-   while the card is hovered or holds the focus, and are otherwise kept
-   out of the layout but still reachable with Tab, so the email has room. On
-   touch screens they always show. */
+/* Pointer dragging starts at the handle. */
 .drag-handle {
   flex: none; width: 10px; height: 18px; margin: 0 -3px 0 -4px; cursor: grab; touch-action: none; opacity: 0.45;
   background: radial-gradient(circle, var(--text-tertiary) 1.2px, transparent 1.6px) 0 0 / 5px 6px;
 }
 .drag-handle:hover { opacity: 1; }
-.order-buttons .btn:disabled { opacity: 0.3; }
-@media (hover: hover) and (pointer: fine) {
-  .card.account:not(:hover):not(:focus-within) .order-buttons {
-    position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
-  }
-}
 @media (hover: none) { .drag-handle { opacity: 1; } }
-.accounts.sorting { cursor: grabbing; user-select: none; }
-.accounts.sorting .drag-handle { cursor: grabbing; }
-.card.account.dragging {
-  opacity: 0.75; border-style: dashed; border-color: var(--primary-color); transform: none; box-shadow: none;
-}
 .account-email {
   min-width: 0; margin-right: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: var(--text-secondary); font-size: 13px;
@@ -424,12 +417,38 @@ html[lang="en"] { --event-type-width: 140px; }
 .chart-box .row-name { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; font-weight: 600; }
 
 /* Settings */
+#account-rows { position: relative; min-width: 760px; }
+.account-setting {
+  display: grid; grid-template-columns: 10px 112px minmax(140px, 1fr) minmax(140px, 1fr) 148px;
+  align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid transparent; border-bottom-color: var(--border-color);
+  background: var(--bg-primary);
+}
+.account-setting:last-child { border-bottom-color: transparent; }
+.account-identity { display: flex; flex-direction: column; min-width: 0; }
+.account-identity > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-setting > .type-badge { justify-self: start; }
+.account-setting input { width: 100%; min-width: 0; }
+.account-setting label { min-width: 0; }
+.account-setting .field-label { display: flex; align-items: baseline; gap: 8px; white-space: nowrap; }
+.account-setting .field-label > span:first-child { flex: none; }
+.account-weight-empty { visibility: hidden; }
+.account-setting.account-placeholder { border: 1px dashed var(--border-color); border-radius: 12px; }
+.account-placeholder > * { visibility: hidden; }
+.account-setting.account-floating {
+  position: fixed; z-index: 10; pointer-events: none; box-shadow: var(--floating-shadow);
+  border: 1px solid var(--border-color); border-radius: 12px; background: var(--bg-primary);
+}
+#account-rows.sorting { cursor: grabbing; user-select: none; }
+#account-rows.sorting .drag-handle { cursor: grabbing; }
 form fieldset {
   border: 1px solid var(--border-color); border-radius: 10px; padding: 14px 16px 16px; margin: 0 0 14px;
   background: color-mix(in srgb, var(--bg-secondary) 50%, transparent);
   display: flex; flex-direction: column; gap: 14px; min-width: 0;
 }
-form legend { color: var(--text-primary); font-size: 13px; font-weight: 650; padding: 0 6px; }
+form legend { color: var(--text-primary); font-size: 13px; font-weight: 650; padding: 0 6px; max-width: 100%; }
+.settings-section > .card-title, form legend { display: flex; align-items: center; gap: 8px; min-width: 0; height: 22px; line-height: 22px; }
+.settings-section > .card-title > :first-child, form legend > :first-child { flex: none; }
+.settings-section > .card-title > .save-state, form legend > .save-state { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 18px; }
 form label { display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; font-weight: 600; color: var(--text-secondary); }
 form label.inline { flex-direction: row; align-items: center; gap: 8px; font-weight: 500; color: var(--text-primary); }
 .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 18px; }
@@ -440,17 +459,19 @@ form label.inline { flex-direction: row; align-items: center; gap: 8px; font-wei
 .webhook-grid input { font-family: var(--font-mono); }
 details.advanced > summary { margin-top: 0; }
 
-/* The save state beside a field: saving, saved, verified, unverified or
-   failed. */
-.save-state { font-size: 12px; font-weight: 500; color: var(--text-tertiary); }
+/* Headings summarize saves on one line; failed controls retain their border. */
+.save-state { display: flex; align-items: center; font-size: 12px; font-weight: 500; color: var(--text-tertiary); }
+.save-state > [data-save-part="summary"], .save-state > [data-save-part="reason"], .save-state > [data-save-part="progress"] { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.save-state > [data-save-part="compact"] { display: none; }
+.save-state > [data-save-part="count"], .save-state::before { flex: none; white-space: pre; }
 .save-state:empty { display: none; }
 .save-state[data-state="saved"], .save-state[data-state="verified"] { color: var(--success-badge-text); }
 .save-state[data-state="saved"]::before, .save-state[data-state="verified"]::before { content: "✓ "; }
 .save-state[data-state="unverified"] { color: var(--amber-text); }
 .save-state[data-state="waiting"] { color: var(--text-secondary); }
 .save-state[data-state="failed"] { color: var(--error-color); }
-label.inline .save-state, td .save-state, .mode-row .save-state, .snippet-head .save-state, .key-row .save-state { margin-left: 8px; }
-td .save-state { display: inline-block; }
+form [aria-invalid="true"] { border-color: var(--error-color); }
+form input[type="checkbox"][aria-invalid="true"], form input[type="radio"][aria-invalid="true"] { outline: 1px solid var(--error-color); outline-offset: 2px; }
 .mode-row { display: flex; flex-wrap: wrap; align-items: baseline; }
 
 .ignition-params { display: flex; flex-direction: column; gap: 14px; transition: opacity 150ms ease; }
@@ -553,6 +574,10 @@ table.services .sub-row td { border-bottom: none; padding-top: 4px; text-align: 
 }
 
 @media (max-width: 640px) {
+  .settings-section > .card-title > :first-child, form legend > :first-child { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .save-state[data-state="failed"] { flex: none; max-width: 100%; }
+  .save-state[data-state="failed"] > [data-save-part="summary"], .save-state > [data-save-part="reason"] { display: none; }
+  .save-state > [data-save-part="compact"] { display: block; flex: none; }
   main { padding: 14px 12px 32px; }
   .grid-3 { grid-template-columns: 1fr; }
   .bark-row, .webhook-grid { grid-template-columns: 1fr; }

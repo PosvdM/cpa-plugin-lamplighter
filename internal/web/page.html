@@ -114,14 +114,23 @@
   </section>
   </div>
 
-  <!-- Settings: each field saves on its own and shows the result beside it
-       (.save-state, added by page.js next to the field's label, table cell
-       or the element named by data-save-in). -->
+  <!-- Settings save independently. One .save-state per section heading or
+       advanced fieldset legend summarizes progress and persistent failures. -->
   <div id="view-settings" hidden>
-    <p class="hint settings-note" data-i18n="save_hint">修改后自动保存到 CPA 的 config.yaml，插件几秒内应用。文本和数字在离开输入框或按回车时保存，保存结果显示在各项旁边。</p>
+    <p class="hint settings-note" data-i18n="save_hint">修改后自动保存到 CPA 的 config.yaml，插件几秒内应用。文本和数字在离开输入框或按回车时保存，保存结果显示在区块标题旁，高级设置按分组显示。</p>
     <form id="settings">
       <section class="card settings-section">
-        <h2 class="card-title" data-i18n="notify_channels">通知渠道</h2>
+        <h2 class="card-title" id="account-order-state"><span data-i18n="account_settings">账号</span></h2>
+        <p class="hint" data-i18n="account_order_hint">拖动手柄调整顺序，额度卡片和图表默认顺序随之调整。拖动时按 Esc 可取消。</p>
+        <div class="table-wrap">
+          <div id="account-rows"></div>
+        </div>
+        <p class="hint" data-i18n="rename_hint">名称写入 CPA 凭证备注的第一行，保留其余各行。留空则按邮箱区分账号；备注有多行时，清空名称须确认删除整条备注。</p>
+        <p class="hint" data-i18n="weight_hint">同一服务有多个账号时，可设置各账号的权重，合计按权重平均剩余额度。权重须大于 0，可带小数；留空使用输入框中提示的套餐默认值。</p>
+      </section>
+
+      <section class="card settings-section">
+        <h2 class="card-title"><span data-i18n="notify_channels">通知渠道</span></h2>
         <div class="bark-row">
           <label><span data-i18n="bark_url">Bark 推送地址</span><input name="bark_url" type="text" autocomplete="off" placeholder="https://api.day.app/device_key"></label>
           <label><span data-i18n="bark_group">Bark 分组</span><input name="bark_group" type="text"></label>
@@ -145,10 +154,10 @@
       </section>
 
       <section class="card settings-section">
-        <h2 class="card-title" data-i18n="alert_rules">提醒规则</h2>
-        <div class="field save-host" id="thresholds-field">
+        <h2 class="card-title"><span data-i18n="alert_rules">提醒规则</span></h2>
+        <div class="field" id="thresholds-field">
           <span class="field-label" data-i18n="thresholds">提醒阈值</span>
-          <div class="thresholds" data-save-in="thresholds-field">
+          <div class="thresholds">
             <label class="inline-input"><span class="level-name" data-i18n="threshold_notice">提醒</span><span data-i18n="remaining_le">剩余 ≤</span><input name="notice_threshold" type="number" min="0" max="100" step="1">%</label>
             <label class="inline-input"><span class="level-name" data-i18n="threshold_low">偏低</span><span data-i18n="remaining_le">剩余 ≤</span><input name="low_threshold" type="number" min="0" max="100" step="1">%</label>
             <label class="inline-input"><span class="level-name" data-i18n="threshold_critical">告急</span><span data-i18n="remaining_le">剩余 ≤</span><input name="critical_threshold" type="number" min="0" max="100" step="1">%</label>
@@ -160,23 +169,23 @@
           <span class="field-label" data-i18n="window_5h">5 小时窗口</span>
           <span class="field-label" data-i18n="window_7d">7 天窗口</span>
           <span class="field-label mode-row" id="recovery-row"><span data-i18n="recovery_notify">额度恢复时通知</span></span>
-          <div class="mode-switch" role="radiogroup" aria-label="额度恢复时通知 · 5 小时窗口" data-i18n-aria-label="recovery_notify_5h" data-save-in="recovery-row">
+          <div class="mode-switch" role="radiogroup" aria-label="额度恢复时通知 · 5 小时窗口" data-i18n-aria-label="recovery_notify_5h">
             <label class="mode-option" title="关闭" data-i18n-title="mode_off_title"><input type="radio" name="recovery_notify.five_hour" value="off"><span data-i18n="mode_off">关闭</span></label>
             <label class="mode-option" title="每次重置都通知" data-i18n-title="recovery_all_title"><input type="radio" name="recovery_notify.five_hour" value="all"><span data-i18n="recovery_all">每次</span></label>
             <label class="mode-option" title="窗口用完后，在下一次重置时通知一次" data-i18n-title="recovery_after_exhausted_title"><input type="radio" name="recovery_notify.five_hour" value="after_exhausted"><span data-i18n="recovery_after_exhausted">用完后</span></label>
           </div>
-          <div class="mode-switch" role="radiogroup" aria-label="额度恢复时通知 · 7 天窗口" data-i18n-aria-label="recovery_notify_7d" data-save-in="recovery-row">
+          <div class="mode-switch" role="radiogroup" aria-label="额度恢复时通知 · 7 天窗口" data-i18n-aria-label="recovery_notify_7d">
             <label class="mode-option" title="关闭" data-i18n-title="mode_off_title"><input type="radio" name="recovery_notify.seven_day" value="off"><span data-i18n="mode_off">关闭</span></label>
             <label class="mode-option" title="每次重置都通知" data-i18n-title="recovery_all_title"><input type="radio" name="recovery_notify.seven_day" value="all"><span data-i18n="recovery_all">每次</span></label>
             <label class="mode-option" title="窗口用完后，在下一次重置时通知一次" data-i18n-title="recovery_after_exhausted_title"><input type="radio" name="recovery_notify.seven_day" value="after_exhausted"><span data-i18n="recovery_after_exhausted">用完后</span></label>
           </div>
           <span class="field-label mode-row" id="reminder-row"><span data-i18n="reset_reminder">重置前提醒</span></span>
-          <div class="mode-switch" role="radiogroup" aria-label="重置前提醒 · 5 小时窗口" data-i18n-aria-label="reset_reminder_5h" data-save-in="reminder-row">
+          <div class="mode-switch" role="radiogroup" aria-label="重置前提醒 · 5 小时窗口" data-i18n-aria-label="reset_reminder_5h">
             <label class="mode-option" title="关闭" data-i18n-title="mode_off_title"><input type="radio" name="reset_reminder.five_hour" value="off"><span data-i18n="mode_off">关闭</span></label>
             <label class="mode-option" title="每次重置前都提醒" data-i18n-title="reminder_all_title"><input type="radio" name="reset_reminder.five_hour" value="all"><span data-i18n="reminder_all">每次</span></label>
             <label class="mode-option" title="剩余高于告急阈值时才提醒" data-i18n-title="reminder_has_remaining_title"><input type="radio" name="reset_reminder.five_hour" value="has_remaining"><span data-i18n="reminder_has_remaining">有余量</span></label>
           </div>
-          <div class="mode-switch" role="radiogroup" aria-label="重置前提醒 · 7 天窗口" data-i18n-aria-label="reset_reminder_7d" data-save-in="reminder-row">
+          <div class="mode-switch" role="radiogroup" aria-label="重置前提醒 · 7 天窗口" data-i18n-aria-label="reset_reminder_7d">
             <label class="mode-option" title="关闭" data-i18n-title="mode_off_title"><input type="radio" name="reset_reminder.seven_day" value="off"><span data-i18n="mode_off">关闭</span></label>
             <label class="mode-option" title="每次重置前都提醒" data-i18n-title="reminder_all_title"><input type="radio" name="reset_reminder.seven_day" value="all"><span data-i18n="reminder_all">每次</span></label>
             <label class="mode-option" title="剩余高于告急阈值时才提醒" data-i18n-title="reminder_has_remaining_title"><input type="radio" name="reset_reminder.seven_day" value="has_remaining"><span data-i18n="reminder_has_remaining">有余量</span></label>
@@ -188,7 +197,7 @@
       </section>
 
       <section class="card settings-section">
-        <h2 class="card-title" data-i18n="ignition">自动点火</h2>
+        <h2 class="card-title"><span data-i18n="ignition">自动点火</span></h2>
         <div class="checks">
           <label class="inline"><input name="ignition.enabled" type="checkbox"><span data-i18n="ignition_enabled">启用自动点火</span></label>
         </div>
@@ -213,15 +222,15 @@
       </section>
 
       <section class="card settings-section">
-        <h2 class="card-title" data-i18n="services">服务</h2>
+        <h2 class="card-title"><span data-i18n="services">服务</span></h2>
         <div class="checks" id="monitor-rows"></div>
         <p class="hint" data-i18n="monitor_hint">勾选要监控额度的服务。</p>
       </section>
 
       <section class="card settings-section">
-        <h2 class="card-title" data-i18n="advanced">高级</h2>
+        <h2 class="card-title"><span data-i18n="advanced">高级</span></h2>
         <fieldset>
-          <legend data-i18n="quota_queries">额度查询</legend>
+          <legend><span data-i18n="quota_queries">额度查询</span></legend>
           <div class="grid-3">
             <label><span data-i18n="poll_interval">查询间隔（秒）</span><input name="poll_interval_seconds" type="number" min="60" step="60"></label>
             <label><span data-i18n="request_timeout">请求超时（秒）</span><input name="request_timeout_seconds" type="number" min="5" max="120"></label>
@@ -232,35 +241,35 @@
           <p class="hint" data-i18n="passive_skip_hint">整点前这段时间内已有被动数据的账号跳过本轮主动查询；设为 0 则每轮都主动查询。</p>
         </fieldset>
         <fieldset>
-          <legend data-i18n="models_api_key">模型列表 API key</legend>
+          <legend><span data-i18n="models_api_key">模型列表 API key</span></legend>
           <div class="grid-3">
             <label class="span-2"><span>API key</span><input name="models_api_key" type="password" autocomplete="one-time-code" data-1p-ignore data-bwignore data-lpignore="true"></label>
           </div>
           <p class="hint" data-i18n="models_api_key_hint">插件用这个 key 从 CPA 读取模型列表，为自动点火选择模型；不使用自动点火时可以留空。请在 CPA 的 access.api-keys 中新建一个专用 key，不要填管理密钥。</p>
         </fieldset>
         <fieldset>
-          <legend>Did Codex Reset</legend>
+          <legend><span>Did Codex Reset</span></legend>
           <div class="checks">
             <label class="inline"><input name="codex_reset_updates.enabled" type="checkbox"><span data-i18n="codex_reset_enabled">转发 Did Codex Reset 发布的 Codex 重置信号</span></label>
             <label class="inline"><input name="codex_reset_updates.notify_current_pending" type="checkbox"><span data-i18n="codex_reset_pending">首次开启时推送当前待生效的排期</span></label>
           </div>
         </fieldset>
         <fieldset>
-          <legend data-i18n="chart_prefs">额度图表</legend>
+          <legend><span data-i18n="chart_prefs">额度图表</span></legend>
           <div class="checks">
             <label class="inline"><input name="remember_chart_filters" type="checkbox"><span data-i18n="remember_chart_filters">记住筛选条件</span></label>
           </div>
           <p class="hint" data-i18n="remember_chart_filters_hint">在当前浏览器中记住上次选择的额度窗口、时间范围和排序；关闭后每次打开页面都使用默认选择。</p>
         </fieldset>
         <fieldset class="mcp">
-          <legend>MCP</legend>
+          <legend><span>MCP</span></legend>
           <p class="hint" data-i18n="mcp_hint">AI 客户端（如 Claude Code）可以通过 MCP 查询额度、历史和事件，并刷新额度。</p>
           <div class="checks">
             <label class="inline"><input name="mcp_enabled" type="checkbox"><span data-i18n="mcp_enabled">启用 MCP 接口</span></label>
           </div>
           <div class="grid-3">
             <label><span data-i18n="mcp_listen">监听地址</span><input name="mcp_listen" type="text" spellcheck="false" autocomplete="off" placeholder="127.0.0.1:8318"></label>
-            <div class="field span-2 save-host" id="mcp-key-field">
+            <div class="field span-2" id="mcp-key-field">
               <span class="field-label" data-i18n="mcp_key">密钥</span>
               <div class="key-row">
                 <code id="mcp-key-view" class="key-view"></code>

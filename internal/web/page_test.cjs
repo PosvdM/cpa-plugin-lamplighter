@@ -54,6 +54,450 @@ test("config tokens are 16 hexadecimal digits", () => {
   assert.notEqual(a, b);
 });
 
+test("account names preserve trailing note lines and clearing removes the whole note", () => {
+  const ctx = context(["accountNote"]);
+  assert.equal(ctx.accountNote("old\r\nsecond\r\nthird", "new"), "new\nsecond\nthird");
+  assert.equal(ctx.accountNote("old\nsecond", ""), "");
+  assert.equal(ctx.accountNote("", "new"), "new");
+});
+
+test("drag targets use layout midpoints rather than animated rectangles", () => {
+  const ctx = context(["accountDropIndex"]);
+  const rows = [0, 100, 200].map((offsetTop) => ({
+    offsetTop, offsetHeight: 80,
+    getBoundingClientRect: () => { throw new Error("animated geometry must not be read"); },
+  }));
+  assert.equal(ctx.accountDropIndex(rows, 49, 10), 0);
+  assert.equal(ctx.accountDropIndex(rows, 51, 10), 1);
+  assert.equal(ctx.accountDropIndex(rows, 150, 10), 1);
+  assert.equal(ctx.accountDropIndex(rows, 151, 10), 2);
+  assert.equal(ctx.accountDropIndex(rows, 999, 10), 3);
+});
+
+test("queued inline weights merge changes and an empty field removes only its own override", async () => {
+  const states = [], writes = [];
+  const ctx = context(["saveAccountField", "accountFieldHost", "accountNote", "fmtWeight"], {
+    rawConfig: {}, saveQueue: Promise.resolve(), history: null,
+    saveHost: () => ({}), saveEntry: (_, input) => ({ input }),
+    translate: (key) => key, setSaveState: (...args) => states.push(args),
+    claimState: () => () => {}, showApplied: () => {},
+    patchConfig: async (patch) => { writes.push(plain(patch)); Object.assign(ctx.rawConfig, patch); return "token"; },
+    loadConfig: async () => {}, renderAccounts: () => {},
+  });
+  const input = (value) => ({ value, parentNode: { firstChild: {} }, accountSaved: "", accountEdit: 1, accountDirty: true, validity: { badInput: false }, hasAttribute: () => false, getAttribute: () => "weight" });
+  const a = input("2.5"), b = input("7");
+  ctx.saveAccountField(a, { account: { name: "a" } });
+  ctx.saveAccountField(b, { account: { name: "b" } });
+  await ctx.saveQueue;
+  assert.deepEqual(plain(ctx.rawConfig.account_weights), { a: 2.5, b: 7 });
+  a.value = ""; a.accountEdit++;
+  ctx.saveAccountField(a, { account: { name: "a" } });
+  await ctx.saveQueue;
+  assert.deepEqual(plain(ctx.rawConfig.account_weights), { b: 7 });
+  for (const bad of ["0", "-1", "Infinity", "NaN"]) {
+    ctx.saveAccountField(input(bad), { account: { name: "a" } });
+  }
+  const invalidEmpty = input(""); invalidEmpty.validity.badInput = true;
+  ctx.saveAccountField(invalidEmpty, { account: { name: "a" } });
+  await ctx.saveQueue;
+  assert.equal(writes.length, 3);
+  assert.equal(states.length, 5);
+});
+
+test("an earlier account name save does not overwrite a newer unsaved edit", async () => {
+  const ctx = context(["saveAccountField", "accountFieldHost", "accountNote", "fmtWeight"], {
+    saveQueue: Promise.resolve(), history: null, saveHost: () => ({}), saveEntry: (_, input) => ({ input }),
+    claimState: () => () => {}, translate: (key) => key, renderAccounts: () => {},
+    saveAccountName: async () => {},
+  });
+  const input = { value: "first", parentNode: { firstChild: {} }, accountSaved: "old", accountEdit: 1, accountDirty: true, getAttribute: () => "name" };
+  ctx.saveAccountField(input, { account: { name: "a", note: "old\nrest" } });
+  input.value = "new unsaved draft"; input.accountEdit++;
+  await ctx.saveQueue;
+  assert.equal(input.value, "new unsaved draft");
+  assert.equal(input.accountDirty, true);
+  assert.equal(input.accountPending, 0);
+});
+
+// Minimal DOM doubles exercise the actual state aggregation and save queue.
+function saveNode(tagName, attrs = {}) {
+  return {
+    tagName, id: attrs.id || "", name: attrs.name || "", children: [], attrs: { ...attrs },
+    value: "", validity: { badInput: false }, accountSaved: "", accountEdit: 1, accountDirty: true,
+    get textContent() { return (this.text || "") + this.children.map(n => n.textContent).join(""); },
+    set textContent(value) { this.text = value; this.children = []; },
+    getAttribute(name) { return this.attrs[name] ?? null; },
+    hasAttribute(name) { return name in this.attrs; },
+    setAttribute(name, value) { this.attrs[name] = value; },
+    removeAttribute(name) { delete this.attrs[name]; },
+    appendChild(node) { this.children.push(node); return node; },
+    querySelector(selector) { return selector === ".save-state" ? this.children[0] : null; },
+    closest() { return null; },
+  };
+}
+
+const saveFunctions = ["saveHost", "saveControls", "saveItemKey", "saveEntry", "renderSaveState",
+  "updateSaveEntry", "setSaveState", "claimState", "editSaveState"];
+function stateContext(names = [], globals = {}) {
+  return context([...saveFunctions, ...names], {
+    saveSerial: 0,
+    translate: (key, ...args) => {
+      if (key === "save_field_failed") return "✕ " + args[0] + " save failed";
+      if (key === "save_failure_reason") return ": " + args[0];
+      if (key === "save_failed_compact") return "✕ Save failed";
+      if (key === "save_more_failed") return " (" + args[0] + " more failed)";
+      return key;
+    },
+    saveText: text => text,
+    saveItemLabel: input => input.id === "account-order-state" ? "Order" : input.getAttribute("data-account-field") || input.name,
+    el: (tag, attrs) => saveNode(tag.toUpperCase(), attrs),
+    clear: node => { node.textContent = ""; },
+    maskedNodes: text => [{ textContent: text }],
+    ...globals,
+  });
+}
+
+function accountSaveContext(fail) {
+  const heading = saveNode("H2", { id: "account-order-state" });
+  const section = { tagName: "SECTION", querySelector: selector => { assert.equal(selector, ".card-title"); return heading; } };
+  const row = { account: { name: "a", note: "old" }, getAttribute: () => "a" };
+  const ctx = stateContext(["saveAccountField", "accountFieldHost", "accountNote", "fmtWeight", "saveAccountOrder"], {
+    fail, rawConfig: {}, saveQueue: Promise.resolve(), history: null, pendingOrder: null,
+    $: () => heading, toast: () => {},
+    showApplied: say => { say("waiting", "waiting"); say("saved", "applied"); },
+    saveAccountName: async () => { if (ctx.fail === "name" || ctx.fail === "unauthorized") throw new Error(ctx.fail); },
+    patchConfig: async patch => {
+      if (ctx.fail === "weight" && patch.account_weights || ctx.fail === "order" && patch.account_order) throw new Error("failed");
+      Object.assign(ctx.rawConfig, patch);
+      return "token";
+    },
+    loadConfig: async () => {}, sortAccounts: () => {}, renderAccounts: () => {},
+  });
+  const field = (kind, value) => {
+    const input = saveNode("INPUT", { "data-account-field": kind });
+    input.value = value;
+    input.closest = selector => selector === ".account-setting" ? row : selector === ".settings-section" ? section : null;
+    return input;
+  };
+  return { ctx, heading, row, field, name: field("name", "unsaved name"), weight: field("weight", "2.5") };
+}
+
+test("a failed name save stays in the heading after successful weight and order saves", async () => {
+  const { ctx, heading, row, name, weight } = accountSaveContext("name");
+  ctx.saveAccountField(name, row);
+  ctx.saveAccountField(weight, row);
+  ctx.saveAccountOrder(["a"]);
+  await ctx.saveQueue;
+  assert.equal(heading.children.length, 1);
+  assert.equal(heading.children[0].getAttribute("data-state"), "failed");
+  assert.match(heading.textContent, /name save failed/);
+  assert.equal(name.getAttribute("aria-invalid"), "true");
+  assert.equal(weight.hasAttribute("aria-invalid"), false);
+  assert.equal(name.value, "unsaved name");
+  assert.equal(name.accountDirty, true);
+  assert.equal(name.accountPending, 0);
+  assert.equal(weight.accountDirty, false);
+  ctx.fail = null;
+  ctx.saveAccountField(name, row);
+  await ctx.saveQueue;
+  assert.equal(name.hasAttribute("aria-invalid"), false);
+  assert.equal(heading.children[0].getAttribute("data-state"), "saved");
+  assert.doesNotMatch(heading.textContent, /failed/);
+});
+
+test("weight and order failures survive a successful name save", async () => {
+  for (const fail of ["weight", "order"]) {
+    const { ctx, heading, row, name, weight } = accountSaveContext(fail);
+    if (fail === "weight") ctx.saveAccountField(weight, row);
+    else ctx.saveAccountOrder(["a"]);
+    ctx.saveAccountField(name, row);
+    await ctx.saveQueue;
+    assert.equal(heading.children[0].getAttribute("data-state"), "failed");
+    assert.match(heading.textContent, fail === "weight" ? /weight save failed/ : /Order save failed/);
+    if (fail === "weight") {
+      assert.equal(weight.getAttribute("aria-invalid"), "true");
+      assert.equal(weight.value, "2.5");
+      assert.equal(weight.accountDirty, true);
+    }
+  }
+});
+
+test("reverting a failed account field to its saved value still retries and clears the failure", async () => {
+  const { ctx, heading, row, weight } = accountSaveContext("weight");
+  ctx.saveAccountField(weight, row);
+  await ctx.saveQueue;
+  assert.equal(weight.getAttribute("aria-invalid"), "true");
+  ctx.fail = null;
+  weight.value = weight.accountSaved;
+  ctx.saveAccountField(weight, row);
+  await ctx.saveQueue;
+  assert.equal(weight.hasAttribute("aria-invalid"), false);
+  assert.equal(heading.children[0].getAttribute("data-state"), "saved");
+  assert.equal(ctx.rawConfig.account_weights, null);
+});
+
+test("multiple failures show the latest reason and count, with every failed control marked", async () => {
+  const { ctx, heading, row, name, weight } = accountSaveContext("unauthorized");
+  ctx.saveAccountField(name, row);
+  await ctx.saveQueue;
+  weight.value = "0";
+  ctx.saveAccountField(weight, row);
+  assert.match(heading.textContent, /weight save failed: weight_invalid \(1 more failed\)/);
+  assert.equal(name.getAttribute("aria-invalid"), "true");
+  assert.equal(weight.getAttribute("aria-invalid"), "true");
+  ctx.editSaveState(heading, name);
+  assert.match(heading.textContent, /1 more failed/);
+  ctx.fail = null;
+  ctx.saveAccountField(name, row);
+  await ctx.saveQueue;
+  assert.equal(name.hasAttribute("aria-invalid"), false);
+  assert.equal(weight.getAttribute("aria-invalid"), "true");
+  assert.doesNotMatch(heading.textContent, /more failed/);
+  weight.value = "3";
+  ctx.saveAccountField(weight, row);
+  await ctx.saveQueue;
+  assert.equal(weight.hasAttribute("aria-invalid"), false);
+  assert.equal(heading.children[0].getAttribute("data-state"), "saved");
+});
+
+test("all settings resolve to section headings or their own advanced legends", () => {
+  const ctx = stateContext();
+  for (const advanced of [false, true]) {
+    for (const name of ["bark_url", "ignition.start_hour", "providers.codex.monitor", "remember_chart_filters", "mcp_enabled"]) {
+      const heading = saveNode(advanced ? "LEGEND" : "H2");
+      const group = { tagName: advanced ? "FIELDSET" : "SECTION", querySelector: selector => {
+        assert.equal(selector, advanced ? "legend" : ".card-title"); return heading;
+      } };
+      const input = saveNode("INPUT", { name });
+      input.closest = selector => selector === (advanced ? "fieldset" : ".settings-section") ? group : null;
+      assert.equal(ctx.saveHost(input), heading);
+      ctx.setSaveState(heading, "failed", "reason", input);
+      assert.equal(heading.children.length, 1);
+      assert.equal(heading.children[0].attrs.class, "save-state");
+      assert.equal(input.children.length, 0);
+      assert.equal(input.getAttribute("aria-invalid"), "true");
+    }
+  }
+  const html = fs.readFileSync(path.join(__dirname, "page.html"), "utf8");
+  assert.match(html, /<form id="settings">\s*<section[^>]+>\s*<h2[^>]+id="account-order-state"/);
+  assert.doesNotMatch(html, /data-save-in/);
+});
+
+test("ordinary settings keep A's failure through B's save and reject stale replies after editing", () => {
+  const ctx = stateContext(), heading = saveNode("H2");
+  const a = saveNode("INPUT", { name: "a" }), b = saveNode("INPUT", { name: "b" });
+  const sayA = ctx.claimState(heading, a);
+  sayA("failed", "A failed");
+  const sayB = ctx.claimState(heading, b);
+  sayB("saved", "B saved");
+  assert.match(heading.textContent, /a save failed: A failed/);
+  assert.equal(a.getAttribute("aria-invalid"), "true");
+  ctx.editSaveState(heading, a);
+  assert.equal(sayA("saved", "late reply"), false);
+  assert.match(heading.textContent, /A failed/);
+  const retry = ctx.claimState(heading, a);
+  assert.match(heading.textContent, /A failed/);
+  retry("waiting", "saved, waiting");
+  assert.equal(a.hasAttribute("aria-invalid"), false);
+  retry("saved", "applied");
+  assert.equal(heading.textContent, "applied");
+});
+
+test("an older confirmation cannot replace a more recent save's progress", () => {
+  const ctx = stateContext(), heading = saveNode("H2");
+  const a = saveNode("INPUT", { name: "a" }), b = saveNode("INPUT", { name: "b" });
+  const sayA = ctx.claimState(heading, a), sayB = ctx.claimState(heading, b);
+  sayB("waiting", "B waiting");
+  sayA("saved", "A applied");
+  assert.equal(heading.textContent, "B waiting");
+});
+
+test("account cards keep only identity in the heading and place actions after the footer plan", () => {
+  const cards = saveNode("DIV");
+  const element = (tag, attrs = {}, children = []) => {
+    const node = saveNode(tag.toUpperCase(), attrs);
+    if (attrs.text) node.textContent = attrs.text;
+    children.filter(Boolean).forEach(child => node.appendChild(child));
+    return node;
+  };
+  const ctx = context(["renderAccounts"], {
+    accountDrag: null, accountsBehind: false, SENSITIVE: "account-sensitive",
+    status: { accounts: [
+      { name: "a", provider: "codex", title: "GPT#first", email: "first@example.com", plan: "Pro", groups: [] },
+      { name: "b", provider: "codex", title: "GPT#second", email: "second@example.com", groups: [] },
+    ] },
+    rawConfig: {}, masked: false, renderAccountSettings: () => {}, accountWeight: () => 2,
+    fmtWeight: String, parseTime: () => null, $: () => cards,
+    clear: node => { node.textContent = ""; }, el: element,
+    translate: (key, value) => value === undefined ? key : key + ": " + value,
+    maskedNodes: text => [element("span", { class: "account-sensitive", text })],
+    snapshotButton: label => element("button", { class: "snapshot no-snapshot", "aria-label": label }),
+  });
+  ctx.renderAccounts();
+  assert.equal(cards.children.length, 2);
+  cards.children.forEach((card, i) => {
+    const heading = card.children[0], footer = card.children.at(-1);
+    assert.equal(heading.children.length, 2);
+    assert.ok(heading.children.every(node => node.tagName === "SPAN"));
+    assert.match(heading.children[0].attrs.class, /type-badge/);
+    assert.match(heading.children[1].attrs.class, /account-email account-sensitive/);
+    assert.match(heading.children[0].children.at(-1).attrs.class, /account-weight/);
+    assert.equal(footer.attrs.class, "account-head cell-note");
+    assert.equal(footer.children[0].textContent, i ? "" : "plan: Pro");
+    assert.equal(footer.children[1].textContent, "refresh");
+    assert.equal(footer.children[2].attrs["aria-label"], "snapshot_card");
+    footer.children.slice(1).forEach(button => {
+      assert.equal(button.tagName, "BUTTON");
+      assert.match(button.attrs.class, /no-snapshot/);
+    });
+  });
+  assert.match(source, /copy.querySelectorAll\("\.no-snapshot,/);
+});
+
+function settingsSaveContext(radio = false) {
+  const a = saveNode("INPUT", { name: radio ? "recovery_notify.five_hour" : "ignition.start_hour" });
+  const b = saveNode("INPUT", { name: radio ? "recovery_notify.five_hour" : "ignition.end_hour" });
+  const inputs = [a, b], applied = [], refilled = [];
+  inputs.forEach((input, i) => { input.type = "number"; input.value = String(i ? 22 : 7); input.checkValidity = () => true; });
+  if (radio) inputs.forEach((input, i) => {
+    input.type = "radio"; input.value = i ? "all" : "off"; input.checked = !i;
+    input.closest = selector => selector === ".thresholds, .mode-switch" ? { querySelectorAll: () => inputs } : null;
+  });
+  const ctx = context(["saveField", "captureIntent", "buildPatch", "refillSaved", "noteEdit", "inputTop", "topKey", "setPath", "saveControls"], {
+    $: () => ({ elements: inputs }), THRESHOLDS: [], saveQueue: Promise.resolve(),
+    rawConfig: { ignition: {} }, status: { config: {} },
+    saveHost: () => ({}), claimState: () => () => true,
+    patchConfig: async patch => { Object.assign(ctx.rawConfig, patch); return "token"; },
+    loadConfig: async () => {},
+    showApplied: () => new Promise(resolve => applied.push(resolve)),
+    fillSettings: keys => refilled.push(plain(keys)), renderIgnitionOff: () => {},
+  });
+  const edit = (input, value) => { input.value = value; input.settingsDirty = true; ctx.noteEdit(input); };
+  return { ctx, a, b, applied, refilled, edit };
+}
+
+test("consecutive saves within one top-level key clear both submitted drafts independently", async () => {
+  const { ctx, a, b, applied, refilled, edit } = settingsSaveContext();
+  edit(a, "8"); ctx.saveField({ target: a });
+  edit(b, "23"); ctx.saveField({ target: b });
+  await ctx.saveQueue;
+  assert.equal(applied.length, 2);
+  applied[0](true); await Promise.resolve();
+  assert.equal(a.settingsDirty, false);
+  assert.equal(b.settingsDirty, true);
+  applied[1](true); await Promise.resolve();
+  assert.equal(a.settingsDirty, false);
+  assert.equal(b.settingsDirty, false);
+  assert.equal(refilled.length, 2);
+});
+
+test("confirmation preserves newer drafts and independently failed controls of the same key", async () => {
+  const { ctx, a, b, applied, edit } = settingsSaveContext();
+  edit(a, "8"); ctx.saveField({ target: a });
+  edit(b, "23"); ctx.saveField({ target: b });
+  await ctx.saveQueue;
+  edit(a, "9");
+  applied[0](true); applied[1](true); await Promise.resolve();
+  assert.equal(a.settingsDirty, true);
+  assert.equal(a.value, "9");
+  assert.equal(b.settingsDirty, false);
+  b.settingsDirty = true;
+  b.setAttribute("aria-invalid", "true");
+  edit(a, "10"); ctx.saveField({ target: a });
+  await ctx.saveQueue;
+  applied[2](true); await Promise.resolve();
+  assert.equal(a.settingsDirty, false);
+  assert.equal(b.settingsDirty, true);
+  assert.equal(b.getAttribute("aria-invalid"), "true");
+});
+
+test("a radio selection owns the generations and submitted state of the whole group", async () => {
+  const { ctx, a, b, applied } = settingsSaveContext(true);
+  a.settingsDirty = true; ctx.noteEdit(a); ctx.saveField({ target: a });
+  a.checked = false; b.checked = true;
+  b.settingsDirty = true; ctx.noteEdit(b); ctx.saveField({ target: b });
+  await ctx.saveQueue;
+  applied[0](true); await Promise.resolve();
+  assert.equal(a.settingsDirty, true);
+  assert.equal(b.settingsDirty, true);
+  applied[1](true); await Promise.resolve();
+  assert.equal(a.settingsDirty, false);
+  assert.equal(b.settingsDirty, false);
+  assert.equal(a.checked, false);
+  assert.equal(b.checked, true);
+});
+
+test("fields skipped by patch construction keep their drafts after confirmation", () => {
+  const { ctx, a, b, edit } = settingsSaveContext();
+  edit(a, ""); edit(b, "23");
+  const intent = ctx.captureIntent(["ignition"]);
+  ctx.buildPatch("ignition", intent);
+  assert.equal(intent.submitted.includes(a), false);
+  ctx.refillSaved(intent);
+  assert.equal(a.settingsDirty, true);
+  assert.equal(b.settingsDirty, false);
+});
+
+test("recreated account inputs inherit drafts and failures and receive later save results", async () => {
+  const { ctx, heading, row, field, name } = accountSaveContext("name");
+  ctx.saveAccountField(name, row); await ctx.saveQueue;
+  const replacement = field("name", "server value");
+  ctx.saveEntry(heading, replacement);
+  const entry = heading.saveEntries.get("a:name");
+  assert.equal(entry.input, replacement);
+  assert.equal(entry.controls[0], replacement);
+  assert.equal(replacement.value, "unsaved name");
+  assert.equal(replacement.getAttribute("aria-invalid"), "true");
+  ctx.saveAccountField(replacement, row); await ctx.saveQueue;
+  assert.equal(replacement.getAttribute("aria-invalid"), "true");
+  ctx.fail = null;
+  ctx.saveAccountField(replacement, row); await ctx.saveQueue;
+  assert.equal(replacement.hasAttribute("aria-invalid"), false);
+  assert.equal(replacement.accountDirty, false);
+});
+
+test("pending account saves settle against the current binding after the row is recreated", async () => {
+  const { ctx, heading, row, field, name } = accountSaveContext();
+  let finish;
+  ctx.saveAccountName = () => new Promise(resolve => { finish = resolve; });
+  ctx.saveAccountField(name, row);
+  await Promise.resolve();
+  const replacement = field("name", "server value");
+  ctx.saveEntry(heading, replacement);
+  assert.equal(replacement.accountPending, 1);
+  finish(); await ctx.saveQueue;
+  assert.equal(replacement.value, "unsaved name");
+  assert.equal(replacement.accountPending, 0);
+  assert.equal(replacement.accountDirty, false);
+});
+
+test("failed states separate the compact summary, field summary, reason and count", () => {
+  const ctx = stateContext(), heading = saveNode("H2");
+  ctx.setSaveState(heading, "failed", "first reason", saveNode("INPUT", { name: "first" }));
+  ctx.setSaveState(heading, "failed", "second reason", saveNode("INPUT", { name: "long field name" }));
+  const parts = Object.fromEntries(heading.children[0].children.map(n => [n.attrs["data-save-part"], n.textContent]));
+  assert.equal(parts.compact, "✕ Save failed");
+  assert.equal(parts.summary, "✕ long field name save failed");
+  assert.equal(parts.reason, ": second reason");
+  assert.equal(parts.count, " (1 more failed)");
+  const css = fs.readFileSync(path.join(__dirname, "page.css"), "utf8");
+  assert.match(css, /@media \(max-width: 640px\)/);
+  assert.match(css, /\.save-state\[data-state="failed"\] > \[data-save-part="summary"\], \.save-state > \[data-save-part="reason"\] { display: none; }/);
+});
+
+test("saved messages and dynamic failure reasons follow language changes", () => {
+  const code = source.slice(source.indexOf("  var I18N ="), source.indexOf("\n  function translate("));
+  assert.match(code, /save_field_failed/);
+  const globals = vm.createContext({});
+  vm.runInContext(code, globals);
+  globals.translate = (key, value) => globals.I18N.en[key].replace("{0}", value);
+  const ctx = context(["saveText"], globals);
+  assert.equal(ctx.saveText(globals.I18N.zh.save_applied), globals.I18N.en.save_applied);
+  assert.equal(ctx.saveText(globals.I18N.zh.weight_invalid), globals.I18N.en.weight_invalid);
+  assert.equal(ctx.saveText(globals.I18N.zh.mcp_error.replace("{0}", "bind failed")), globals.I18N.en.mcp_error.replace("{0}", "bind failed"));
+  assert.equal(ctx.saveText("HTTP 500 upstream error"), "HTTP 500 upstream error");
+});
+
 const HOUR = 3600, DAY = 86400, WEEK = 7 * DAY;
 function pace() { return context(["paceSegments", "paceAt", "pooledPace"], { RESET_DRIFT: 60 }); }
 // Arrays from the VM context have another prototype.
