@@ -154,8 +154,7 @@ func Fetch(ctx context.Context, p *Provider, doer quota.Doer, cred Credential, n
 }
 
 // TriggerPrompt is the only content of an ignition request.
-const TriggerPrompt = "Do not think, reason, deliberate, use tools, or perform any other task. " +
-	"Reply with exactly OK and nothing else."
+const TriggerPrompt = "Reply with only OK. Do not think, do not use tools, do not do anything else."
 
 // Request returns the entry protocol and body of the ignition request.
 func Request(p *Provider, model string) (string, []byte, error) {

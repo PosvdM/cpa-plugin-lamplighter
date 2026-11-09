@@ -272,7 +272,7 @@ Antigravity、Kimi 和 Grok 的响应头里没有额度。
 所有点火请求都省略输出 token 上限字段。唯一的提示词由 `providers.TriggerPrompt` 给出：
 
 ```text
-Do not think, reason, deliberate, use tools, or perform any other task. Reply with exactly OK and nothing else.
+Reply with only OK. Do not think, do not use tools, do not do anything else.
 ```
 
 ### 流式执行与取消

@@ -183,7 +183,7 @@ func TestClampPercentDropsFloatNoise(t *testing.T) {
 }
 
 func TestTriggerPromptIsStrict(t *testing.T) {
-	const want = "Do not think, reason, deliberate, use tools, or perform any other task. Reply with exactly OK and nothing else."
+	const want = "Reply with only OK. Do not think, do not use tools, do not do anything else."
 	if TriggerPrompt != want {
 		t.Fatalf("trigger prompt = %q, want %q", TriggerPrompt, want)
 	}
@@ -200,7 +200,7 @@ func TestRequestUsesMinimalBodies(t *testing.T) {
 		}
 		var body map[string]any
 		json.Unmarshal(raw, &body)
-		if body["model"] != "m" || !strings.Contains(string(raw), "exactly OK") {
+		if body["model"] != "m" || !strings.Contains(string(raw), "Reply with only OK.") {
 			t.Fatalf("%s body %s", p.ID, raw)
 		}
 		if body["stream"] != true {
