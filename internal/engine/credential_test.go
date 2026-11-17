@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -569,5 +570,56 @@ func TestCredentialProblemWithoutMessage(t *testing.T) {
 	}
 	if len(sender.sent) != 1 || strings.Contains(sender.sent[0].Body, "HTTP 403") || !strings.HasPrefix(sender.sent[0].Body, "403 · TOS_VIOLATION · 账号已被停用，需要申诉\n来源：额度查询") {
 		t.Fatalf("notification %+v", sender.sent)
+	}
+}
+
+// failingSender records every notification and fails while fail is set.
+type failingSender struct {
+	sent []notify.Message
+	fail bool
+}
+
+func (f *failingSender) Send(_ context.Context, msg notify.Message) error {
+	f.sent = append(f.sent, msg)
+	if f.fail {
+		return errors.New("bark unreachable")
+	}
+	return nil
+}
+
+// A failed credential notification is tried once per poll: the poll that
+// finds the problem does not retry it at its end, the next polls do.
+func TestFailedCredentialNotificationIsTriedOncePerPoll(t *testing.T) {
+	c := &clock{t: time.Date(2026, 11, 16, 7, 0, 0, 0, shanghai)}
+	h := standardHost(c)
+	base := h.http
+	h.http = func(req pluginapi.HTTPRequest) pluginapi.HTTPResponse {
+		if req.URL == providers.ClaudeUsageURL {
+			return pluginapi.HTTPResponse{StatusCode: 403, Body: []byte(tosBody)}
+		}
+		return base(req)
+	}
+	e, _ := newTestEngine(t, h, c)
+	sender := &failingSender{fail: true}
+	e.alerts.Sender = sender
+	ctx := context.Background()
+	cfg := e.config()
+	cfg.Providers["codex"] = config.Provider{}
+	e.Configure(cfg, nil)
+	e.poll(ctx, cfg, c.t, "", true)
+	if len(sender.sent) != 1 || len(eventsOf(e, "notify_failed")) != 1 {
+		t.Fatalf("first poll: %d sends, %d notify_failed", len(sender.sent), len(eventsOf(e, "notify_failed")))
+	}
+	c.add(5 * time.Minute)
+	e.poll(ctx, cfg, c.t, "", true)
+	if len(sender.sent) != 2 || len(eventsOf(e, "notify_failed")) != 2 {
+		t.Fatalf("second poll: %d sends, %d notify_failed", len(sender.sent), len(eventsOf(e, "notify_failed")))
+	}
+	sender.fail = false
+	c.add(5 * time.Minute)
+	e.poll(ctx, cfg, c.t, "", true)
+	e.poll(ctx, cfg, c.t, "", true)
+	if len(sender.sent) != 3 || len(eventsOf(e, "notify")) != 1 || !e.state.Credentials["3"].Notified {
+		t.Fatalf("delivered: %d sends, %+v", len(sender.sent), e.state.Credentials["3"])
 	}
 }

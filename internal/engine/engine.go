@@ -109,14 +109,18 @@ type Engine struct {
 	credProblems map[string]string
 
 	// Owned by the loop goroutine.
-	state     *store.State
-	stateFile *store.StateFile
-	history   *store.History
-	dirty     bool
-	egress    *egress.Egress
-	lister    *models.Lister
-	alerts    *notify.Alerts
-	passiveAt map[string]time.Time
+	state *store.State
+	// credNoticeTried is when the credential notification of each account
+	// was last sent or tried; flushCredentialNotices skips the ones tried
+	// during the same poll.
+	credNoticeTried map[string]time.Time
+	stateFile       *store.StateFile
+	history         *store.History
+	dirty           bool
+	egress          *egress.Egress
+	lister          *models.Lister
+	alerts          *notify.Alerts
+	passiveAt       map[string]time.Time
 	// fableSeen marks credentials whose passive Fable window was logged.
 	fableSeen map[string]bool
 	activeAt  map[string]time.Time

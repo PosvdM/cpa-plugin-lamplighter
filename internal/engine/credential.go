@@ -309,6 +309,10 @@ func (e *Engine) sendCredentialNotice(ctx context.Context, cred *Cred, st *store
 	if msg.Group == "" {
 		msg.Group = e.accountGroup(cred.AuthIndex)
 	}
+	if e.credNoticeTried == nil {
+		e.credNoticeTried = map[string]time.Time{}
+	}
+	e.credNoticeTried[cred.AuthIndex] = e.now()
 	switch err := e.alerts.Sender.Send(ctx, msg); {
 	case errors.Is(err, notify.ErrNotConfigured):
 		// Notifications are off; the problem counts as not notified.
@@ -326,14 +330,20 @@ func (e *Engine) sendCredentialNotice(ctx context.Context, cred *Cred, st *store
 	e.forgetEmptyCredential(cred.AuthIndex)
 }
 
-// flushCredentialNotices retries the pending credential notifications.
-func (e *Engine) flushCredentialNotices(ctx context.Context) {
+// flushCredentialNotices retries the pending credential notifications. A
+// notification already sent or tried since start, the start of this poll,
+// waits for the next poll: a problem found by a query of this poll tries its
+// notification right away, and a second try would only repeat it.
+func (e *Engine) flushCredentialNotices(ctx context.Context, start time.Time) {
 	if e.state == nil {
 		return
 	}
 	now := e.now()
 	for authIndex, st := range e.state.Credentials {
 		if st == nil || st.Notice == "" {
+			continue
+		}
+		if tried, ok := e.credNoticeTried[authIndex]; ok && !tried.Before(start) {
 			continue
 		}
 		e.mu.Lock()

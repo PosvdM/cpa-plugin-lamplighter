@@ -317,6 +317,7 @@ func (e *Engine) shouldSkipActive(cfg config.Config, cred *Cred, slot, now time.
 // belongs to. onlyAuth limits the round to one credential. force disables the
 // passive skip rule, for the manual refresh button.
 func (e *Engine) poll(ctx context.Context, cfg config.Config, slot time.Time, onlyAuth string, force bool) {
+	start := e.now()
 	creds, err := e.loadCreds(cfg)
 	if err != nil {
 		e.mu.Lock()
@@ -355,7 +356,7 @@ func (e *Engine) poll(ctx context.Context, cfg config.Config, slot time.Time, on
 	e.mu.Unlock()
 	e.dirty = true
 	e.checkCooldowns(ctx, cfg)
-	e.flushCredentialNotices(ctx)
+	e.flushCredentialNotices(ctx, start)
 }
 
 // refreshCred runs the active query of one credential.
