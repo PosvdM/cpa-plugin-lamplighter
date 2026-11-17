@@ -197,6 +197,11 @@
       ev_notify_failed_detail: "{0}：{1}",
       ev_cooldown: "额度已恢复，CPA 仍冷却到 {0}",
       ev_codex_sent: "已发送 {0} 条通知",
+      ev_reset: "额度重置", ev_exhausted: "额度耗尽", ev_credential_invalid: "凭证失效", ev_credential_suspended: "账号停用",
+      ev_credential_rate_limited: "被限流", ev_credential_restored: "凭证恢复", ev_notify_quota: "额度提醒", ev_notify_reminder: "重置提醒",
+      ev_window_left: "{0} · 剩余 {1}", ev_window_next: "{0} · 剩余 {1} · 下次重置 {2}", ev_window_due: "{0} · 剩余 {1} · {2} 重置",
+      ev_limited_until: "{0} · 限流到 {1}", ev_appeal: "申诉", ev_source_ignite: "点火时确认", ev_source_query: "额度查询时确认",
+      ev_show_5h: "显示 5 小时重置", ev_show_5h_count: "显示 5 小时重置（{0}）",
       no_events: "暂无事件", collapse: "收起", show_more: "显示更多（共 {0} 条）",
       failed: "失败：{0}",
       range_h: "{0} 小时", range_d: "{0} 天", range_mo: "{0} 个月",
@@ -357,6 +362,11 @@
       ev_notify_failed_detail: "{0}: {1}",
       ev_cooldown: "Quota is back, but CPA cools down until {0}",
       ev_codex_sent: "Sent {0} notifications",
+      ev_reset: "Quota reset", ev_exhausted: "Quota exhausted", ev_credential_invalid: "Credential invalid", ev_credential_suspended: "Account suspended",
+      ev_credential_rate_limited: "Rate limited", ev_credential_restored: "Credential restored", ev_notify_quota: "Quota alert", ev_notify_reminder: "Reset reminder",
+      ev_window_left: "{0} · {1} left", ev_window_next: "{0} · {1} left · next reset {2}", ev_window_due: "{0} · {1} left · resets {2}",
+      ev_limited_until: "{0} · limited until {1}", ev_appeal: "Appeal", ev_source_ignite: "Confirmed by ignition", ev_source_query: "Confirmed by a quota query",
+      ev_show_5h: "Show 5-hour resets", ev_show_5h_count: "Show 5-hour resets ({0})",
       no_events: "No events yet", collapse: "Show less", show_more: "Show more ({0} in total)",
       failed: "Failed: {0}",
       range_h: "{0}h", range_d: "{0}d", range_mo: "{0} month",
@@ -1311,17 +1321,37 @@
     });
   }
 
+  // ---- Events ----
+
   // Badge style per event type; the label is ev_<kind> in the dictionary.
   var EVENT_TYPES = {
     ignite: "success", ignite_manual: "success", ignite_failed: "warning", ignite_paused: "failure", model_refused: "warning",
-    cooldown_stale: "warning", plan_change: "warning", notify: "muted", notify_failed: "warning", codex_reset: "muted", error: "failure"
+    cooldown_stale: "warning", plan_change: "warning", notify: "muted", notify_failed: "warning", codex_reset: "muted", error: "failure",
+    reset: "success", exhausted: "warning", credential_invalid: "failure", credential_restored: "success"
   };
-  var EVENTS_COLLAPSED = 12;
+  var EVENTS_COLLAPSED = 12, EVENTS_MAX = 100;
   var eventsExpanded = false;
+  // Resets of 5-hour windows, one per service every five hours, show only
+  // when chosen; the choice is kept in this browser.
+  var EVENTS_STORE = "lamplighter-events-5h";
+  var showFiveHourResets = false;
+  try { showFiveHourResets = localStorage.getItem(EVENTS_STORE) === "1"; } catch (err) {}
+
+  // The events a notification reports, by its notify_kind. A notification
+  // sent within NOTIFY_LAG seconds after such an event of the same quota
+  // group shows as a mark on that event's row instead of a row of its own.
+  var NOTIFY_TRIGGERS = {
+    recovery: ["reset"], circuit: ["ignite_paused"], cooldown: ["cooldown_stale"], plan: ["plan_change"],
+    credential: ["credential_invalid"], suspended: ["credential_invalid"], rate_limited: ["credential_invalid"],
+    credential_ok: ["credential_restored"]
+  };
+  var NOTIFY_LAG = 600;
+  // Error texts longer than this are cut in the list; the tooltip keeps all.
+  var ERROR_CHARS = 160;
 
   function groupLabel(key) {
     var label = "";
-    (status.accounts || []).forEach(function (a) {
+    ((status && status.accounts) || []).forEach(function (a) {
       (a.groups || []).forEach(function (g) { if (g.key === key) label = g.label; });
     });
     return label;
@@ -1331,78 +1361,298 @@
     return seconds < 60 ? translate("ev_seconds", seconds) : translate("ev_minutes", Math.round(seconds / 60));
   }
 
-  // The event text in the page language, built from the event params.
-  // Events written before params existed keep their stored Chinese text.
-  function eventDetail(ev) {
-    var p = ev.params;
-    if (!p) return null;
-    var time = function (value) { return fmtDateTime(parseTime(value)); };
-    switch (ev.kind) {
-      case "ignite": case "ignite_manual": return p.reset ? translate("ev_ignited", p.model, time(p.reset)) : p.model;
-      case "ignite_failed": return translate(p.cooldown ? "ev_retry_cooldown" : "ev_retry", retryText(Number(p.retry_seconds) || 0), p.error);
-      case "ignite_paused": return translate("ev_paused", time(p.until), p.error);
-      case "model_refused": return translate("ev_refused", p.model, p.fallback, p.hours);
-      case "notify": return p.title;
-      case "notify_failed": return translate("ev_notify_failed_detail", p.title, p.error);
-      case "cooldown_stale": return translate("ev_cooldown", time(p.until));
-      case "plan_change": return p.from + " → " + p.to;
-      case "codex_reset": return translate("ev_codex_sent", p.count);
-    }
-    return null;
+  function cutText(text, max) {
+    var chars = Array.from(text);
+    return chars.length > max ? chars.slice(0, max - 1).join("").replace(/\s+$/, "") + "…" : text;
   }
 
-  // Events written before label and detail existed only have a message that
-  // starts with the group label.
+  // One line for an error text, which can hold a JSON body from the
+  // provider over many lines: the text before the body, then the status
+  // code, reason and message from it. Without a JSON body, the first line.
+  function errorSummary(text) {
+    text = String(text == null ? "" : text).trim();
+    var start = text.indexOf("{"), end = text.lastIndexOf("}"), body = null;
+    if (start >= 0 && end > start) {
+      try { body = JSON.parse(text.slice(start, end + 1)); } catch (err) { body = null; }
+    }
+    if (!body || typeof body !== "object") {
+      var first = text.split(/\r?\n/).filter(function (line) { return line.trim(); })[0] || "";
+      return cutText(first.trim(), ERROR_CHARS);
+    }
+    var e = body.error && typeof body.error === "object" ? body.error : body;
+    var code = null, reason = "", message = "";
+    [e.code, e.status, body.status, body.code].forEach(function (v) {
+      if (code == null && (typeof v === "number" || /^\d{3}$/.test(String(v)))) code = String(v);
+    });
+    var http = text.slice(end + 1).match(/HTTP (\d{3})/) || text.slice(0, start).match(/HTTP (\d{3})/);
+    if (code == null && http) code = http[1];
+    (Array.isArray(e.details) ? e.details : []).forEach(function (d) {
+      if (!reason && d && typeof d.reason === "string") reason = d.reason;
+    });
+    [e.status, e.type, e.code, typeof body.error === "string" ? body.error : null].forEach(function (v) {
+      if (!reason && typeof v === "string" && v && !/^\d+$/.test(v)) reason = v;
+    });
+    [e.message, body.message, body.error_description, e.error_description].forEach(function (v) {
+      if (!message && typeof v === "string" && v.trim()) message = v.trim().split(/\r?\n/)[0];
+    });
+    var parts = [code != null ? "HTTP " + code : "", reason, message].filter(function (s) { return s; });
+    var prefix = text.slice(0, start).trim();
+    var line = parts.join(" · ");
+    if (prefix) line = prefix + (/[：:]$/.test(prefix) ? (/：$/.test(prefix) ? "" : " ") : " ") + line;
+    return cutText(line || text.split(/\r?\n/)[0].trim(), ERROR_CHARS);
+  }
+
+  // What a notification reports. Notifications recorded before notify_kind
+  // existed are told by their title, in either language; see
+  // internal/notify/text.go.
+  function notifyKind(ev) {
+    var p = ev.params || {};
+    if (p.notify_kind) return p.notify_kind;
+    var title = String(p.title || ev.detail || ev.message || "").replace(/^推送失败 /, "");
+    var starts = function (prefix) { return title.indexOf(prefix) === 0; };
+    if (/^(📅|✅) Codex /.test(title)) return "codex_reset";
+    if (starts("✅")) return "recovery";
+    if (title.indexOf("点火已暂停") >= 0 || title.indexOf("ignition paused") >= 0) return "circuit";
+    if (starts("🎫")) return "plan";
+    if (title.indexOf("CPA 仍在冷却") >= 0 || title.indexOf("CPA still cooling down") >= 0) return "cooldown";
+    if (starts("🟡") || starts("🔴")) return "quota";
+    if (starts("⏰")) return "reminder";
+    return "";
+  }
+
+  // The kind ("5h", "7d" or "") and short label of the window of a reset or
+  // exhausted event. Events recorded without them have only the window ID.
+  function eventWindow(p) {
+    var id = String(p.window || "");
+    if (p.label) return { kind: p.kind || "", label: p.label };
+    var kind = id === "five-hour" || /-5h$/.test(id) ? "5h" : id === "seven-day" || id.indexOf("weekly") >= 0 ? "7d" : "";
+    return { kind: kind, label: kind || id };
+  }
+
+  // Whether two events concern the same quota group. Notifications and some
+  // events were recorded without the group and only have its label.
+  function sameSubject(a, b) {
+    if (a.group && b.group) return a.group === b.group;
+    return !!a.label && a.label === b.label;
+  }
+
+  function eventSeconds(ev) { var t = parseTime(ev.time); return t ? t.getTime() / 1000 : 0; }
+
+  // The rows of the event list, newest first like events: a notification
+  // that reports an event joins that event's row (pushes); one that reports
+  // none, such as a quota alert, stays a row of its own. A recovery joins
+  // the reset of each window it names, or without window names the latest
+  // reset and those of the same poll. Other notifications join their latest
+  // event. Resets of 5-hour windows are left out unless chosen, together
+  // with their notifications; hidden counts them.
+  function eventRows(events, showFiveHour) {
+    var rows = events.map(function (ev) { return { event: ev, t: eventSeconds(ev), pushes: [] }; });
+    rows.forEach(function (row) {
+      var ev = row.event;
+      if (ev.kind !== "notify" && ev.kind !== "notify_failed") return;
+      row.notifyKind = notifyKind(ev);
+      var triggers = NOTIFY_TRIGGERS[row.notifyKind];
+      if (!triggers) return;
+      var p = ev.params || {};
+      var windows = row.notifyKind === "recovery" && p.windows ? p.windows.split(",").map(function (w) { return w.trim(); }) : null;
+      var hits = rows.filter(function (other) {
+        var o = other.event;
+        if (triggers.indexOf(o.kind) < 0 || row.t < other.t || row.t - other.t > NOTIFY_LAG || !sameSubject(ev, o)) return false;
+        return !windows || windows.indexOf((o.params || {}).window) >= 0;
+      }).sort(function (a, b) { return b.t - a.t; });
+      if (!hits.length) return;
+      var chosen;
+      if (windows) {
+        var seen = {};
+        chosen = hits.filter(function (h) {
+          var w = (h.event.params || {}).window;
+          if (seen[w]) return false;
+          seen[w] = true;
+          return true;
+        });
+      } else if (row.notifyKind === "recovery") {
+        chosen = hits.filter(function (h) { return hits[0].t - h.t <= 60; });
+      } else chosen = [hits[0]];
+      chosen.forEach(function (h) { h.pushes.push(ev); });
+      row.merged = true;
+    });
+    var hidden = 0, fiveHour = 0;
+    var out = rows.filter(function (row) {
+      if (row.merged) return false;
+      var ev = row.event;
+      if (ev.kind === "reset" && eventWindow(ev.params || {}).kind === "5h") {
+        fiveHour++;
+        if (!showFiveHour) { hidden++; return false; }
+      }
+      return true;
+    });
+    return { rows: out, hidden: hidden, fiveHour: fiveHour };
+  }
+
+  // A notification title without the label the label column shows, such as
+  // "🟡 GPT · 5h 45%" under the label GPT.
+  function notifyTitle(title, label) {
+    title = String(title || "");
+    var at = label ? title.indexOf(label + " · ") : -1;
+    return at >= 0 && at <= 3 ? title.slice(0, at) + title.slice(at + label.length + 3) : title;
+  }
+
+  // How an event shows in the list, in the page language: the badge style
+  // and text, the label, a one-line detail, the full text for the tooltip
+  // (tip), an appeal link, and the texts of the detail that are sensitive
+  // as a whole (secrets): error texts from the provider, which may name an
+  // account. whole marks a detail that is sensitive as a whole: the detail
+  // of an error event, and of an older event without a label, whose message
+  // may name an account that no longer exists. Events written before params
+  // existed keep their stored Chinese text.
+  function eventView(ev, notifyKindOf) {
+    var p = ev.params || {};
+    var known = EVENT_TYPES[ev.kind];
+    var view = {
+      style: known || (ev.level === "error" ? "failure" : ev.level === "warn" ? "warning" : "muted"),
+      badge: known ? translate("ev_" + ev.kind) : ev.kind,
+      label: ev.label || (ev.group ? groupLabel(ev.group) : ""),
+      detail: "", tip: "", secrets: [], whole: ev.kind === "error" || (!ev.params && !ev.label), link: ""
+    };
+    var time = function (value) { return fmtDateTime(parseTime(value)); };
+    var error = function (summary, full) {
+      var line = summary || errorSummary(full);
+      view.secrets.push(line, String(full || ""));
+      return line;
+    };
+    if (!ev.params) {
+      var detail = ev.detail || ev.message || "";
+      if (!ev.detail && view.label && detail.indexOf(view.label + " ") === 0) detail = detail.slice(view.label.length + 1);
+      if (!ev.detail) detail = detail.replace(/^点火成功（(.+?)），下次重置 /, "$1 · 下次重置 ");
+      view.detail = errorSummary(detail);
+      view.tip = detail;
+      return view;
+    }
+    switch (ev.kind) {
+      case "ignite": case "ignite_manual":
+        view.detail = p.reset ? translate("ev_ignited", p.model, time(p.reset)) : p.model || "";
+        break;
+      case "ignite_failed":
+        view.detail = translate(p.cooldown ? "ev_retry_cooldown" : "ev_retry", retryText(Number(p.retry_seconds) || 0), error(p.summary, p.error));
+        view.tip = translate(p.cooldown ? "ev_retry_cooldown" : "ev_retry", retryText(Number(p.retry_seconds) || 0), p.error || "");
+        break;
+      case "ignite_paused":
+        view.detail = translate("ev_paused", time(p.until), error(p.summary, p.error));
+        view.tip = translate("ev_paused", time(p.until), p.error || "");
+        break;
+      case "model_refused":
+        view.detail = translate("ev_refused", p.model, p.fallback, p.hours);
+        break;
+      case "notify": case "notify_failed":
+        var kind = notifyKindOf || notifyKind(ev);
+        if (ev.kind === "notify" && (kind === "quota" || kind === "reminder")) view.badge = translate("ev_notify_" + kind);
+        var title = notifyTitle(p.title, view.label);
+        if (ev.kind === "notify") view.detail = title;
+        else {
+          view.detail = translate("ev_notify_failed_detail", title, error("", p.error));
+          view.tip = translate("ev_notify_failed_detail", p.title || "", p.error || "");
+        }
+        break;
+      case "cooldown_stale":
+        view.detail = translate("ev_cooldown", time(p.until));
+        break;
+      case "plan_change":
+        view.detail = p.from + " → " + p.to;
+        break;
+      case "codex_reset":
+        view.detail = translate("ev_codex_sent", p.count);
+        break;
+      case "reset": case "exhausted":
+        var win = eventWindow(p), left = pct(Number(p.remaining)), at = parseTime(p.reset);
+        view.detail = !at ? translate("ev_window_left", win.label, left)
+          : translate(ev.kind === "reset" ? "ev_window_next" : "ev_window_due", win.label, left, fmtDateTime(at));
+        break;
+      case "credential_invalid":
+        if (p.reason === "suspended" || p.reason === "rate_limited") view.badge = translate("ev_credential_" + p.reason);
+        var line = error(p.summary, p.error || [p.status ? "HTTP " + p.status : "", p.code].filter(Boolean).join(" · "));
+        view.detail = p.reason === "rate_limited" && parseTime(p.until) ? translate("ev_limited_until", line, time(p.until)) : line;
+        view.tip = view.detail;
+        if (/^https?:\/\//i.test(p.appeal_url || "")) view.link = p.appeal_url;
+        break;
+      case "credential_restored":
+        view.detail = p.source === "ignite" || p.source === "query" ? translate("ev_source_" + p.source) : "";
+        break;
+      case "error":
+        view.detail = errorSummary(ev.detail || ev.message || "");
+        view.tip = ev.detail || ev.message || "";
+        break;
+      default:
+        view.detail = ev.detail || ev.message || "";
+    }
+    return view;
+  }
+
+  // The label and detail of an event, for the chart's tooltips.
   function eventParts(ev) {
-    var label = ev.label || (ev.group ? groupLabel(ev.group) : "");
-    var translated = eventDetail(ev);
-    if (translated !== null) return { label: label || "—", detail: translated };
-    var detail = ev.detail || ev.message || "";
-    if (!ev.detail && label && detail.indexOf(label + " ") === 0) detail = detail.slice(label.length + 1);
-    if (!ev.detail) detail = detail.replace(/^点火成功（(.+?)），下次重置 /, "$1 · 下次重置 ");
-    return { label: label || "—", detail: detail };
+    var view = eventView(ev);
+    return { label: view.label || "—", detail: view.detail };
   }
 
   // The label and detail of an event as nodes, with the account names
   // marked SENSITIVE by what the fields mean: the label names the quota
   // group of an account, so it is sensitive as a whole, and so is its text
   // within the detail, such as in a notification title, and an error text
-  // from the provider. Text that cannot be split reliably is sensitive as a
-  // whole: the detail of an error event, and of an older event without a
-  // label, whose message may name an account that no longer exists.
-  function eventMasked(ev, parts) {
-    parts = parts || eventParts(ev);
-    var p = ev.params || {};
-    var label = parts.label === "—" ? [document.createTextNode("—")] : [el("span", { class: SENSITIVE, text: parts.label })];
-    var whole = ev.kind === "error" || (!ev.params && !ev.label);
-    var detail = whole ? [el("span", { class: SENSITIVE, text: parts.detail })]
-      : maskedNodes(parts.detail, [parts.label === "—" ? "" : parts.label, p.error ? String(p.error) : ""]);
+  // from the provider.
+  function eventMasked(ev, view) {
+    view = view || eventView(ev);
+    var label = view.label ? [el("span", { class: SENSITIVE, text: view.label })] : [document.createTextNode("—")];
+    var detail = view.whole ? [el("span", { class: SENSITIVE, text: view.detail })] : maskedNodes(view.detail, [view.label].concat(view.secrets));
     return { label: label, detail: detail };
+  }
+
+  // A mark after the detail for the notifications of an event: sent, or
+  // failed with the errors in its tooltip.
+  function pushMarks(pushes) {
+    var marks = [];
+    var sent = pushes.filter(function (ev) { return ev.kind === "notify"; });
+    var failed = pushes.filter(function (ev) { return ev.kind === "notify_failed"; });
+    if (sent.length) {
+      marks.push(el("span", { class: "event-mark", title: masked ? null : sent.map(function (ev) { return (ev.params || {}).title || ev.detail || ""; }).join("\n"),
+        text: translate("ev_notify") }));
+    }
+    if (failed.length) {
+      marks.push(el("span", { class: "event-mark failed", title: masked ? null : failed.map(function (ev) {
+        var p = ev.params || {};
+        return p.title ? translate("ev_notify_failed_detail", p.title, p.error || "") : ev.detail || ev.message || "";
+      }).join("\n"), text: translate("ev_notify_failed") }));
+    }
+    return marks;
   }
 
   function renderEvents() {
     var list = $("events");
     clear(list);
     var more = $("events-more");
-    if (!status.events.length) {
+    var filter = $("events-5h"), filterText = $("events-5h-label");
+    var built = eventRows(status.events || [], showFiveHourResets);
+    if (filter) {
+      filter.checked = showFiveHourResets;
+      filterText.textContent = translate(built.fiveHour ? "ev_show_5h_count" : "ev_show_5h", built.fiveHour);
+    }
+    if (!built.rows.length) {
       list.appendChild(el("p", { class: "empty", text: translate("no_events") }));
       more.hidden = true;
       return;
     }
-    var events = eventsExpanded ? status.events.slice(0, 100) : status.events.slice(0, EVENTS_COLLAPSED);
-    events.forEach(function (ev) {
-      var known = EVENT_TYPES[ev.kind];
-      var type = [known || (ev.level === "error" ? "failure" : ev.level === "warn" ? "warning" : "muted"), known ? translate("ev_" + ev.kind) : ev.kind];
-      var parts = eventParts(ev), nodes = eventMasked(ev, parts);
+    var total = Math.min(built.rows.length, EVENTS_MAX);
+    built.rows.slice(0, eventsExpanded ? EVENTS_MAX : EVENTS_COLLAPSED).forEach(function (row) {
+      var ev = row.event, view = eventView(ev, row.notifyKind), nodes = eventMasked(ev, view);
+      var cell = [el("span", { class: "event-text", title: masked ? null : view.tip || view.detail || null }, nodes.detail)];
+      if (view.link) cell.push(el("a", { class: "event-link", href: view.link, target: "_blank", rel: "noopener noreferrer", text: translate("ev_appeal") }));
       list.appendChild(el("div", { class: "event-row", role: "row" }, [
         el("span", { class: "event-time", role: "cell", text: fmtDateTime(parseTime(ev.time)) }),
-        el("span", { class: "event-type", role: "cell" }, [badge(type[0], type[1])]),
+        el("span", { class: "event-type", role: "cell" }, [badge(view.style, view.badge)]),
         el("span", { class: "event-label", role: "cell" }, nodes.label),
-        el("span", { class: "event-detail", role: "cell", title: masked ? null : parts.detail }, nodes.detail)
+        el("span", { class: "event-detail", role: "cell" }, cell.concat(pushMarks(row.pushes)))
       ]));
     });
-    more.hidden = status.events.length <= EVENTS_COLLAPSED;
-    more.textContent = eventsExpanded ? translate("collapse") : translate("show_more", Math.min(status.events.length, 100));
+    more.hidden = total <= EVENTS_COLLAPSED;
+    more.textContent = eventsExpanded ? translate("collapse") : translate("show_more", total);
   }
 
   // The provider settings, built when the provider list changes: a monitor
@@ -3931,6 +4181,11 @@
     }
   });
   $("events-more").addEventListener("click", function () { eventsExpanded = !eventsExpanded; renderEvents(); });
+  $("events-5h").addEventListener("change", function (e) {
+    showFiveHourResets = e.target.checked;
+    try { localStorage.setItem(EVENTS_STORE, showFiveHourResets ? "1" : "0"); } catch (err) {}
+    if (status) renderEvents();
+  });
   // bounce is set when the user picks the value, so the thumb slides there.
   function pressSegment(id, value, bounce) {
     var box = $(id);
