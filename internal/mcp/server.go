@@ -70,14 +70,30 @@ func (s *Server) State() State { s.mu.Lock(); defer s.mu.Unlock(); return s.stat
 
 // Configure closes the old listener before binding the replacement. A failed
 // bind is retried every two seconds, including during hot-reload handover.
+//
+// A new non-empty key for a running listener on the same address replaces
+// the key without closing the listener: reverse proxies and MCP clients reuse
+// keep-alive connections, and a closing listener fails the next request on
+// them. serveHTTP reads the key under mu, so every request after Configure
+// returns is checked against the new key. Requests already admitted with the
+// old key are canceled, as when the listener closes.
 func (s *Server) Configure(enabled bool, listen, key string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.stopped {
 		return
 	}
-	if s.state.Enabled == enabled && s.state.Listen == listen && s.key == key && s.state.Running {
-		return
+	if s.state.Enabled == enabled && s.state.Listen == listen && s.state.Running {
+		if s.key == key {
+			return
+		}
+		if enabled && key != "" {
+			for _, cancel := range s.requests {
+				cancel()
+			}
+			s.key = key
+			return
+		}
 	}
 	s.closeLocked()
 	s.state = State{Enabled: enabled, Listen: listen, Path: "/mcp"}
