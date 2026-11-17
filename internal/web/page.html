@@ -79,8 +79,10 @@
       </div>
     </div>
     <div id="chart" class="chart-box"></div>
-    <div id="chart-detail-head" class="detail-head" hidden></div>
-    <div id="chart-detail" class="chart-box"></div>
+    <div id="chart-detail-wrap" class="detail-wrap" hidden>
+      <div id="chart-detail-head" class="detail-head"></div>
+      <div id="chart-detail" class="chart-box"></div>
+    </div>
     <p class="legend">
       <span><i class="swatch fill-full"></i><span id="legend-full">满 100%</span></span>
       <span><i class="swatch fill-high"></i><span id="legend-high">高 &gt; 50%</span></span>
@@ -92,6 +94,7 @@
       <span data-i18n="legend_failed">✕ 含点火失败</span>
       <span data-i18n="legend_reset">↻ 重置</span>
       <span><i class="swatch pace"></i><span data-i18n="pace_reference">匀速参考</span></span>
+      <span id="legend-pace-extended" hidden><i class="swatch pace-extended"></i><span data-i18n="legend_pace_extended">匀速参考往回延长到本周期起点（周期中途预定重置变了）</span></span>
       <span><i class="swatch projection"></i><span id="legend-projection">按当前速度的延长线</span></span>
       <span class="muted" data-i18n="legend_inactive">已停用：账号不再报告这个窗口，保留到最后一个数据点移出所选范围</span>
       <span class="muted" data-i18n="legend_pooled">多账号的服务显示合计额度，点击行查看详情，再点一次展开各账号</span>
@@ -108,7 +111,10 @@
   </section>
 
   <section class="card">
-    <h2 class="card-title" data-i18n="events">事件</h2>
+    <div class="block-head">
+      <h2 class="block-title" data-i18n="events">事件</h2>
+      <label class="events-filter"><input id="events-5h" type="checkbox"><span id="events-5h-label">显示 5 小时重置</span></label>
+    </div>
     <div id="events" class="events" role="table" aria-label="事件" data-i18n-aria-label="events"></div>
     <button id="events-more" class="btn btn-ghost btn-sm events-more" type="button" hidden></button>
   </section>

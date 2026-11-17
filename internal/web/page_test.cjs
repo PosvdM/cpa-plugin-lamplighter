@@ -671,3 +671,433 @@ test("a current window whose reset became unknown ends the even pace now", () =>
   assert.equal(ctx.pooledPace([a, b], L, now), null);
   assert.equal(ctx.pooledPace([a, b], L, now + HOUR), null);
 });
+
+// ---- Events ----
+
+// A var statement of page.js, such as the NOTIFY_TRIGGERS table.
+function pageVar(name) {
+  const match = source.match(new RegExp("\\n  var " + name + " = [^]*?;\\n"));
+  assert.ok(match, name);
+  return match[0];
+}
+
+const EVENT_FUNCTIONS = ["groupLabel", "retryText", "cutText", "errorSummary", "notifyKind", "eventWindow", "sameSubject",
+  "eventSeconds", "eventRows", "notifyTitle", "eventView", "eventParts", "eventMasked", "pushMarks", "parseTime"];
+
+// Elements and text nodes as plain objects; translate shows the key and
+// its arguments.
+function eventContext(globals = {}) {
+  const ctx = context(EVENT_FUNCTIONS, {
+    status: { accounts: [] }, masked: false, SENSITIVE: "account-sensitive",
+    translate: (key, ...args) => args.length ? key + "(" + args.join("|") + ")" : key,
+    fmtDateTime: (t) => t ? t.toISOString().slice(5, 16) : "—",
+    pct: (v) => v == null || isNaN(v) ? "—" : Math.round(v) + "%",
+    el: (tag, attrs = {}, children = []) => ({ tag, ...attrs, children }),
+    document: { createTextNode: (text) => ({ text }) },
+    maskedNodes: (text, extra) => {
+      // Like page.js: each listed name in its own sensitive span.
+      let rest = String(text), out = [];
+      const names = (extra || []).filter((n) => n && n.trim()).sort((a, b) => b.length - a.length);
+      while (rest) {
+        let at = -1, hit = "";
+        for (const n of names) { const i = rest.indexOf(n); if (i >= 0 && (at < 0 || i < at)) { at = i; hit = n; } }
+        if (at < 0) { out.push({ text: rest }); break; }
+        if (at) out.push({ text: rest.slice(0, at) });
+        out.push({ tag: "span", class: "account-sensitive", text: hit });
+        rest = rest.slice(at + hit.length);
+      }
+      return out;
+    },
+    ...globals,
+  });
+  vm.runInContext(["EVENT_TYPES", "NOTIFY_TRIGGERS", "NOTIFY_LAG", "PAUSE_PAIR", "ERROR_CHARS"].map(pageVar).join("\n"), ctx);
+  return ctx;
+}
+
+const T0 = Date.UTC(2026, 10, 16, 0, 0, 0) / 1000;
+function event(kind, at, fields = {}) {
+  return { time: new Date((T0 + at) * 1000).toISOString(), kind, level: "info", ...fields };
+}
+
+test("a notification joins the row of the event it reports", () => {
+  const ctx = eventContext();
+  const g = { group: "codex:a", label: "GPT" };
+  const events = [
+    event("notify", 70, { ...g, params: { title: "✅ GPT · 7d 已恢复", notify_kind: "recovery", windows: "seven-day" } }),
+    event("reset", 60, { ...g, params: { window: "seven-day", kind: "7d", label: "7d", remaining: "100.00" } }),
+    event("notify_failed", 40, { ...g, level: "warn", params: { title: "⚠️ GPT 点火已暂停", notify_kind: "circuit", error: "bark: 500" } }),
+    event("notify", 39, { ...g, params: { title: "⚠️ GPT 点火已暂停", notify_kind: "circuit" } }),
+    event("ignite_paused", 30, { ...g, level: "error", params: { until: "2026-11-17T00:00:00Z", error: "boom", summary: "boom" } }),
+    // No event before it: a quota alert stays a row of its own.
+    event("notify", 20, { ...g, params: { title: "🟡 GPT · 5h 45%", notify_kind: "quota" } }),
+    // Too late for the reset of another group.
+    event("notify", 10, { group: "codex:b", label: "GPT 2", params: { title: "✅ GPT 2 · 7d 已恢复", notify_kind: "recovery" } }),
+  ];
+  const built = ctx.eventRows(events, false);
+  assert.deepEqual(plain(built.rows.map((r) => r.event.kind + "@" + (r.event.params.title || ""))), [
+    "reset@", "ignite_paused@", "notify@🟡 GPT · 5h 45%", "notify@✅ GPT 2 · 7d 已恢复"]);
+  assert.deepEqual(plain(built.rows[0].pushes.map((ev) => ev.kind)), ["notify"]);
+  assert.deepEqual(plain(built.rows[1].pushes.map((ev) => ev.kind).sort()), ["notify", "notify_failed"]);
+  const marks = ctx.pushMarks(built.rows[1].pushes);
+  assert.deepEqual(plain(marks.map((m) => m.text)), ["ev_notify", "ev_notify_failed"]);
+  assert.match(marks[1].title, /bark: 500/);
+  assert.equal(marks[1].class, "event-mark failed");
+  // A standalone quota alert has its own badge, without the repeated label.
+  const view = ctx.eventView(built.rows[2].event, built.rows[2].notifyKind);
+  assert.equal(view.badge, "ev_notify_quota");
+  assert.equal(view.detail, "🟡 5h 45%");
+  // An unmatched recovery falls back to the plain badge.
+  assert.equal(ctx.eventView(built.rows[3].event, built.rows[3].notifyKind).badge, "ev_notify");
+});
+
+test("matching needs the same group, the order, the time limit and the windows", () => {
+  const ctx = eventContext();
+  const g = { group: "k", label: "Gemini" };
+  const reset = (at, window) => event("reset", at, { ...g, params: { window, remaining: "100.00" } });
+  const recovery = (at, windows) => event("notify", at, { ...g, params: { title: "✅ Gemini · 7d 已恢复", notify_kind: "recovery", windows } });
+  // Sent before the event, or more than 70 minutes after it, as retries
+  // can be: no match.
+  assert.equal(ctx.eventRows([reset(100, "gemini-weekly"), recovery(99, "gemini-weekly")], true).rows.length, 2);
+  assert.equal(ctx.eventRows([recovery(4301, "gemini-weekly"), reset(100, "gemini-weekly")], true).rows.length, 2);
+  assert.equal(ctx.eventRows([recovery(4300, "gemini-weekly"), reset(100, "gemini-weekly")], true).rows.length, 1);
+  // The window must be one the notification names.
+  let built = ctx.eventRows([recovery(110, "gemini-weekly"), reset(100, "gemini-5h")], true);
+  assert.equal(built.rows.length, 2);
+  // A notification for two windows marks both resets.
+  built = ctx.eventRows([recovery(110, "gemini-5h,gemini-weekly"), reset(100, "gemini-5h"), reset(100, "gemini-weekly")], true);
+  assert.equal(built.rows.length, 2);
+  assert.ok(built.rows.every((r) => r.pushes.length === 1));
+  // Hidden 5-hour resets take their notifications with them.
+  built = ctx.eventRows([recovery(110, "gemini-5h"), reset(100, "gemini-5h"), reset(50, "gemini-weekly")], false);
+  assert.deepEqual(plain(built.rows.map((r) => r.event.params.window)), ["gemini-weekly"]);
+  assert.equal(built.hidden, 1);
+  assert.equal(built.fiveHour, 1);
+  // Older notifications have no group: their label decides.
+  built = ctx.eventRows([
+    event("notify", 20, { label: "Gemini", params: { title: "⚠️ Gemini 额度已恢复，CPA 仍在冷却" } }),
+    event("cooldown_stale", 10, { label: "Gemini", params: { until: "2026-11-17T00:00:00Z" } }),
+  ], false);
+  assert.equal(built.rows.length, 1);
+  assert.equal(built.rows[0].event.kind, "cooldown_stale");
+});
+
+test("older notifications are told by their titles", () => {
+  const ctx = eventContext();
+  const kind = (title, kindName = "notify") => ctx.notifyKind({ kind: kindName, params: { title } });
+  assert.equal(kind("✅ GPT · 7d 已恢复"), "recovery");
+  assert.equal(kind("✅ GPT · 7d recovered"), "recovery");
+  assert.equal(kind("⚠️ Gemini 点火已暂停"), "circuit");
+  assert.equal(kind("⚠️ Gemini ignition paused"), "circuit");
+  assert.equal(kind("🎫 GPT · 套餐 plus → free"), "plan");
+  assert.equal(kind("⚠️ GPT 额度已恢复，CPA 仍在冷却"), "cooldown");
+  assert.equal(kind("⚠️ GPT quota is back, CPA still cooling down"), "cooldown");
+  assert.equal(kind("🟡 GPT · 5h 45%"), "quota");
+  assert.equal(kind("🔴 GPT · 5h 5%"), "quota");
+  assert.equal(kind("⏰ GPT · 5h 重置提醒"), "reminder");
+  // Codex reset signals also start with ✅ but report no reset of an account.
+  assert.equal(kind("✅ Codex 全局重置已完成"), "codex_reset");
+  assert.equal(kind("🕯️ Lamplighter 测试通知"), "");
+  // Failed notifications recorded without params.
+  assert.equal(ctx.notifyKind({ kind: "notify_failed", detail: "✅ GPT · 7d 已恢复：timeout" }), "recovery");
+  assert.equal(ctx.notifyKind({ kind: "notify", params: { title: "x", notify_kind: "suspended" } }), "suspended");
+});
+
+test("resets and exhaustion name the window by its short label", () => {
+  const ctx = eventContext();
+  assert.deepEqual(plain(ctx.eventWindow({ window: "five-hour" })), { kind: "5h", label: "5h" });
+  assert.deepEqual(plain(ctx.eventWindow({ window: "gemini-5h" })), { kind: "5h", label: "5h" });
+  assert.deepEqual(plain(ctx.eventWindow({ window: "seven-day" })), { kind: "7d", label: "7d" });
+  assert.deepEqual(plain(ctx.eventWindow({ window: "3p-weekly" })), { kind: "7d", label: "7d" });
+  assert.deepEqual(plain(ctx.eventWindow({ window: "seven-day-opus" })), { kind: "", label: "seven-day-opus" });
+  assert.deepEqual(plain(ctx.eventWindow({ window: "seven-day-opus", kind: "", label: "Opus 7d" })), { kind: "", label: "Opus 7d" });
+  let view = ctx.eventView(event("reset", 0, { label: "GPT", params: { window: "seven-day", remaining: "100.00", reset: "2026-11-23T00:00:00Z" } }));
+  assert.equal(view.badge, "ev_reset");
+  assert.equal(view.style, "success");
+  assert.equal(view.detail, "ev_window_next(7d|100%|11-23T00:00)");
+  view = ctx.eventView(event("exhausted", 0, { label: "GPT", params: { window: "five-hour", kind: "5h", label: "5h", remaining: "0.00", reset: "2026-11-16T05:00:00Z" } }));
+  assert.equal(view.badge, "ev_exhausted");
+  assert.equal(view.detail, "ev_window_due(5h|0%|11-16T05:00)");
+  view = ctx.eventView(event("reset", 0, { label: "GPT", params: { window: "seven-day", remaining: "100.00" } }));
+  assert.equal(view.detail, "ev_window_left(7d|100%)");
+  // Exhaustion of a 5-hour window always shows.
+  const built = ctx.eventRows([event("exhausted", 0, { params: { window: "five-hour", remaining: "0" } })], false);
+  assert.equal(built.rows.length, 1);
+});
+
+test("error texts shrink to one line and stay masked", () => {
+  const ctx = eventContext();
+  const google = 'host_call_failed: {\n  "error": {\n    "code": 403,\n    "message": "The caller does not have permission for alice@example.com",\n' +
+    '    "status": "PERMISSION_DENIED",\n    "details": [{ "@type": "type.googleapis.com/google.rpc.ErrorInfo", "reason": "TOS_VIOLATION" }]\n  }\n} (HTTP 403)';
+  assert.equal(ctx.errorSummary(google), "host_call_failed: HTTP 403 · TOS_VIOLATION · The caller does not have permission for alice@example.com");
+  assert.equal(ctx.errorSummary('{"error":{"message":"Rate limit reached","type":"rate_limit_error","code":"rate_limit_exceeded"}} (HTTP 429)'),
+    "HTTP 429 · rate_limit_error · Rate limit reached");
+  assert.equal(ctx.errorSummary('刷新失败：{"error":"invalid_grant","error_description":"Token has been expired"}'), "刷新失败：invalid_grant · Token has been expired");
+  assert.equal(ctx.errorSummary("dial tcp: timeout\nmore lines"), "dial tcp: timeout");
+  assert.equal(ctx.errorSummary("{not json\nsecond"), "{not json");
+  const long = ctx.errorSummary("x".repeat(400));
+  assert.equal(Array.from(long).length, 160);
+  assert.ok(long.endsWith("…"));
+
+  const ev = event("ignite_failed", 0, { group: "g", label: "alice", params: { retry_seconds: "300", error: google } });
+  const view = ctx.eventView(ev);
+  assert.ok(!view.detail.includes("\n"));
+  assert.ok(view.detail.includes("TOS_VIOLATION"));
+  assert.ok(view.tip.includes('"code": 403'));
+  // The summary from the backend wins over the page's own.
+  assert.ok(ctx.eventView({ ...ev, params: { ...ev.params, summary: "账号被封禁" } }).detail.includes("账号被封禁"));
+  // Masked, neither the label nor the error leaves a plain text node.
+  const nodes = ctx.eventMasked(ev, view);
+  const plainText = (list) => list.filter((n) => n.class !== "account-sensitive").map((n) => n.text || "").join("");
+  assert.equal(plainText(nodes.label), "");
+  assert.ok(!plainText(nodes.detail).includes("alice"), plainText(nodes.detail));
+  assert.ok(!plainText(nodes.detail).includes("TOS_VIOLATION"));
+  // The tooltips of notification marks are left out while masked.
+  ctx.masked = true;
+  const marks = ctx.pushMarks([event("notify_failed", 0, { params: { title: "⚠️ alice 点火已暂停", error: "x" } })]);
+  assert.equal(marks[0].title, null);
+});
+
+test("credential events show the reason, a summary and an appeal link", () => {
+  const ctx = eventContext();
+  const invalid = (params) => ctx.eventView(event("credential_invalid", 0, { level: "error", label: "Gemini", params }));
+  let view = invalid({ reason: "suspended", status: "403", code: "TOS_VIOLATION", summary: "账号因违反服务条款被停用", appeal_url: "https://support.example.com/appeal", source: "ignite" });
+  assert.equal(view.badge, "ev_credential_suspended");
+  assert.equal(view.style, "failure");
+  // Found by ignition: the row says ignition is paused.
+  assert.equal(view.detail, "ev_ignite_paused_note(账号因违反服务条款被停用)");
+  assert.equal(view.link, "https://support.example.com/appeal");
+  // The tooltip shows the status, code and summary, and the appeal address.
+  assert.equal(view.tip, "HTTP 403 · TOS_VIOLATION · 账号因违反服务条款被停用\nhttps://support.example.com/appeal");
+  assert.ok(view.secrets.includes("账号因违反服务条款被停用"));
+  view = invalid({ reason: "auth", summary: "", status: "401", appeal_url: "javascript:alert(1)" });
+  assert.equal(view.badge, "ev_credential_invalid");
+  assert.equal(view.detail, "HTTP 401");
+  assert.equal(view.link, "");
+  view = invalid({ reason: "rate_limited", summary: "请求过多", until: "2026-11-16T08:00:00Z" });
+  assert.equal(view.badge, "ev_credential_rate_limited");
+  assert.equal(view.detail, "ev_limited_until(请求过多|11-16T08:00)");
+  view = ctx.eventView(event("credential_restored", 0, { label: "Gemini", params: { source: "query" } }));
+  assert.equal(view.badge, "ev_credential_restored");
+  assert.equal(view.style, "success");
+  assert.equal(view.detail, "ev_source_query");
+  // A credential notification joins its event.
+  const built = ctx.eventRows([
+    event("notify", 5, { group: "k", label: "Gemini", params: { title: "⚠️ Gemini", notify_kind: "suspended" } }),
+    event("credential_invalid", 0, { group: "k", label: "Gemini", params: { reason: "suspended" } }),
+    event("notify", 5, { group: "j", label: "Claude", params: { title: "✅ Claude", notify_kind: "credential_ok" } }),
+    event("credential_restored", 0, { group: "j", label: "Claude", params: { source: "query" } }),
+  ], false);
+  assert.deepEqual(plain(built.rows.map((r) => [r.event.kind, r.pushes.length])), [["credential_invalid", 1], ["credential_restored", 1]]);
+});
+
+// ---- Even pace extended back to the cycle start ----
+
+function extension() {
+  return context(["paceSegments", "paceAt", "pooledPace", "paceExtensions", "extendedPace"], { RESET_DRIFT: 60, RESET_JUMP: 5 });
+}
+
+// Synthetic samples shaped like a 7-day window whose quota came back to
+// 100% at rise and whose scheduled reset moved back to an earlier time at
+// move: [time, remaining].
+function movedReset() {
+  const rise = 6000 * DAY, x1 = rise + WEEK + 4 * 60 + 14, x2 = rise + 6 * DAY - 52 * 60, move = rise + 16.5 * HOUR;
+  const points = [[rise - 2 * HOUR, 22], [rise - HOUR, 21], [rise, 100], [rise + 6 * HOUR, 91], [move - 2 * HOUR, 65], [move, 21], [move + HOUR, 20]];
+  // The history records a change of the reset only beyond 60 s; the
+  // reset wavered between x1 and x1 + 1 meanwhile.
+  const resets = [[rise - 3 * DAY, x2], [rise, rise + WEEK], [rise + 4 * 60, x1], [move, x2]];
+  return { rise, x1, x2, move, points, resets };
+}
+
+test("a reset that moves within its cycle extends the new line back to the cycle start", () => {
+  const ctx = extension();
+  const d = movedReset();
+  const segs = ctx.paceSegments(d.resets, WEEK, d.x2, d.move + 2 * HOUR);
+  const ext = ctx.paceExtensions(segs, d.points, WEEK);
+  assert.deepEqual(plain(ext), [[d.rise, d.move, d.x2]]);
+  // The old line stays: just before the move it follows the reset x1.
+  assert.ok(Math.abs(ctx.paceAt(segs, WEEK, d.move - 1) - 100 * (d.x1 - d.move + 1) / WEEK) < 1e-6);
+  // The extension runs the line of x2 back to the rise.
+  const part = { weight: 1, segments: segs, extensions: ext };
+  assert.ok(Math.abs(ctx.extendedPace([part], WEEK, d.rise) - 100 * (d.x2 - d.rise) / WEEK) < 1e-9);
+  assert.ok(Math.abs(ctx.extendedPace([part], WEEK, d.move) - ctx.paceAt(segs, WEEK, d.move)) < 1e-9);
+  // Outside the extension there is none.
+  assert.equal(ctx.extendedPace([part], WEEK, d.rise - 1), null);
+  assert.equal(ctx.extendedPace([part], WEEK, d.move + 1), null);
+});
+
+test("resets that waver by a second extend nothing", () => {
+  const ctx = extension();
+  const d = movedReset();
+  // The same cycle recorded with every one-second change, as a backend
+  // without the 60 s tolerance would: x1, x1 + 1, x1, x1 + 1.
+  const resets = [[d.rise, d.rise + WEEK], [d.rise + 4 * 60, d.x1], [d.rise + 6 * HOUR, d.x1 + 1], [d.rise + 8 * HOUR, d.x1], [d.rise + 9 * HOUR, d.x1 + 1]];
+  const segs = ctx.paceSegments(resets, WEEK, d.x1, d.rise + 10 * HOUR);
+  assert.deepEqual(plain(ctx.paceExtensions(segs, d.points, WEEK)), []);
+  // The status reset that wavers adds no segment either.
+  assert.equal(ctx.paceSegments(resets, WEEK, d.x1 + 1, d.rise + 10 * HOUR).length, segs.length);
+  // A line that starts with its cycle, or an early reset, extends nothing.
+  const early = d.rise + 2 * DAY;
+  assert.deepEqual(plain(ctx.paceExtensions(ctx.paceSegments([[d.rise, d.x1], [early, early + WEEK]], WEEK, null, early + HOUR),
+    [[d.rise, 100], [early - HOUR, 40], [early, 100]], WEEK)), []);
+  // Without a rise in the samples, the start of the cycle is not known.
+  assert.deepEqual(plain(ctx.paceExtensions(ctx.paceSegments([[d.move, d.x2]], WEEK, null, d.move + HOUR), [[d.move, 21]], WEEK)), []);
+});
+
+test("a total extends where an account does, with the other accounts' lines", () => {
+  const ctx = extension();
+  const d = movedReset();
+  const segsA = ctx.paceSegments(d.resets, WEEK, d.x2, d.move + HOUR);
+  const a = { weight: 1, segments: segsA, extensions: ctx.paceExtensions(segsA, d.points, WEEK) };
+  const xb = d.rise + 3 * DAY;
+  const segsB = ctx.paceSegments([[xb - WEEK, xb]], WEEK, xb, d.move + HOUR);
+  const b = { weight: 3, segments: segsB, extensions: ctx.paceExtensions(segsB, [], WEEK) };
+  const t = d.rise + HOUR;
+  const want = (100 * (d.x2 - t) / WEEK + 3 * 100 * (xb - t) / WEEK) / 4;
+  assert.ok(Math.abs(ctx.extendedPace([a, b], WEEK, t) - want) < 1e-9);
+  assert.equal(ctx.extendedPace([b], WEEK, t), null);
+});
+
+test("the detail heading moves left of the plot only where it fits", () => {
+  const ctx = context(["placeDetailHead"], { SIDE_GAP: 46 });
+  const wrap = () => {
+    const classes = new Set(), style = {};
+    return { classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c) }, style: { setProperty: (k, v) => { style[k] = v; } }, classes, css: style };
+  };
+  const box = { clientWidth: 1000, offsetHeight: 206 };
+  let w = wrap();
+  ctx.placeDetailHead(w, { offsetHeight: 180 }, box, { labelW: 190, width: 1000 });
+  assert.ok(w.classes.has("side"));
+  assert.equal(w.css["--detail-side"], "144px");
+  // Too narrow: the blank of a chart below 640 pixels.
+  w = wrap();
+  ctx.placeDetailHead(w, { offsetHeight: 100 }, { clientWidth: 600, offsetHeight: 206 }, { labelW: 120, width: 600 });
+  assert.ok(!w.classes.has("side"));
+  // Too tall, such as a long name over several lines.
+  w = wrap();
+  ctx.placeDetailHead(w, { offsetHeight: 240 }, box, { labelW: 190, width: 1000 });
+  assert.ok(!w.classes.has("side"));
+});
+
+test("manual ignition failures show no retry, and credential pauses no end time", () => {
+  const ctx = eventContext();
+  const json = '{"error":{"code":401,"message":"token expired","status":"UNAUTHENTICATED"}}';
+  let view = ctx.eventView(event("ignite_failed", 0, { label: "GPT", params: { manual: "1", error: json, summary: "凭证已失效" } }));
+  assert.equal(view.detail, "凭证已失效");
+  assert.equal(view.tip, json);
+  view = ctx.eventView(event("ignite_failed", 0, { label: "GPT", params: { manual: "1", error: json } }));
+  assert.equal(view.detail, "HTTP 401 · UNAUTHENTICATED · token expired");
+  assert.ok(view.secrets.includes(json));
+  // Automatic failures keep the retry; older manual failures without params
+  // keep their stored text.
+  assert.match(ctx.eventView(event("ignite_failed", 0, { label: "GPT", params: { retry_seconds: "300", error: "x" } })).detail, /^ev_retry\(/);
+  assert.equal(ctx.eventView(event("ignite_failed", 0, { label: "GPT", detail: "点火失败：x" })).detail, "点火失败：x");
+
+  const paused = (params) => ctx.eventView(event("ignite_paused", 0, { level: "error", label: "Gemini", params }));
+  assert.equal(paused({ reason: "auth", error: json, summary: "凭证已失效" }).detail, "ev_paused_auth(凭证已失效)");
+  view = paused({ reason: "suspended", error: json });
+  assert.equal(view.detail, "ev_paused_suspended(HTTP 401 · UNAUTHENTICATED · token expired)");
+  assert.equal(view.tip, "ev_paused_suspended(" + json + ")");
+  assert.equal(paused({ reason: "rate_limited", until: "2026-11-17T00:00:00Z", error: "x", summary: "请求过多" }).detail, "ev_paused(11-17T00:00|请求过多)");
+  assert.equal(paused({ until: "2026-11-17T00:00:00Z", error: "boom" }).detail, "ev_paused(11-17T00:00|boom)");
+  // Without an end time or a known reason, no "until —".
+  assert.equal(paused({ error: "boom" }).detail, "boom");
+});
+
+test("a credential problem shares its row with the ignition pause and the notifications", () => {
+  const ctx = eventContext();
+  const g = { group: "claude:k", label: "Claude" };
+  const until = "2026-11-16T23:00:00Z";
+  const events = [
+    event("notify", 1800, { ...g, params: { title: "⏳ Claude 被限流", notify_kind: "rate_limited" } }),
+    event("notify_failed", 30, { ...g, level: "warn", params: { title: "⚠️ Claude 点火已暂停", notify_kind: "circuit", error: "Bark: 500" } }),
+    event("credential_invalid", 0, { ...g, level: "error", params: { reason: "rate_limited", status: "429", summary: "请求过多", until, source: "ignite" } }),
+    event("ignite_paused", 0, { ...g, level: "error", params: { until, error: '{"error":{"code":429,"message":"Number of requests has exceeded your rate limit"}}', summary: "请求过多" } }),
+    // Another group's pause stays its own row.
+    event("ignite_paused", 10, { group: "gemini:k", label: "Gemini", level: "error", params: { until, error: "x" } }),
+  ];
+  const built = ctx.eventRows(events, false);
+  assert.deepEqual(plain(built.rows.map((r) => r.event.kind + ":" + r.event.label)), ["credential_invalid:Claude", "ignite_paused:Gemini"]);
+  const row = built.rows[0];
+  assert.equal(row.paused.kind, "ignite_paused");
+  // The rate limit notification half an hour later and the circuit
+  // notification of the pause both join it.
+  assert.deepEqual(plain(row.pushes.map((ev) => ev.params.notify_kind).sort()), ["circuit", "rate_limited"]);
+  const view = ctx.eventView(row.event, row.notifyKind, row.paused);
+  assert.equal(view.badge, "ev_credential_rate_limited");
+  assert.equal(view.detail, "ev_ignite_paused_until(请求过多|11-16T23:00)");
+  // The tooltip adds the full error of the pause on a line of its own.
+  assert.equal(view.tip, 'HTTP 429 · 请求过多\n{"error":{"code":429,"message":"Number of requests has exceeded your rate limit"}}');
+  // A pause more than PAUSE_PAIR seconds away is a row of its own.
+  assert.equal(ctx.eventRows([events[2], { ...events[3], time: new Date((T0 - 61) * 1000).toISOString() }], false).rows.length, 2);
+  // Found by a query, without a pause: the rate limit alone.
+  assert.equal(ctx.eventView(event("credential_invalid", 0, { ...g, params: { reason: "rate_limited", summary: "请求过多", until, source: "query" } })).detail,
+    "ev_limited_until(请求过多|11-16T23:00)");
+  // An account suspended at ignition: one row too.
+  const suspended = ctx.eventRows([
+    event("credential_invalid", 0, { ...g, params: { reason: "suspended", summary: "停用", source: "ignite" } }),
+    event("ignite_paused", 0, { ...g, params: { reason: "suspended", error: "x", summary: "停用" } }),
+  ], false);
+  assert.equal(suspended.rows.length, 1);
+  const merged = ctx.eventView(suspended.rows[0].event, undefined, suspended.rows[0].paused);
+  assert.equal(merged.detail, "ev_ignite_paused_note(停用)");
+  // With an appeal address, the pause's error follows it; a pause without
+  // an error adds nothing.
+  const appeal = { reason: "suspended", status: "403", summary: "停用", appeal_url: "https://appeal.example.com/", source: "ignite" };
+  const withPause = (error) => ctx.eventView(event("credential_invalid", 0, { ...g, params: appeal }), undefined,
+    event("ignite_paused", 0, { ...g, params: error ? { reason: "suspended", error, summary: "停用" } : { reason: "suspended", summary: "停用" } }));
+  assert.equal(withPause("raw").tip, "HTTP 403 · 停用\nhttps://appeal.example.com/\nraw");
+  assert.equal(withPause("").tip, "HTTP 403 · 停用\nhttps://appeal.example.com/");
+});
+
+test("Did Codex Reset notifications join the event recorded after them", () => {
+  const ctx = eventContext();
+  const signal = (at) => event("codex_reset", at, { label: "Did Codex Reset", params: { count: "1" } });
+  const push = (at, fields = {}) => event("notify", at, { params: { title: "✅ Codex 全局重置已完成", notify_kind: "codex_reset" }, ...fields });
+  let built = ctx.eventRows([signal(10), push(5), push(0, { params: { title: "📅 Codex 全局重置已排期" } })], false);
+  assert.equal(built.rows.length, 1);
+  assert.equal(built.rows[0].event.kind, "codex_reset");
+  assert.equal(built.rows[0].pushes.length, 2);
+  // More than five minutes apart: the notification stays a row, under the
+  // label of Did Codex Reset.
+  built = ctx.eventRows([signal(400), push(0)], false);
+  assert.equal(built.rows.length, 2);
+  const view = ctx.eventView(built.rows[1].event, built.rows[1].notifyKind);
+  assert.equal(view.label, "Did Codex Reset");
+  assert.equal(view.detail, "✅ Codex 全局重置已完成");
+});
+
+test("older failure events without params hide their whole detail when masked", () => {
+  const ctx = eventContext();
+  const plainText = (list) => list.filter((n) => n.class !== "account-sensitive").map((n) => n.text || "").join("");
+  // A manual ignition failure from before params, naming an account that
+  // has since been removed: no name list can catch it.
+  const old = [
+    event("ignite_failed", 0, { group: "claude:k", label: "Claude", level: "warn", detail: "手动点火失败：permission denied for gone@example.com" }),
+    event("ignite_paused", 0, { group: "claude:k", label: "Claude", level: "error", detail: "暂停到 11/17：gone@example.com" }),
+    event("notify_failed", 0, { group: "claude:k", label: "Claude", level: "warn", detail: "Bark：gone@example.com" }),
+    event("error", 0, { level: "error", label: "Claude", detail: "额度查询失败：gone@example.com" }),
+  ];
+  for (const ev of old) {
+    const view = ctx.eventView(ev);
+    assert.ok(view.whole, ev.kind);
+    const nodes = ctx.eventMasked(ev, view);
+    assert.equal(plainText(nodes.detail), "", ev.kind);
+    assert.ok(nodes.detail.some((n) => n.text.includes("gone@example.com")), ev.kind);
+  }
+  // An older success keeps its detail, with only the names hidden.
+  const ok = event("ignite", 0, { group: "claude:k", label: "Claude", detail: "claude-haiku · 下次重置 11/17" });
+  assert.equal(ctx.eventView(ok).whole, false);
+  assert.equal(plainText(ctx.eventMasked(ok).detail), "claude-haiku · 下次重置 11/17");
+  // An older success without a stored label hides whole too, even when its
+  // group gives a label now: the account may have been renamed since.
+  const ctx2 = eventContext({ status: { accounts: [{ groups: [{ key: "claude:k", label: "Claude Now" }] }] } });
+  const unlabeled = event("ignite", 0, { group: "claude:k", message: "Claude Old 点火成功（claude-haiku），下次重置 11/17" });
+  const view = ctx2.eventView(unlabeled);
+  assert.equal(view.label, "Claude Now");
+  assert.ok(view.whole);
+  const nodes = ctx2.eventMasked(unlabeled, view);
+  assert.equal(plainText(nodes.detail), "");
+  assert.ok(nodes.detail.some((n) => n.text.includes("Claude Old")));
+  // Events with params keep the masking by names and error texts.
+  assert.equal(ctx.eventView(event("ignite_failed", 0, { label: "Claude", params: { manual: "1", error: "x", summary: "y" } })).whole, false);
+});

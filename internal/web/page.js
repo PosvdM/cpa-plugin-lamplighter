@@ -107,6 +107,8 @@
       legend_failed: "✕ 含点火失败",
       legend_reset: "↻ 重置",
       pace_reference: "匀速参考",
+      pace_extended: "匀速参考（往回延长）",
+      legend_pace_extended: "匀速参考往回延长到本周期起点（周期中途预定重置变了）",
       legend_pooled: "多账号的服务显示合计额度，点击行查看详情，再点一次展开各账号",
       data_table: "数据表",
       col_quota: "额度", col_account: "账号", col_latest: "最新", col_min: "最低", col_max: "最高", col_samples: "样本", col_to_reset: "距重置",
@@ -193,10 +195,16 @@
       ev_retry: "{0}后重试：{1}", ev_retry_cooldown: "CPA 冷却结束，{0}后重试：{1}",
       ev_seconds: "{0} 秒", ev_minutes: "{0} 分钟",
       ev_paused: "暂停到 {0}：{1}",
+      ev_paused_auth: "暂停，等待更新凭证：{0}", ev_paused_suspended: "暂停，账号已停用：{0}",
       ev_refused: "{0} 被上游拒绝，改用 {1}，{2} 小时内不再尝试",
       ev_notify_failed_detail: "{0}：{1}",
       ev_cooldown: "额度已恢复，CPA 仍冷却到 {0}",
       ev_codex_sent: "已发送 {0} 条通知",
+      ev_reset: "额度重置", ev_exhausted: "额度耗尽", ev_credential_invalid: "凭证失效", ev_credential_suspended: "账号停用",
+      ev_credential_rate_limited: "被限流", ev_credential_restored: "凭证恢复", ev_notify_quota: "额度提醒", ev_notify_reminder: "重置提醒",
+      ev_window_left: "{0} · 剩余 {1}", ev_window_next: "{0} · 剩余 {1} · 下次重置 {2}", ev_window_due: "{0} · 剩余 {1} · {2} 重置",
+      ev_limited_until: "{0} · 限流到 {1}", ev_ignite_paused_note: "{0} · 点火已暂停", ev_ignite_paused_until: "{0} · 点火暂停到 {1}", ev_appeal: "申诉", ev_source_ignite: "点火时确认", ev_source_query: "额度查询时确认",
+      ev_show_5h: "显示 5 小时重置", ev_show_5h_count: "显示 5 小时重置（{0}）",
       no_events: "暂无事件", collapse: "收起", show_more: "显示更多（共 {0} 条）",
       failed: "失败：{0}",
       range_h: "{0} 小时", range_d: "{0} 天", range_mo: "{0} 个月",
@@ -267,6 +275,8 @@
       legend_failed: "✕ an ignition failed",
       legend_reset: "↻ reset",
       pace_reference: "Even pace",
+      pace_extended: "Even pace (extended back)",
+      legend_pace_extended: "Even pace extended back to the cycle start (the reset moved within the cycle)",
       legend_pooled: "Services with several accounts show their total; click a row for details, click again to list the accounts",
       data_table: "Data table",
       col_quota: "Quota", col_account: "Account", col_latest: "Latest", col_min: "Lowest", col_max: "Highest", col_samples: "Samples", col_to_reset: "Until reset",
@@ -353,10 +363,16 @@
       ev_retry: "Retrying in {0}: {1}", ev_retry_cooldown: "Retrying when the CPA cooldown ends, in {0}: {1}",
       ev_seconds: "{0} s", ev_minutes: "{0} min",
       ev_paused: "Paused until {0}: {1}",
+      ev_paused_auth: "Paused until the credential is updated: {0}", ev_paused_suspended: "Paused, account suspended: {0}",
       ev_refused: "{0} was refused upstream; used {1}, not tried again for {2} hours",
       ev_notify_failed_detail: "{0}: {1}",
       ev_cooldown: "Quota is back, but CPA cools down until {0}",
       ev_codex_sent: "Sent {0} notifications",
+      ev_reset: "Quota reset", ev_exhausted: "Quota exhausted", ev_credential_invalid: "Credential invalid", ev_credential_suspended: "Account suspended",
+      ev_credential_rate_limited: "Rate limited", ev_credential_restored: "Credential restored", ev_notify_quota: "Quota alert", ev_notify_reminder: "Reset reminder",
+      ev_window_left: "{0} · {1} left", ev_window_next: "{0} · {1} left · next reset {2}", ev_window_due: "{0} · {1} left · resets {2}",
+      ev_limited_until: "{0} · limited until {1}", ev_ignite_paused_note: "{0} · ignition paused", ev_ignite_paused_until: "{0} · ignition paused until {1}", ev_appeal: "Appeal", ev_source_ignite: "Confirmed by ignition", ev_source_query: "Confirmed by a quota query",
+      ev_show_5h: "Show 5-hour resets", ev_show_5h_count: "Show 5-hour resets ({0})",
       no_events: "No events yet", collapse: "Show less", show_more: "Show more ({0} in total)",
       failed: "Failed: {0}",
       range_h: "{0}h", range_d: "{0}d", range_mo: "{0} month",
@@ -1311,17 +1327,47 @@
     });
   }
 
+  // ---- Events ----
+
   // Badge style per event type; the label is ev_<kind> in the dictionary.
   var EVENT_TYPES = {
     ignite: "success", ignite_manual: "success", ignite_failed: "warning", ignite_paused: "failure", model_refused: "warning",
-    cooldown_stale: "warning", plan_change: "warning", notify: "muted", notify_failed: "warning", codex_reset: "muted", error: "failure"
+    cooldown_stale: "warning", plan_change: "warning", notify: "muted", notify_failed: "warning", codex_reset: "muted", error: "failure",
+    reset: "success", exhausted: "warning", credential_invalid: "failure", credential_restored: "success"
   };
-  var EVENTS_COLLAPSED = 12;
+  var EVENTS_COLLAPSED = 12, EVENTS_MAX = 100;
   var eventsExpanded = false;
+  // Resets of 5-hour windows, one per service every five hours, show only
+  // when chosen; the choice is kept in this browser.
+  var EVENTS_STORE = "lamplighter-events-5h";
+  var showFiveHourResets = false;
+  try { showFiveHourResets = localStorage.getItem(EVENTS_STORE) === "1"; } catch (err) {}
+
+  // The events a notification reports, by its notify_kind. A notification
+  // sent within NOTIFY_LAG of such an event of the same quota group shows
+  // as a mark on that event's row instead of a row of its own.
+  var NOTIFY_TRIGGERS = {
+    recovery: ["reset"], circuit: ["ignite_paused"], cooldown: ["cooldown_stale"], plan: ["plan_change"],
+    credential: ["credential_invalid"], suspended: ["credential_invalid"], rate_limited: ["credential_invalid"],
+    credential_ok: ["credential_restored"], codex_reset: ["codex_reset"]
+  };
+  // How long, in seconds, a notification may follow its event, as [from,
+  // to]. Notifications that failed are retried with later polls for up to
+  // an hour, so most kinds allow 70 minutes. Did Codex Reset records its
+  // event after sending, so its notifications come a little before it.
+  var NOTIFY_LAG = {
+    recovery: [0, 4200], circuit: [0, 4200], cooldown: [0, 4200], plan: [0, 4200], credential: [0, 4200],
+    suspended: [0, 4200], rate_limited: [0, 4200], credential_ok: [0, 4200], codex_reset: [-300, 300]
+  };
+  // An ignition pause this many seconds from a credential problem of the
+  // same quota group is part of it and shares its row.
+  var PAUSE_PAIR = 60;
+  // Error texts longer than this are cut in the list; the tooltip keeps all.
+  var ERROR_CHARS = 160;
 
   function groupLabel(key) {
     var label = "";
-    (status.accounts || []).forEach(function (a) {
+    ((status && status.accounts) || []).forEach(function (a) {
       (a.groups || []).forEach(function (g) { if (g.key === key) label = g.label; });
     });
     return label;
@@ -1331,78 +1377,340 @@
     return seconds < 60 ? translate("ev_seconds", seconds) : translate("ev_minutes", Math.round(seconds / 60));
   }
 
-  // The event text in the page language, built from the event params.
-  // Events written before params existed keep their stored Chinese text.
-  function eventDetail(ev) {
-    var p = ev.params;
-    if (!p) return null;
-    var time = function (value) { return fmtDateTime(parseTime(value)); };
-    switch (ev.kind) {
-      case "ignite": case "ignite_manual": return p.reset ? translate("ev_ignited", p.model, time(p.reset)) : p.model;
-      case "ignite_failed": return translate(p.cooldown ? "ev_retry_cooldown" : "ev_retry", retryText(Number(p.retry_seconds) || 0), p.error);
-      case "ignite_paused": return translate("ev_paused", time(p.until), p.error);
-      case "model_refused": return translate("ev_refused", p.model, p.fallback, p.hours);
-      case "notify": return p.title;
-      case "notify_failed": return translate("ev_notify_failed_detail", p.title, p.error);
-      case "cooldown_stale": return translate("ev_cooldown", time(p.until));
-      case "plan_change": return p.from + " → " + p.to;
-      case "codex_reset": return translate("ev_codex_sent", p.count);
-    }
-    return null;
+  function cutText(text, max) {
+    var chars = Array.from(text);
+    return chars.length > max ? chars.slice(0, max - 1).join("").replace(/\s+$/, "") + "…" : text;
   }
 
-  // Events written before label and detail existed only have a message that
-  // starts with the group label.
+  // One line for an error text, which can hold a JSON body from the
+  // provider over many lines: the text before the body, then the status
+  // code, reason and message from it. Without a JSON body, the first line.
+  function errorSummary(text) {
+    text = String(text == null ? "" : text).trim();
+    var start = text.indexOf("{"), end = text.lastIndexOf("}"), body = null;
+    if (start >= 0 && end > start) {
+      try { body = JSON.parse(text.slice(start, end + 1)); } catch (err) { body = null; }
+    }
+    if (!body || typeof body !== "object") {
+      var first = text.split(/\r?\n/).filter(function (line) { return line.trim(); })[0] || "";
+      return cutText(first.trim(), ERROR_CHARS);
+    }
+    var e = body.error && typeof body.error === "object" ? body.error : body;
+    var code = null, reason = "", message = "";
+    [e.code, e.status, body.status, body.code].forEach(function (v) {
+      if (code == null && (typeof v === "number" || /^\d{3}$/.test(String(v)))) code = String(v);
+    });
+    var http = text.slice(end + 1).match(/HTTP (\d{3})/) || text.slice(0, start).match(/HTTP (\d{3})/);
+    if (code == null && http) code = http[1];
+    (Array.isArray(e.details) ? e.details : []).forEach(function (d) {
+      if (!reason && d && typeof d.reason === "string") reason = d.reason;
+    });
+    [e.status, e.type, e.code, typeof body.error === "string" ? body.error : null].forEach(function (v) {
+      if (!reason && typeof v === "string" && v && !/^\d+$/.test(v)) reason = v;
+    });
+    [e.message, body.message, body.error_description, e.error_description].forEach(function (v) {
+      if (!message && typeof v === "string" && v.trim()) message = v.trim().split(/\r?\n/)[0];
+    });
+    var parts = [code != null ? "HTTP " + code : "", reason, message].filter(function (s) { return s; });
+    var prefix = text.slice(0, start).trim();
+    var line = parts.join(" · ");
+    if (prefix) line = prefix + (/[：:]$/.test(prefix) ? (/：$/.test(prefix) ? "" : " ") : " ") + line;
+    return cutText(line || text.split(/\r?\n/)[0].trim(), ERROR_CHARS);
+  }
+
+  // What a notification reports. Notifications recorded before notify_kind
+  // existed are told by their title, in either language; see
+  // internal/notify/text.go.
+  function notifyKind(ev) {
+    var p = ev.params || {};
+    if (p.notify_kind) return p.notify_kind;
+    var title = String(p.title || ev.detail || ev.message || "").replace(/^推送失败 /, "");
+    var starts = function (prefix) { return title.indexOf(prefix) === 0; };
+    if (/^(📅|✅) Codex /.test(title)) return "codex_reset";
+    if (starts("✅")) return "recovery";
+    if (title.indexOf("点火已暂停") >= 0 || title.indexOf("ignition paused") >= 0) return "circuit";
+    if (starts("🎫")) return "plan";
+    if (title.indexOf("CPA 仍在冷却") >= 0 || title.indexOf("CPA still cooling down") >= 0) return "cooldown";
+    if (starts("🟡") || starts("🔴")) return "quota";
+    if (starts("⏰")) return "reminder";
+    return "";
+  }
+
+  // The kind ("5h", "7d" or "") and short label of the window of a reset or
+  // exhausted event. Events recorded without them have only the window ID.
+  function eventWindow(p) {
+    var id = String(p.window || "");
+    if (p.label) return { kind: p.kind || "", label: p.label };
+    var kind = id === "five-hour" || /-5h$/.test(id) ? "5h" : id === "seven-day" || id.indexOf("weekly") >= 0 ? "7d" : "";
+    return { kind: kind, label: kind || id };
+  }
+
+  // Whether two events concern the same quota group. Notifications and some
+  // events were recorded without the group and only have its label.
+  function sameSubject(a, b) {
+    if (a.group && b.group) return a.group === b.group;
+    return !!a.label && a.label === b.label;
+  }
+
+  function eventSeconds(ev) { var t = parseTime(ev.time); return t ? t.getTime() / 1000 : 0; }
+
+  // The rows of the event list, newest first like events: a notification
+  // that reports an event joins that event's row (pushes); one that reports
+  // none, such as a quota alert, stays a row of its own. A recovery joins
+  // the reset of each window it names, or without window names the latest
+  // reset and those of the same poll. Other notifications join their latest
+  // event. Resets of 5-hour windows are left out unless chosen, together
+  // with their notifications; hidden counts them.
+  function eventRows(events, showFiveHour) {
+    var rows = events.map(function (ev) { return { event: ev, t: eventSeconds(ev), pushes: [] }; });
+    // A credential problem found by ignition also pauses it: the pause
+    // joins the problem's row (paused), and so do its notifications.
+    rows.forEach(function (row) {
+      if (row.event.kind !== "ignite_paused") return;
+      var host = rows.filter(function (other) {
+        return other.event.kind === "credential_invalid" && !other.paused && Math.abs(other.t - row.t) <= PAUSE_PAIR && sameSubject(row.event, other.event);
+      }).sort(function (a, b) { return Math.abs(a.t - row.t) - Math.abs(b.t - row.t); })[0];
+      if (!host) return;
+      host.paused = row.event;
+      row.host = host;
+    });
+    rows.forEach(function (row) {
+      var ev = row.event;
+      if (ev.kind !== "notify" && ev.kind !== "notify_failed") return;
+      row.notifyKind = notifyKind(ev);
+      var triggers = NOTIFY_TRIGGERS[row.notifyKind];
+      if (!triggers) return;
+      var p = ev.params || {};
+      var windows = row.notifyKind === "recovery" && p.windows ? p.windows.split(",").map(function (w) { return w.trim(); }) : null;
+      var lag = NOTIFY_LAG[row.notifyKind];
+      // Did Codex Reset concerns no account: its events and notifications
+      // have no quota group.
+      var global = row.notifyKind === "codex_reset";
+      var hits = rows.filter(function (other) {
+        var o = other.event, dt = row.t - other.t;
+        if (triggers.indexOf(o.kind) < 0 || dt < lag[0] || dt > lag[1]) return false;
+        if (global ? ev.group || o.group : !sameSubject(ev, o)) return false;
+        return !windows || windows.indexOf((o.params || {}).window) >= 0;
+      }).sort(function (a, b) { return Math.abs(row.t - a.t) - Math.abs(row.t - b.t); })
+        .map(function (h) { return h.host || h; });
+      if (!hits.length) return;
+      var chosen;
+      if (windows) {
+        var seen = {};
+        chosen = hits.filter(function (h) {
+          var w = (h.event.params || {}).window;
+          if (seen[w]) return false;
+          seen[w] = true;
+          return true;
+        });
+      } else if (row.notifyKind === "recovery") {
+        chosen = hits.filter(function (h) { return Math.abs(hits[0].t - h.t) <= 60; });
+      } else chosen = [hits[0]];
+      chosen.forEach(function (h) { h.pushes.push(ev); });
+      row.merged = true;
+    });
+    var hidden = 0, fiveHour = 0;
+    var out = rows.filter(function (row) {
+      if (row.merged || row.host) return false;
+      var ev = row.event;
+      if (ev.kind === "reset" && eventWindow(ev.params || {}).kind === "5h") {
+        fiveHour++;
+        if (!showFiveHour) { hidden++; return false; }
+      }
+      return true;
+    });
+    return { rows: out, hidden: hidden, fiveHour: fiveHour };
+  }
+
+  // A notification title without the label the label column shows, such as
+  // "🟡 GPT · 5h 45%" under the label GPT.
+  function notifyTitle(title, label) {
+    title = String(title || "");
+    var at = label ? title.indexOf(label + " · ") : -1;
+    return at >= 0 && at <= 3 ? title.slice(0, at) + title.slice(at + label.length + 3) : title;
+  }
+
+  // How an event shows in the list, in the page language: the badge style
+  // and text, the label, a one-line detail, the full text for the tooltip
+  // (tip), an appeal link, and the texts of the detail that are sensitive
+  // as a whole (secrets): error texts from the provider, which may name an
+  // account. whole marks a detail that is sensitive as a whole: the detail
+  // of an error event, and of an older event without a label, whose message
+  // may name an account that no longer exists. Events written before params
+  // existed keep their stored Chinese text.
+  function eventView(ev, notifyKindOf, paused) {
+    var p = ev.params || {};
+    var known = EVENT_TYPES[ev.kind];
+    var view = {
+      style: known || (ev.level === "error" ? "failure" : ev.level === "warn" ? "warning" : "muted"),
+      badge: known ? translate("ev_" + ev.kind) : ev.kind,
+      label: ev.label || (ev.group ? groupLabel(ev.group) : ""),
+      detail: "", tip: "", secrets: [], whole: false, link: ""
+    };
+    // Masked, these details hide whole: errors, and older events without
+    // params that stored no label or whose text is a failure or warning,
+    // as their text may name accounts since removed or renamed. The label
+    // looked up from the current quota group does not count: it may differ
+    // from the name in the text.
+    view.whole = ev.kind === "error" || (!ev.params && (!ev.label || view.style === "failure" || view.style === "warning"));
+    var time = function (value) { return fmtDateTime(parseTime(value)); };
+    var error = function (summary, full) {
+      var line = summary || errorSummary(full);
+      view.secrets.push(line, String(full || ""));
+      return line;
+    };
+    if (!ev.params) {
+      var detail = ev.detail || ev.message || "";
+      if (!ev.detail && view.label && detail.indexOf(view.label + " ") === 0) detail = detail.slice(view.label.length + 1);
+      if (!ev.detail) detail = detail.replace(/^点火成功（(.+?)），下次重置 /, "$1 · 下次重置 ");
+      view.detail = errorSummary(detail);
+      view.tip = detail;
+      return view;
+    }
+    switch (ev.kind) {
+      case "ignite": case "ignite_manual":
+        view.detail = p.reset ? translate("ev_ignited", p.model, time(p.reset)) : p.model || "";
+        break;
+      case "ignite_failed":
+        // A manual ignition is not retried.
+        if (p.manual === "1") {
+          view.detail = error(p.summary, p.error);
+          view.tip = p.error || view.detail;
+          break;
+        }
+        view.detail = translate(p.cooldown ? "ev_retry_cooldown" : "ev_retry", retryText(Number(p.retry_seconds) || 0), error(p.summary, p.error));
+        view.tip = translate(p.cooldown ? "ev_retry_cooldown" : "ev_retry", retryText(Number(p.retry_seconds) || 0), p.error || "");
+        break;
+      case "ignite_paused":
+        // A pause for an invalid credential or a suspended account has no
+        // end; it lasts until the credential changes.
+        var pausedKey = parseTime(p.until) ? "ev_paused" : p.reason === "auth" || p.reason === "suspended" ? "ev_paused_" + p.reason : "";
+        var pausedLine = error(p.summary, p.error);
+        view.detail = !pausedKey ? pausedLine : pausedKey === "ev_paused" ? translate(pausedKey, time(p.until), pausedLine) : translate(pausedKey, pausedLine);
+        view.tip = !pausedKey ? p.error || pausedLine : pausedKey === "ev_paused" ? translate(pausedKey, time(p.until), p.error || "") : translate(pausedKey, p.error || "");
+        break;
+      case "model_refused":
+        view.detail = translate("ev_refused", p.model, p.fallback, p.hours);
+        break;
+      case "notify": case "notify_failed":
+        var kind = notifyKindOf || notifyKind(ev);
+        if (ev.kind === "notify" && (kind === "quota" || kind === "reminder")) view.badge = translate("ev_notify_" + kind);
+        if (!view.label && kind === "codex_reset") view.label = "Did Codex Reset";
+        var title = notifyTitle(p.title, view.label);
+        if (ev.kind === "notify") view.detail = title;
+        else {
+          view.detail = translate("ev_notify_failed_detail", title, error("", p.error));
+          view.tip = translate("ev_notify_failed_detail", p.title || "", p.error || "");
+        }
+        break;
+      case "cooldown_stale":
+        view.detail = translate("ev_cooldown", time(p.until));
+        break;
+      case "plan_change":
+        view.detail = p.from + " → " + p.to;
+        break;
+      case "codex_reset":
+        view.detail = translate("ev_codex_sent", p.count);
+        break;
+      case "reset": case "exhausted":
+        var win = eventWindow(p), left = pct(Number(p.remaining)), at = parseTime(p.reset);
+        view.detail = !at ? translate("ev_window_left", win.label, left)
+          : translate(ev.kind === "reset" ? "ev_window_next" : "ev_window_due", win.label, left, fmtDateTime(at));
+        break;
+      case "credential_invalid":
+        if (p.reason === "suspended" || p.reason === "rate_limited") view.badge = translate("ev_credential_" + p.reason);
+        var codes = [p.status ? "HTTP " + p.status : "", p.code].filter(Boolean).join(" · ");
+        var line = error(p.summary, p.error || codes);
+        // A problem found by ignition, or with its pause in the row, says
+        // that ignition is paused, until when for a rate limit.
+        var stops = paused || p.source === "ignite";
+        var until = parseTime(p.until) || parseTime(paused && (paused.params || {}).until);
+        if (stops) view.detail = until ? translate("ev_ignite_paused_until", line, fmtDateTime(until)) : translate("ev_ignite_paused_note", line);
+        else view.detail = p.reason === "rate_limited" && until ? translate("ev_limited_until", line, fmtDateTime(until)) : line;
+        // The tooltip adds the full error of the pause in the row.
+        view.tip = [[codes, p.summary].filter(Boolean).join(" · ") || line, p.appeal_url || "", paused && (paused.params || {}).error || ""]
+          .filter(Boolean).join("\n");
+        if (/^https?:\/\//i.test(p.appeal_url || "")) view.link = p.appeal_url;
+        break;
+      case "credential_restored":
+        view.detail = p.source === "ignite" || p.source === "query" ? translate("ev_source_" + p.source) : "";
+        break;
+      case "error":
+        view.detail = errorSummary(ev.detail || ev.message || "");
+        view.tip = ev.detail || ev.message || "";
+        break;
+      default:
+        view.detail = ev.detail || ev.message || "";
+    }
+    return view;
+  }
+
+  // The label and detail of an event, for the chart's tooltips.
   function eventParts(ev) {
-    var label = ev.label || (ev.group ? groupLabel(ev.group) : "");
-    var translated = eventDetail(ev);
-    if (translated !== null) return { label: label || "—", detail: translated };
-    var detail = ev.detail || ev.message || "";
-    if (!ev.detail && label && detail.indexOf(label + " ") === 0) detail = detail.slice(label.length + 1);
-    if (!ev.detail) detail = detail.replace(/^点火成功（(.+?)），下次重置 /, "$1 · 下次重置 ");
-    return { label: label || "—", detail: detail };
+    var view = eventView(ev);
+    return { label: view.label || "—", detail: view.detail };
   }
 
   // The label and detail of an event as nodes, with the account names
   // marked SENSITIVE by what the fields mean: the label names the quota
   // group of an account, so it is sensitive as a whole, and so is its text
   // within the detail, such as in a notification title, and an error text
-  // from the provider. Text that cannot be split reliably is sensitive as a
-  // whole: the detail of an error event, and of an older event without a
-  // label, whose message may name an account that no longer exists.
-  function eventMasked(ev, parts) {
-    parts = parts || eventParts(ev);
-    var p = ev.params || {};
-    var label = parts.label === "—" ? [document.createTextNode("—")] : [el("span", { class: SENSITIVE, text: parts.label })];
-    var whole = ev.kind === "error" || (!ev.params && !ev.label);
-    var detail = whole ? [el("span", { class: SENSITIVE, text: parts.detail })]
-      : maskedNodes(parts.detail, [parts.label === "—" ? "" : parts.label, p.error ? String(p.error) : ""]);
+  // from the provider.
+  function eventMasked(ev, view) {
+    view = view || eventView(ev);
+    var label = view.label ? [el("span", { class: SENSITIVE, text: view.label })] : [document.createTextNode("—")];
+    var detail = view.whole ? [el("span", { class: SENSITIVE, text: view.detail })] : maskedNodes(view.detail, [view.label].concat(view.secrets));
     return { label: label, detail: detail };
+  }
+
+  // A mark after the detail for the notifications of an event: sent, or
+  // failed with the errors in its tooltip.
+  function pushMarks(pushes) {
+    var marks = [];
+    var sent = pushes.filter(function (ev) { return ev.kind === "notify"; });
+    var failed = pushes.filter(function (ev) { return ev.kind === "notify_failed"; });
+    if (sent.length) {
+      marks.push(el("span", { class: "event-mark", title: masked ? null : sent.map(function (ev) { return (ev.params || {}).title || ev.detail || ""; }).join("\n"),
+        text: translate("ev_notify") }));
+    }
+    if (failed.length) {
+      marks.push(el("span", { class: "event-mark failed", title: masked ? null : failed.map(function (ev) {
+        var p = ev.params || {};
+        return p.title ? translate("ev_notify_failed_detail", p.title, p.error || "") : ev.detail || ev.message || "";
+      }).join("\n"), text: translate("ev_notify_failed") }));
+    }
+    return marks;
   }
 
   function renderEvents() {
     var list = $("events");
     clear(list);
     var more = $("events-more");
-    if (!status.events.length) {
+    var filter = $("events-5h"), filterText = $("events-5h-label");
+    var built = eventRows(status.events || [], showFiveHourResets);
+    if (filter) {
+      filter.checked = showFiveHourResets;
+      filterText.textContent = translate(built.fiveHour ? "ev_show_5h_count" : "ev_show_5h", built.fiveHour);
+    }
+    if (!built.rows.length) {
       list.appendChild(el("p", { class: "empty", text: translate("no_events") }));
       more.hidden = true;
       return;
     }
-    var events = eventsExpanded ? status.events.slice(0, 100) : status.events.slice(0, EVENTS_COLLAPSED);
-    events.forEach(function (ev) {
-      var known = EVENT_TYPES[ev.kind];
-      var type = [known || (ev.level === "error" ? "failure" : ev.level === "warn" ? "warning" : "muted"), known ? translate("ev_" + ev.kind) : ev.kind];
-      var parts = eventParts(ev), nodes = eventMasked(ev, parts);
+    var total = Math.min(built.rows.length, EVENTS_MAX);
+    built.rows.slice(0, eventsExpanded ? EVENTS_MAX : EVENTS_COLLAPSED).forEach(function (row) {
+      var ev = row.event, view = eventView(ev, row.notifyKind, row.paused), nodes = eventMasked(ev, view);
+      var cell = [el("span", { class: "event-text", title: masked ? null : view.tip || view.detail || null }, nodes.detail)];
+      if (view.link) cell.push(el("a", { class: "event-link", href: view.link, target: "_blank", rel: "noopener noreferrer", text: translate("ev_appeal") }));
       list.appendChild(el("div", { class: "event-row", role: "row" }, [
         el("span", { class: "event-time", role: "cell", text: fmtDateTime(parseTime(ev.time)) }),
-        el("span", { class: "event-type", role: "cell" }, [badge(type[0], type[1])]),
+        el("span", { class: "event-type", role: "cell" }, [badge(view.style, view.badge)]),
         el("span", { class: "event-label", role: "cell" }, nodes.label),
-        el("span", { class: "event-detail", role: "cell", title: masked ? null : parts.detail }, nodes.detail)
+        el("span", { class: "event-detail", role: "cell" }, cell.concat(pushMarks(row.pushes)))
       ]));
     });
-    more.hidden = status.events.length <= EVENTS_COLLAPSED;
-    more.textContent = eventsExpanded ? translate("collapse") : translate("show_more", Math.min(status.events.length, 100));
+    more.hidden = total <= EVENTS_COLLAPSED;
+    more.textContent = eventsExpanded ? translate("collapse") : translate("show_more", total);
   }
 
   // The provider settings, built when the provider list changes: a monitor
@@ -2268,6 +2576,30 @@
     return out;
   }
 
+  // Where a line of the even pace starts after its cycle began, because
+  // the reset was unknown before or moved within the cycle, it extends
+  // back to the start of the cycle: the last rise of the samples by a reset
+  // (RESET_JUMP) since one window length before its reset. Segments that
+  // follow each other with resets within RESET_DRIFT count as one line, so
+  // a reset that wavers by seconds extends nothing. The extensions are
+  // [a, b, x] like the segments of paceSegments, and the line they extend
+  // stays as it is.
+  function paceExtensions(segments, points, length) {
+    var out = [];
+    points = points || [];
+    segments.forEach(function (s, i) {
+      var prev = segments[i - 1];
+      if (prev && prev[1] === s[0] && !prev[3] && Math.abs(prev[2] - s[2]) <= RESET_DRIFT) return;
+      if (s[0] <= s[2] - length + RESET_DRIFT) return;
+      var start = null;
+      for (var k = 1; k < points.length && points[k][0] <= s[0]; k++) {
+        if (points[k][0] >= s[2] - length - RESET_DRIFT && points[k][1] - points[k - 1][1] >= RESET_JUMP) start = points[k][0];
+      }
+      if (start != null && start < s[0]) out.push([start, s[0], s[2]]);
+    });
+    return out;
+  }
+
   // The even pace at t, or null outside the segments. Where two segments
   // meet, the later one counts, and where the reset becomes unknown there
   // is none.
@@ -2293,17 +2625,41 @@
     return total ? sum / total : null;
   }
 
-  // The even pace of a row: at(t) is its value, null where it has none, and
-  // breaks are the times where it can bend or jump. A pooled row combines
-  // the even pace of its accounts, each from its own resets.
+  // The extended even pace of a total (paceExtensions): where any account
+  // has an extension, the mean with the extensions in place of the lines
+  // they extend, while every account has a value. parts are {weight,
+  // segments, extensions}.
+  function extendedPace(parts, length, t) {
+    var sum = 0, total = 0, used = false;
+    for (var i = 0; i < parts.length; i++) {
+      var value = null;
+      parts[i].extensions.forEach(function (e) { if (t >= e[0] && t <= e[1]) value = 100 * (e[2] - t) / length; });
+      if (value != null) used = true;
+      else value = paceAt(parts[i].segments, length, t);
+      if (value == null) return null;
+      sum += parts[i].weight * value;
+      total += parts[i].weight;
+    }
+    return used && total ? sum / total : null;
+  }
+
+  // The even pace of a row: at(t) is its value, null where it has none,
+  // extended(t) the value of its extensions back to the cycle start, and
+  // breaks are the times where either can bend or jump. A pooled row
+  // combines the even pace of its accounts, each from its own resets.
   function rowPace(row, now) {
     var length = WINDOW_SECONDS[historyWindow];
     var parts = !length ? [] : (row.children || [row]).map(function (r) {
-      return { weight: row.children ? r.weight : 1, segments: paceSegments(r.resets, length, r.reset, now) };
+      var segments = paceSegments(r.resets, length, r.reset, now);
+      return { weight: row.children ? r.weight : 1, segments: segments, extensions: paceExtensions(segments, r.points, length) };
     });
     var breaks = [];
-    parts.forEach(function (part) { part.segments.forEach(function (s) { breaks.push(s[0], s[1]); }); });
-    return { breaks: breaks, at: function (t) { return parts.length ? pooledPace(parts, length, t) : null; } };
+    parts.forEach(function (part) {
+      part.segments.forEach(function (s) { breaks.push(s[0], s[1]); });
+      part.extensions.forEach(function (e) { breaks.push(e[0], e[1]); });
+    });
+    return { breaks: breaks, at: function (t) { return parts.length ? pooledPace(parts, length, t) : null; },
+      extended: function (t) { return parts.length ? extendedPace(parts, length, t) : null; } };
   }
 
   // The least-squares line through pts[a..b]: its slope per second and the
@@ -2424,12 +2780,12 @@
     });
     var resets = [];
     pieces.forEach(function (piece) { resets = resets.concat(piece.split.resets); });
-    var even = row.inactive ? { breaks: [], at: function () { return null; } } : rowPace(row, g.now);
+    var even = row.inactive ? { breaks: [], at: function () { return null; }, extended: function () { return null; } } : rowPace(row, g.now);
 
     head.appendChild(el("span", { class: "detail-name" }, (row.orphan ? [el("span", { class: SENSITIVE, text: row.name })] : maskedNodes(row.name)).concat([" · " + translate(historyWindow === "5h" ? "quota_5h" : "quota_7d")])));
     if (row.inactive) head.appendChild(badge("muted", translate("inactive")));
     head.appendChild(el("span", { class: "muted" + (group ? "" : " " + SENSITIVE), text: group ? translate("pooled_note", row.children.length) : row.sub }));
-    head.appendChild(el("span", { class: "detail-tools" }, [maskButton(), snapshotButton("snapshot_detail", function () { return [head, box]; })]));
+    head.appendChild(el("span", { class: "detail-tools" }, [maskButton(), snapshotButton("snapshot_detail", function () { return [$("chart-detail-wrap")]; })]));
     if (row.inactive) {
       head.appendChild(el("span", { class: "detail-stat" }, [document.createTextNode(translate("stat_last")),
         el("strong", { text: pct(row.last) + " · " + fmtDateTime(unixDate(row.lastAt)) })]));
@@ -2515,17 +2871,25 @@
     // straight between two breaks, and its value just inside each end
     // decides whether it continues from the previous piece or jumps.
     var times = [g.from, g.to].concat(even.breaks.filter(function (t) { return t > g.from && t < g.to; })).sort(function (a, b) { return a - b; });
-    var paceD = "", paceEnd = null;
-    for (var k = 0; k + 1 < times.length; k++) {
-      var a = times[k], b = times[k + 1], inset = Math.min(1, (b - a) / 4);
-      if (b - a <= 0) continue;
-      var va = even.at(a + inset), vb = even.at(b - inset);
-      if (va == null || vb == null) { paceEnd = null; continue; }
-      if (paceEnd == null || Math.abs(paceEnd - va) > 0.5) paceD += "M" + g.x(a) + " " + y(va);
-      paceD += "L" + g.x(b) + " " + y(vb);
-      paceEnd = vb;
+    function pacePath(at) {
+      var d = "", end = null;
+      for (var k = 0; k + 1 < times.length; k++) {
+        var a = times[k], b = times[k + 1], inset = Math.min(1, (b - a) / 4);
+        if (b - a <= 0) continue;
+        var va = at(a + inset), vb = at(b - inset);
+        if (va == null || vb == null) { end = null; continue; }
+        if (end == null || Math.abs(end - va) > 0.5) d += "M" + g.x(a) + " " + y(va);
+        d += "L" + g.x(b) + " " + y(vb);
+        end = vb;
+      }
+      return d;
     }
+    var paceD = pacePath(even.at), extendedD = pacePath(even.extended);
     if (paceD) plot.appendChild(svg("path", { d: paceD, fill: "none", stroke: cssVar("--text-tertiary"), "stroke-opacity": 0.8, "stroke-width": 1.5, "stroke-dasharray": "6 4" }));
+    // The extension back to the cycle start: dash-dot, apart from the
+    // dashes of the even pace and the dots of the projection.
+    if (extendedD) plot.appendChild(svg("path", { d: extendedD, fill: "none", stroke: cssVar("--text-tertiary"), "stroke-opacity": 0.8, "stroke-width": 1.5, "stroke-dasharray": "8 3 1.5 3" }));
+    $("legend-pace-extended").hidden = !extendedD;
     pieces.forEach(function (piece) {
       if (group) splitAtResets(piece.pts, [3, 4]).parts.forEach(function (part) {
         if (part.length < 2) return;
@@ -2624,9 +2988,11 @@
     });
 
     function paceRow(t) {
-      var value = even.at(t);
+      var value = even.at(t), extended = even.extended(t);
       if (value != null) tip.appendChild(el("div", { class: "row pace" }, [el("span", { class: "key" }),
         el("span", { class: "name", text: translate("pace_reference") }), el("span", { class: "value", text: pct(value) })]));
+      if (extended != null) tip.appendChild(el("div", { class: "row pace extended" }, [el("span", { class: "key" }),
+        el("span", { class: "name", text: translate("pace_extended") }), el("span", { class: "value", text: pct(extended) })]));
     }
 
     hoverListeners.push(function (t) {
@@ -2670,6 +3036,21 @@
       tip.hidden = false;
       placeTip(tip, box, g, t, 6);
     });
+  }
+
+  // The detail chart's heading goes, as a column (.side), into the blank
+  // left of the plot that lines the plot up with the overview; the plot
+  // stays where it is. The y-axis labels keep the right SIDE_GAP pixels of
+  // the blank. Where the blank is too narrow, in a chart below 640 pixels
+  // wide (labelW 120), or too short for the heading, such as with a long
+  // name, the heading stays above the chart.
+  var SIDE_GAP = 46;
+  function placeDetailHead(wrap, head, box, g) {
+    wrap.classList.remove("side");
+    if (g.labelW < 190 || g.width !== box.clientWidth) return;
+    wrap.style.setProperty("--detail-side", (g.labelW - SIDE_GAP) + "px");
+    wrap.classList.add("side");
+    if (head.offsetHeight > box.offsetHeight) wrap.classList.remove("side");
   }
 
   function hoverAt(e, root, rowId, source) {
@@ -2739,7 +3120,7 @@
     clear($("chart-table"));
     hoverListeners = [];
     snapPoints = [];
-    head.hidden = true;
+    $("chart-detail-wrap").hidden = true;
     if (!history || !status) {
       overview.appendChild(el("div", { class: "empty", text: historyFailed ? translate("history_failed", historyFailed) : translate("loading") }));
       return;
@@ -2752,8 +3133,9 @@
     if (!findRow(rows, chartSelected)) chartSelected = rows[0].id;
     var selected = findRow(rows, chartSelected);
     renderOverview(rows, overview, axisEnd(selected));
-    head.hidden = false;
+    $("chart-detail-wrap").hidden = false;
     renderDetail(selected, head, detail);
+    placeDetailHead($("chart-detail-wrap"), head, detail, chartView);
     renderChartTable(rows);
     $("legend-projection").textContent = translate("legend_projection_" + historyWindow);
   }
@@ -3931,6 +4313,11 @@
     }
   });
   $("events-more").addEventListener("click", function () { eventsExpanded = !eventsExpanded; renderEvents(); });
+  $("events-5h").addEventListener("change", function (e) {
+    showFiveHourResets = e.target.checked;
+    try { localStorage.setItem(EVENTS_STORE, showFiveHourResets ? "1" : "0"); } catch (err) {}
+    if (status) renderEvents();
+  });
   // bounce is set when the user picks the value, so the thumb slides there.
   function pressSegment(id, value, bounce) {
     var box = $(id);

@@ -208,7 +208,8 @@ header .update path { fill: none; stroke: currentColor; stroke-width: 1.8; strok
    measures it, and in the image, so the two have the same size. */
 .snapshot-frame { padding: 12px; background: var(--bg-secondary); color: var(--text-primary); -webkit-font-smoothing: antialiased; }
 .snapshot-frame, .snapshot-frame *, .snapshot-frame *::before, .snapshot-frame *::after { animation: none !important; transition: none !important; }
-.snapshot-frame .detail-head { margin-top: 0; padding-top: 0; border-top: 0; }
+.snapshot-frame .detail-wrap { margin-top: 0; padding-top: 0; border-top: 0; }
+.snapshot-frame .detail-wrap.side .detail-head { top: 0; }
 .hint.settings-note { margin: 0 0 14px; }
 .settings-section { display: flex; flex-direction: column; gap: 14px; }
 .settings-section > .card-title { margin: 0; }
@@ -363,10 +364,18 @@ td.actions { text-align: right; }
 .chart-box.loading svg { opacity: 0.5; }
 .chart-box svg { display: block; width: 100%; height: auto; overflow: visible; font-family: var(--font-mono); user-select: none; }
 .chart-box svg rect[tabindex]:focus { outline: none; }
-.detail-head {
-  display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; margin-top: 18px; padding-top: 16px;
-  border-top: 1px solid var(--border-color); font-size: 12.5px; color: var(--text-tertiary);
+.detail-wrap { position: relative; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border-color); }
+.detail-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; font-size: 12.5px; color: var(--text-tertiary); }
+/* The heading as a column in the blank left of the plot; page.js sets
+   --detail-side to the width of the blank less the y-axis labels. */
+.detail-wrap.side .detail-head {
+  position: absolute; left: 0; top: 16px; width: var(--detail-side); flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 3px;
 }
+.detail-wrap.side .detail-head > * { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.detail-wrap.side .detail-name { white-space: normal; overflow-wrap: anywhere; line-height: 1.35; margin-bottom: 1px; }
+.detail-wrap.side .detail-head > .badge { align-self: flex-start; }
+.detail-wrap.side .detail-stat { display: flex; justify-content: space-between; gap: 8px; }
+.detail-wrap.side .detail-tools { margin: 4px 0 0; align-self: flex-start; overflow: visible; }
 .detail-name { font-size: 14px; font-weight: 650; color: var(--text-primary); }
 .detail-stat strong { margin-left: 4px; color: var(--text-primary); font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: 600; }
 .detail-stat strong.ahead { color: var(--viz-success); }
@@ -378,6 +387,11 @@ td.actions { text-align: right; }
   border: 1px solid var(--border-color);
 }
 .legend .swatch.pace { width: 14px; height: 0; border-radius: 0; border-top: 1.5px dashed var(--text-tertiary); vertical-align: 3px; }
+/* Dash-dot, like the stroke-dasharray "8 3 1.5 3" of the line. */
+.legend .swatch.pace-extended, .tooltip .row.pace.extended .key {
+  width: 16px; height: 1.5px; border-radius: 0; vertical-align: 3px;
+  background: linear-gradient(90deg, var(--text-tertiary) 0 8px, transparent 8px 11px, var(--text-tertiary) 11px 12.5px, transparent 12.5px);
+}
 .legend .swatch.projection { width: 14px; height: 0; border-radius: 0; border-top: 2px dotted var(--text-primary); vertical-align: 3px; }
 .legend .muted { color: var(--text-tertiary); }
 .tooltip {
@@ -391,6 +405,7 @@ td.actions { text-align: right; }
 .tooltip .key { width: 8px; height: 8px; border-radius: 2px; }
 .tooltip .row.pace { color: var(--text-tertiary); }
 .tooltip .row.pace .key { height: 0; border-radius: 0; border-top: 1.5px dashed var(--text-tertiary); }
+.tooltip .row.pace.extended .key { width: 12px; border-top: 0; height: 1.5px; }
 .tooltip .row.projection .key { height: 0; border-radius: 0; border-top: 2px dotted var(--text-primary); }
 .tooltip .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tooltip .value { font-family: var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; }
@@ -410,7 +425,17 @@ html[lang="en"] { --event-type-width: 140px; }
 .event-time { color: var(--text-tertiary); font-family: var(--font-mono); font-size: 12px; font-variant-numeric: tabular-nums; }
 .event-type .badge { font-size: 11.5px; padding: 1px 8px; }
 .event-label { font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.event-detail { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.event-detail { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--text-secondary); }
+.event-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Notifications of an event, after its detail. */
+.event-mark {
+  flex: none; padding: 0 6px; border-radius: 4px; font-size: 11px; line-height: 18px;
+  background: var(--bg-tertiary); color: var(--text-tertiary);
+}
+.event-mark.failed { background: color-mix(in srgb, var(--warning-text) 14%, transparent); color: var(--warning-text); }
+.event-link { flex: none; font-size: 12px; color: var(--text-secondary); text-decoration: underline; text-underline-offset: 2px; }
+.events-filter { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-secondary); cursor: pointer; }
+.events-filter input { margin: 0; }
 .events-more { margin-top: 8px; }
 
 /* Chart labels use the body font; numbers stay monospaced. */
@@ -588,6 +613,8 @@ table.services .sub-row td { border-bottom: none; padding-top: 4px; text-align: 
   form label.mode-option { padding: 4px 2px; }
   .event-row { grid-template-columns: 82px minmax(0, 1fr); }
   .event-label, .event-detail { grid-column: 2; }
+  .event-detail { flex-wrap: wrap; }
+  .event-text { white-space: normal; overflow-wrap: anywhere; }
 }
 
 /* Last, so that it overrides the transitions and animations above. */
