@@ -203,7 +203,7 @@
       ev_reset: "额度重置", ev_exhausted: "额度耗尽", ev_credential_invalid: "凭证失效", ev_credential_suspended: "账号停用",
       ev_credential_rate_limited: "被限流", ev_credential_restored: "凭证恢复", ev_notify_quota: "额度提醒", ev_notify_reminder: "重置提醒",
       ev_window_left: "{0} · 剩余 {1}", ev_window_next: "{0} · 剩余 {1} · 下次重置 {2}", ev_window_due: "{0} · 剩余 {1} · {2} 重置",
-      ev_limited_until: "{0} · 限流到 {1}", ev_appeal: "申诉", ev_source_ignite: "点火时确认", ev_source_query: "额度查询时确认",
+      ev_limited_until: "{0} · 限流到 {1}", ev_ignite_paused_note: "{0} · 点火已暂停", ev_ignite_paused_until: "{0} · 点火暂停到 {1}", ev_appeal: "申诉", ev_source_ignite: "点火时确认", ev_source_query: "额度查询时确认",
       ev_show_5h: "显示 5 小时重置", ev_show_5h_count: "显示 5 小时重置（{0}）",
       no_events: "暂无事件", collapse: "收起", show_more: "显示更多（共 {0} 条）",
       failed: "失败：{0}",
@@ -371,7 +371,7 @@
       ev_reset: "Quota reset", ev_exhausted: "Quota exhausted", ev_credential_invalid: "Credential invalid", ev_credential_suspended: "Account suspended",
       ev_credential_rate_limited: "Rate limited", ev_credential_restored: "Credential restored", ev_notify_quota: "Quota alert", ev_notify_reminder: "Reset reminder",
       ev_window_left: "{0} · {1} left", ev_window_next: "{0} · {1} left · next reset {2}", ev_window_due: "{0} · {1} left · resets {2}",
-      ev_limited_until: "{0} · limited until {1}", ev_appeal: "Appeal", ev_source_ignite: "Confirmed by ignition", ev_source_query: "Confirmed by a quota query",
+      ev_limited_until: "{0} · limited until {1}", ev_ignite_paused_note: "{0} · ignition paused", ev_ignite_paused_until: "{0} · ignition paused until {1}", ev_appeal: "Appeal", ev_source_ignite: "Confirmed by ignition", ev_source_query: "Confirmed by a quota query",
       ev_show_5h: "Show 5-hour resets", ev_show_5h_count: "Show 5-hour resets ({0})",
       no_events: "No events yet", collapse: "Show less", show_more: "Show more ({0} in total)",
       failed: "Failed: {0}",
@@ -1344,14 +1344,24 @@
   try { showFiveHourResets = localStorage.getItem(EVENTS_STORE) === "1"; } catch (err) {}
 
   // The events a notification reports, by its notify_kind. A notification
-  // sent within NOTIFY_LAG seconds after such an event of the same quota
-  // group shows as a mark on that event's row instead of a row of its own.
+  // sent within NOTIFY_LAG of such an event of the same quota group shows
+  // as a mark on that event's row instead of a row of its own.
   var NOTIFY_TRIGGERS = {
     recovery: ["reset"], circuit: ["ignite_paused"], cooldown: ["cooldown_stale"], plan: ["plan_change"],
     credential: ["credential_invalid"], suspended: ["credential_invalid"], rate_limited: ["credential_invalid"],
-    credential_ok: ["credential_restored"]
+    credential_ok: ["credential_restored"], codex_reset: ["codex_reset"]
   };
-  var NOTIFY_LAG = 600;
+  // How long, in seconds, a notification may follow its event, as [from,
+  // to]. Notifications that failed are retried with later polls for up to
+  // an hour, so most kinds allow 70 minutes. Did Codex Reset records its
+  // event after sending, so its notifications come a little before it.
+  var NOTIFY_LAG = {
+    recovery: [0, 4200], circuit: [0, 4200], cooldown: [0, 4200], plan: [0, 4200], credential: [0, 4200],
+    suspended: [0, 4200], rate_limited: [0, 4200], credential_ok: [0, 4200], codex_reset: [-300, 300]
+  };
+  // An ignition pause this many seconds from a credential problem of the
+  // same quota group is part of it and shares its row.
+  var PAUSE_PAIR = 60;
   // Error texts longer than this are cut in the list; the tooltip keeps all.
   var ERROR_CHARS = 160;
 
@@ -1453,6 +1463,17 @@
   // with their notifications; hidden counts them.
   function eventRows(events, showFiveHour) {
     var rows = events.map(function (ev) { return { event: ev, t: eventSeconds(ev), pushes: [] }; });
+    // A credential problem found by ignition also pauses it: the pause
+    // joins the problem's row (paused), and so do its notifications.
+    rows.forEach(function (row) {
+      if (row.event.kind !== "ignite_paused") return;
+      var host = rows.filter(function (other) {
+        return other.event.kind === "credential_invalid" && !other.paused && Math.abs(other.t - row.t) <= PAUSE_PAIR && sameSubject(row.event, other.event);
+      }).sort(function (a, b) { return Math.abs(a.t - row.t) - Math.abs(b.t - row.t); })[0];
+      if (!host) return;
+      host.paused = row.event;
+      row.host = host;
+    });
     rows.forEach(function (row) {
       var ev = row.event;
       if (ev.kind !== "notify" && ev.kind !== "notify_failed") return;
@@ -1461,11 +1482,17 @@
       if (!triggers) return;
       var p = ev.params || {};
       var windows = row.notifyKind === "recovery" && p.windows ? p.windows.split(",").map(function (w) { return w.trim(); }) : null;
+      var lag = NOTIFY_LAG[row.notifyKind];
+      // Did Codex Reset concerns no account: its events and notifications
+      // have no quota group.
+      var global = row.notifyKind === "codex_reset";
       var hits = rows.filter(function (other) {
-        var o = other.event;
-        if (triggers.indexOf(o.kind) < 0 || row.t < other.t || row.t - other.t > NOTIFY_LAG || !sameSubject(ev, o)) return false;
+        var o = other.event, dt = row.t - other.t;
+        if (triggers.indexOf(o.kind) < 0 || dt < lag[0] || dt > lag[1]) return false;
+        if (global ? ev.group || o.group : !sameSubject(ev, o)) return false;
         return !windows || windows.indexOf((o.params || {}).window) >= 0;
-      }).sort(function (a, b) { return b.t - a.t; });
+      }).sort(function (a, b) { return Math.abs(row.t - a.t) - Math.abs(row.t - b.t); })
+        .map(function (h) { return h.host || h; });
       if (!hits.length) return;
       var chosen;
       if (windows) {
@@ -1477,14 +1504,14 @@
           return true;
         });
       } else if (row.notifyKind === "recovery") {
-        chosen = hits.filter(function (h) { return hits[0].t - h.t <= 60; });
+        chosen = hits.filter(function (h) { return Math.abs(hits[0].t - h.t) <= 60; });
       } else chosen = [hits[0]];
       chosen.forEach(function (h) { h.pushes.push(ev); });
       row.merged = true;
     });
     var hidden = 0, fiveHour = 0;
     var out = rows.filter(function (row) {
-      if (row.merged) return false;
+      if (row.merged || row.host) return false;
       var ev = row.event;
       if (ev.kind === "reset" && eventWindow(ev.params || {}).kind === "5h") {
         fiveHour++;
@@ -1511,7 +1538,7 @@
   // of an error event, and of an older event without a label, whose message
   // may name an account that no longer exists. Events written before params
   // existed keep their stored Chinese text.
-  function eventView(ev, notifyKindOf) {
+  function eventView(ev, notifyKindOf, paused) {
     var p = ev.params || {};
     var known = EVENT_TYPES[ev.kind];
     var view = {
@@ -1562,6 +1589,7 @@
       case "notify": case "notify_failed":
         var kind = notifyKindOf || notifyKind(ev);
         if (ev.kind === "notify" && (kind === "quota" || kind === "reminder")) view.badge = translate("ev_notify_" + kind);
+        if (!view.label && kind === "codex_reset") view.label = "Did Codex Reset";
         var title = notifyTitle(p.title, view.label);
         if (ev.kind === "notify") view.detail = title;
         else {
@@ -1585,9 +1613,15 @@
         break;
       case "credential_invalid":
         if (p.reason === "suspended" || p.reason === "rate_limited") view.badge = translate("ev_credential_" + p.reason);
-        var line = error(p.summary, p.error || [p.status ? "HTTP " + p.status : "", p.code].filter(Boolean).join(" · "));
-        view.detail = p.reason === "rate_limited" && parseTime(p.until) ? translate("ev_limited_until", line, time(p.until)) : line;
-        view.tip = view.detail;
+        var codes = [p.status ? "HTTP " + p.status : "", p.code].filter(Boolean).join(" · ");
+        var line = error(p.summary, p.error || codes);
+        // A problem found by ignition, or with its pause in the row, says
+        // that ignition is paused, until when for a rate limit.
+        var stops = paused || p.source === "ignite";
+        var until = parseTime(p.until) || parseTime(paused && (paused.params || {}).until);
+        if (stops) view.detail = until ? translate("ev_ignite_paused_until", line, fmtDateTime(until)) : translate("ev_ignite_paused_note", line);
+        else view.detail = p.reason === "rate_limited" && until ? translate("ev_limited_until", line, fmtDateTime(until)) : line;
+        view.tip = [[codes, p.summary].filter(Boolean).join(" · ") || line, p.appeal_url || ""].filter(Boolean).join("\n");
         if (/^https?:\/\//i.test(p.appeal_url || "")) view.link = p.appeal_url;
         break;
       case "credential_restored":
@@ -1657,7 +1691,7 @@
     }
     var total = Math.min(built.rows.length, EVENTS_MAX);
     built.rows.slice(0, eventsExpanded ? EVENTS_MAX : EVENTS_COLLAPSED).forEach(function (row) {
-      var ev = row.event, view = eventView(ev, row.notifyKind), nodes = eventMasked(ev, view);
+      var ev = row.event, view = eventView(ev, row.notifyKind, row.paused), nodes = eventMasked(ev, view);
       var cell = [el("span", { class: "event-text", title: masked ? null : view.tip || view.detail || null }, nodes.detail)];
       if (view.link) cell.push(el("a", { class: "event-link", href: view.link, target: "_blank", rel: "noopener noreferrer", text: translate("ev_appeal") }));
       list.appendChild(el("div", { class: "event-row", role: "row" }, [

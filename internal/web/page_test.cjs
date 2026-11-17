@@ -710,7 +710,7 @@ function eventContext(globals = {}) {
     },
     ...globals,
   });
-  vm.runInContext(["EVENT_TYPES", "NOTIFY_TRIGGERS", "NOTIFY_LAG", "ERROR_CHARS"].map(pageVar).join("\n"), ctx);
+  vm.runInContext(["EVENT_TYPES", "NOTIFY_TRIGGERS", "NOTIFY_LAG", "PAUSE_PAIR", "ERROR_CHARS"].map(pageVar).join("\n"), ctx);
   return ctx;
 }
 
@@ -755,10 +755,11 @@ test("matching needs the same group, the order, the time limit and the windows",
   const g = { group: "k", label: "Gemini" };
   const reset = (at, window) => event("reset", at, { ...g, params: { window, remaining: "100.00" } });
   const recovery = (at, windows) => event("notify", at, { ...g, params: { title: "✅ Gemini · 7d 已恢复", notify_kind: "recovery", windows } });
-  // Sent before the event, or more than ten minutes after it: no match.
+  // Sent before the event, or more than 70 minutes after it, as retries
+  // can be: no match.
   assert.equal(ctx.eventRows([reset(100, "gemini-weekly"), recovery(99, "gemini-weekly")], true).rows.length, 2);
-  assert.equal(ctx.eventRows([recovery(701, "gemini-weekly"), reset(100, "gemini-weekly")], true).rows.length, 2);
-  assert.equal(ctx.eventRows([recovery(700, "gemini-weekly"), reset(100, "gemini-weekly")], true).rows.length, 1);
+  assert.equal(ctx.eventRows([recovery(4301, "gemini-weekly"), reset(100, "gemini-weekly")], true).rows.length, 2);
+  assert.equal(ctx.eventRows([recovery(4300, "gemini-weekly"), reset(100, "gemini-weekly")], true).rows.length, 1);
   // The window must be one the notification names.
   let built = ctx.eventRows([recovery(110, "gemini-weekly"), reset(100, "gemini-5h")], true);
   assert.equal(built.rows.length, 2);
@@ -862,8 +863,11 @@ test("credential events show the reason, a summary and an appeal link", () => {
   let view = invalid({ reason: "suspended", status: "403", code: "TOS_VIOLATION", summary: "账号因违反服务条款被停用", appeal_url: "https://support.example.com/appeal", source: "ignite" });
   assert.equal(view.badge, "ev_credential_suspended");
   assert.equal(view.style, "failure");
-  assert.equal(view.detail, "账号因违反服务条款被停用");
+  // Found by ignition: the row says ignition is paused.
+  assert.equal(view.detail, "ev_ignite_paused_note(账号因违反服务条款被停用)");
   assert.equal(view.link, "https://support.example.com/appeal");
+  // The tooltip shows the status, code and summary, and the appeal address.
+  assert.equal(view.tip, "HTTP 403 · TOS_VIOLATION · 账号因违反服务条款被停用\nhttps://support.example.com/appeal");
   assert.ok(view.secrets.includes("账号因违反服务条款被停用"));
   view = invalid({ reason: "auth", summary: "", status: "401", appeal_url: "javascript:alert(1)" });
   assert.equal(view.badge, "ev_credential_invalid");
@@ -997,4 +1001,58 @@ test("manual ignition failures show no retry, and credential pauses no end time"
   assert.equal(paused({ until: "2026-11-17T00:00:00Z", error: "boom" }).detail, "ev_paused(11-17T00:00|boom)");
   // Without an end time or a known reason, no "until —".
   assert.equal(paused({ error: "boom" }).detail, "boom");
+});
+
+test("a credential problem shares its row with the ignition pause and the notifications", () => {
+  const ctx = eventContext();
+  const g = { group: "claude:k", label: "Claude" };
+  const until = "2026-11-16T23:00:00Z";
+  const events = [
+    event("notify", 1800, { ...g, params: { title: "⏳ Claude 被限流", notify_kind: "rate_limited" } }),
+    event("notify_failed", 30, { ...g, level: "warn", params: { title: "⚠️ Claude 点火已暂停", notify_kind: "circuit", error: "Bark: 500" } }),
+    event("credential_invalid", 0, { ...g, level: "error", params: { reason: "rate_limited", status: "429", summary: "请求过多", until, source: "ignite" } }),
+    event("ignite_paused", 0, { ...g, level: "error", params: { until, error: "{}", summary: "请求过多" } }),
+    // Another group's pause stays its own row.
+    event("ignite_paused", 10, { group: "gemini:k", label: "Gemini", level: "error", params: { until, error: "x" } }),
+  ];
+  const built = ctx.eventRows(events, false);
+  assert.deepEqual(plain(built.rows.map((r) => r.event.kind + ":" + r.event.label)), ["credential_invalid:Claude", "ignite_paused:Gemini"]);
+  const row = built.rows[0];
+  assert.equal(row.paused.kind, "ignite_paused");
+  // The rate limit notification half an hour later and the circuit
+  // notification of the pause both join it.
+  assert.deepEqual(plain(row.pushes.map((ev) => ev.params.notify_kind).sort()), ["circuit", "rate_limited"]);
+  const view = ctx.eventView(row.event, row.notifyKind, row.paused);
+  assert.equal(view.badge, "ev_credential_rate_limited");
+  assert.equal(view.detail, "ev_ignite_paused_until(请求过多|11-16T23:00)");
+  assert.equal(view.tip, "HTTP 429 · 请求过多");
+  // A pause more than PAUSE_PAIR seconds away is a row of its own.
+  assert.equal(ctx.eventRows([events[2], { ...events[3], time: new Date((T0 - 61) * 1000).toISOString() }], false).rows.length, 2);
+  // Found by a query, without a pause: the rate limit alone.
+  assert.equal(ctx.eventView(event("credential_invalid", 0, { ...g, params: { reason: "rate_limited", summary: "请求过多", until, source: "query" } })).detail,
+    "ev_limited_until(请求过多|11-16T23:00)");
+  // An account suspended at ignition: one row too.
+  const suspended = ctx.eventRows([
+    event("credential_invalid", 0, { ...g, params: { reason: "suspended", summary: "停用", source: "ignite" } }),
+    event("ignite_paused", 0, { ...g, params: { reason: "suspended", error: "x", summary: "停用" } }),
+  ], false);
+  assert.equal(suspended.rows.length, 1);
+  assert.equal(ctx.eventView(suspended.rows[0].event, undefined, suspended.rows[0].paused).detail, "ev_ignite_paused_note(停用)");
+});
+
+test("Did Codex Reset notifications join the event recorded after them", () => {
+  const ctx = eventContext();
+  const signal = (at) => event("codex_reset", at, { label: "Did Codex Reset", params: { count: "1" } });
+  const push = (at, fields = {}) => event("notify", at, { params: { title: "✅ Codex 全局重置已完成", notify_kind: "codex_reset" }, ...fields });
+  let built = ctx.eventRows([signal(10), push(5), push(0, { params: { title: "📅 Codex 全局重置已排期" } })], false);
+  assert.equal(built.rows.length, 1);
+  assert.equal(built.rows[0].event.kind, "codex_reset");
+  assert.equal(built.rows[0].pushes.length, 2);
+  // More than five minutes apart: the notification stays a row, under the
+  // label of Did Codex Reset.
+  built = ctx.eventRows([signal(400), push(0)], false);
+  assert.equal(built.rows.length, 2);
+  const view = ctx.eventView(built.rows[1].event, built.rows[1].notifyKind);
+  assert.equal(view.label, "Did Codex Reset");
+  assert.equal(view.detail, "✅ Codex 全局重置已完成");
 });
