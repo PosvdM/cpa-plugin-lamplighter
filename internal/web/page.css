@@ -598,6 +598,8 @@ table.services .sub-row td { border-bottom: none; padding-top: 4px; text-align: 
   form label.mode-option { padding: 4px 2px; }
   .event-row { grid-template-columns: 82px minmax(0, 1fr); }
   .event-label, .event-detail { grid-column: 2; }
+  .event-detail { flex-wrap: wrap; }
+  .event-text { white-space: normal; overflow-wrap: anywhere; }
 }
 
 /* Last, so that it overrides the transitions and animations above. */
