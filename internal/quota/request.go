@@ -3,6 +3,7 @@ package quota
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 )
 
@@ -30,3 +31,23 @@ type Doer interface {
 // ErrUnauthorized means the upstream rejected the access token. CPA refreshes
 // tokens in the background, so the caller skips this round.
 var ErrUnauthorized = errors.New("上游返回 401，access token 可能刚过期，等待 CPA 刷新")
+
+// errorTextLength is how much of an error response Error includes; the text
+// is shown on the management page.
+const errorTextLength = 300
+
+// HTTPError is an upstream response with a status other than 2xx and 401.
+// Body keeps the start of the response, longer than the text of Error, so
+// that failure.Diagnose can read reasons placed late in a JSON error.
+type HTTPError struct {
+	Status int
+	Body   string
+}
+
+func (e *HTTPError) Error() string {
+	body := e.Body
+	if len(body) > errorTextLength {
+		body = body[:errorTextLength]
+	}
+	return fmt.Sprintf("上游 HTTP %d: %s", e.Status, body)
+}

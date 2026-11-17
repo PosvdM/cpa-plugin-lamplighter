@@ -653,7 +653,7 @@ func TestHardIgnitionFailurePausesAndNotifiesOnce(t *testing.T) {
 	c := &clock{t: time.Date(2026, 10, 4, 10, 0, 0, 0, shanghai)}
 	h := claudeIgnitionHost(c, nil)
 	h.execute = func(pluginapi.HostModelExecutionRequest) (pluginapi.HostModelExecutionResponse, error) {
-		return pluginapi.HostModelExecutionResponse{}, &host.Error{Code: "host_call_failed", Message: "unauthorized", Status: 401}
+		return pluginapi.HostModelExecutionResponse{}, &host.Error{Code: "host_call_failed", Message: "conflict", Status: 409}
 	}
 	e, sender := newTestEngine(t, h, c)
 	ctx := context.Background()
@@ -829,7 +829,7 @@ func TestLanguageReportedByThePageIsUsedForNotifications(t *testing.T) {
 	c := &clock{t: time.Date(2026, 10, 4, 10, 0, 0, 0, shanghai)}
 	h := claudeIgnitionHost(c, nil)
 	h.execute = func(pluginapi.HostModelExecutionRequest) (pluginapi.HostModelExecutionResponse, error) {
-		return pluginapi.HostModelExecutionResponse{}, &host.Error{Code: "host_call_failed", Message: "unauthorized", Status: 401}
+		return pluginapi.HostModelExecutionResponse{}, &host.Error{Code: "host_call_failed", Message: "conflict", Status: 409}
 	}
 	e, sender := newTestEngine(t, h, c)
 	ctx := context.Background()

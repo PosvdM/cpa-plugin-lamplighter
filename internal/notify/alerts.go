@@ -196,6 +196,7 @@ func (a *Alerts) buildChangeMessage(g Group, changes []change, now time.Time) Me
 		Body:  a.body(g, now),
 		Level: level,
 		Label: g.Label,
+		Group: g.Key,
 	}
 }
 
@@ -203,10 +204,12 @@ func (a *Alerts) buildChangeMessage(g Group, changes []change, now time.Time) Me
 // with what was left of each window in the ended cycle, when known.
 func (a *Alerts) buildRecoveryMessage(g Group, recoveries []recovery, now time.Time) Message {
 	labels := make([]string, 0, len(recoveries))
+	ids := make([]string, 0, len(recoveries))
 	var previous []string
 	for _, r := range recoveries {
 		label := quota.ShortLabel(r.window.Label)
 		labels = append(labels, label)
+		ids = append(ids, r.window.ID)
 		if r.previous != nil {
 			previous = append(previous, fmt.Sprintf("%s %d%%", label, roundPercent(*r.previous)))
 		}
@@ -216,11 +219,13 @@ func (a *Alerts) buildRecoveryMessage(g Group, recoveries []recovery, now time.T
 		body = T(a.Lang, "previous_cycle", strings.Join(previous, " / ")) + "\n" + body
 	}
 	return Message{
-		Kind:  KindRecovery,
-		Title: T(a.Lang, "recovered", g.Label, strings.Join(labels, " / ")),
-		Body:  body,
-		Level: LevelActive,
-		Label: g.Label,
+		Kind:    KindRecovery,
+		Title:   T(a.Lang, "recovered", g.Label, strings.Join(labels, " / ")),
+		Body:    body,
+		Level:   LevelActive,
+		Label:   g.Label,
+		Group:   g.Key,
+		Windows: ids,
 	}
 }
 
@@ -235,6 +240,7 @@ func (a *Alerts) buildReminderMessage(g Group, reminders []reminder, now time.Ti
 		Body:  a.body(g, now),
 		Level: LevelActive,
 		Label: g.Label,
+		Group: g.Key,
 	}
 }
 
@@ -285,6 +291,67 @@ func staleReading(old *store.WindowState, w quota.Window, now time.Time) bool {
 	}
 	oldReset := parseReset(old.Reset)
 	return !oldReset.IsZero() && w.Reset.Before(oldReset.Add(-resetTolerance))
+}
+
+// Bounced reports whether w reports the reset time of the cycle that ended
+// last, ws.EndedReset. The Antigravity quota API sometimes answers from the
+// state before a reset for a few minutes after it: the 7-day window goes
+// from 95% to 100% with a new reset time and back to 95% with the old one.
+// Such a reading neither changes the baseline nor notifies, and records no
+// reset or exhaustion event. A reading whose reset time has passed is
+// handled as stale before this check.
+func Bounced(ws *store.WindowState, w quota.Window) bool {
+	return ws != nil && !ws.Rebase && !w.Reset.IsZero() && SameResetCycle(formatReset(w.Reset), ws.EndedReset)
+}
+
+// A bounce that lasts shows that the detected reset was wrong and the
+// provider still counts the old cycle. Seen 2026-10-22 on Antigravity: the
+// 7-day window reported an unused new cycle for almost five hours, then the
+// old cycle with 95% until its reset two days later. The reading of the old
+// cycle is accepted once bounced readings in a row span bounceAcceptAge and
+// number at least bounceAcceptReadings. The bounces seen so far ended after
+// one or two readings, under 10 minutes with the default 5-minute poll, so
+// 30 minutes leaves a wide margin; the reading count keeps two readings far
+// apart, after a restart or with a long poll interval, from deciding alone.
+const (
+	bounceAcceptAge      = 30 * time.Minute
+	bounceAcceptReadings = 3
+)
+
+// bounceAccepted counts one bounced reading and reports whether the old
+// cycle is to be accepted.
+func bounceAccepted(ws *store.WindowState, now time.Time) bool {
+	if ws.BounceSince == 0 || ws.BounceReadings == 0 {
+		ws.BounceSince, ws.BounceReadings = now.Unix(), 0
+	}
+	ws.BounceReadings++
+	return ws.BounceReadings >= bounceAcceptReadings && now.Sub(time.Unix(ws.BounceSince, 0)) >= bounceAcceptAge
+}
+
+// newBaseline returns the baseline for a window seen for the first time.
+// keep is the earlier state of the window or nil; a new baseline after a
+// plan change keeps the reminders already sent for a reset, and the cycle
+// that already ended.
+func (a *Alerts) newBaseline(w quota.Window, keep *store.WindowState, now time.Time) *store.WindowState {
+	current := a.Severity(w.Remaining)
+	long := !w.Reset.IsZero() && w.Reset.Sub(now) > 24*time.Hour
+	ws := &store.WindowState{
+		Severity:         current,
+		NotifiedSeverity: current,
+		Remaining:        w.Remaining,
+		Reset:            formatReset(w.Reset),
+		LastSeen:         now.Unix(),
+		Exhausted:        w.Remaining <= ExhaustedRemaining,
+		Long:             long,
+	}
+	if keep != nil {
+		ws.ResetNotice1hFor, ws.ResetNotice1dFor = keep.ResetNotice1hFor, keep.ResetNotice1dFor
+		ws.EndedReset, ws.Long = keep.EndedReset, keep.Long || long
+	}
+	if !w.Reset.IsZero() && now.Before(w.Reset) {
+		ws.CycleReset, ws.CycleRemaining, ws.CycleSeen = ws.Reset, w.Remaining, now.Unix()
+	}
+	return ws
 }
 
 // previousReadingAge is how old the last reading of an ended cycle may be,
@@ -377,30 +444,23 @@ func (a *Alerts) ProcessGroup(ctx context.Context, st *store.State, g Group, now
 		long := !w.Reset.IsZero() && w.Reset.Sub(now) > 24*time.Hour
 		old, seen := groupState.Windows[w.ID]
 		if !seen || old == nil || old.Rebase {
-			ws := &store.WindowState{
-				Severity:         current,
-				NotifiedSeverity: current,
-				Remaining:        w.Remaining,
-				Reset:            formatReset(w.Reset),
-				LastSeen:         now.Unix(),
-				Exhausted:        exhausted,
-				Long:             long,
-			}
-			if old != nil {
-				// A new baseline after a plan change keeps the reminders
-				// already sent for a reset and the cycle that already ended.
-				ws.ResetNotice1hFor, ws.ResetNotice1dFor = old.ResetNotice1hFor, old.ResetNotice1dFor
-				ws.EndedReset, ws.Long = old.EndedReset, old.Long || long
-			}
-			groupState.Windows[w.ID] = ws
-			if !w.Reset.IsZero() && now.Before(w.Reset) {
-				ws.CycleReset, ws.CycleRemaining, ws.CycleSeen = ws.Reset, w.Remaining, now.Unix()
-			}
+			groupState.Windows[w.ID] = a.newBaseline(w, old, now)
 			continue
 		}
 		if staleReading(old, w, now) {
 			continue
 		}
+		if Bounced(old, w) {
+			if bounceAccepted(old, now) {
+				// The cycle did not end: start over from its reading without
+				// a notification, as after a plan change.
+				ws := a.newBaseline(w, old, now)
+				ws.EndedReset = ""
+				groupState.Windows[w.ID] = ws
+			}
+			continue
+		}
+		old.BounceSince, old.BounceReadings = 0, 0
 		if long {
 			old.Long = true
 		}
@@ -521,12 +581,98 @@ func PlanMessage(lang, label, from, to string) Message {
 }
 
 // CircuitMessage is sent once when ignition pauses until the next day.
-func CircuitMessage(lang, label string, until time.Time, reason string, loc *time.Location) Message {
+// summary is the error in one sentence, see failure.Diagnose.
+func CircuitMessage(lang, label string, until time.Time, summary string, loc *time.Location) Message {
 	return Message{
 		Kind:  KindCircuit,
 		Title: T(lang, "circuit_title", label),
-		Body:  T(lang, "circuit_body", until.In(loc).Format("01/02 15:04"), truncate(reason, 220)),
+		Body:  T(lang, "circuit_body", until.In(loc).Format("01/02 15:04"), truncate(summary, 220)),
 		Level: LevelTimeSensitive,
 		Label: label,
 	}
+}
+
+// Problem describes a credential problem for CredentialMessage.
+type Problem struct {
+	// Kind is KindCredential, KindSuspended or KindRateLimited.
+	Kind string
+	// Status and Code are the HTTP status and error code, either may be
+	// empty; Summary is the error in one sentence.
+	Status, Code, Summary string
+	// AppealURL is the appeal form of a suspended account, or empty.
+	AppealURL string
+	// Ignition is true when an ignition found the problem, false for a
+	// quota query.
+	Ignition bool
+	// Until is when ignition resumes after a rate limit.
+	Until time.Time
+}
+
+// CredentialMessage is sent once when a credential stops working: rejected
+// (KindCredential), account disabled by the provider (KindSuspended) or
+// rate limited during ignition (KindRateLimited).
+func CredentialMessage(lang, label string, p Problem, loc *time.Location) Message {
+	head := joinNonEmpty(" · ", p.Status, p.Code)
+	source := T(lang, "source_query")
+	if p.Ignition {
+		source = T(lang, "source_ignite")
+	}
+	summary := truncate(p.Summary, 220)
+	var title string
+	var lines []string
+	switch p.Kind {
+	case KindSuspended:
+		title = T(lang, "suspended_title", label)
+		lines = append(lines, joinNonEmpty(" · ", head, T(lang, "suspended_reason")), summary, T(lang, "line_source", source))
+		if p.AppealURL != "" {
+			lines = append(lines, T(lang, "line_appeal", p.AppealURL))
+		}
+	case KindRateLimited:
+		title = T(lang, "rate_limited_title", label)
+		lines = append(lines, joinNonEmpty(" · ", head, summary), T(lang, "rate_limited_until", p.Until.In(loc).Format("01/02 15:04")))
+	default:
+		title = T(lang, "credential_title", label)
+		lines = append(lines, joinNonEmpty(" · ", head, summary), T(lang, "line_source", source), T(lang, "credential_fix"))
+	}
+	msg := Message{
+		Kind:  p.Kind,
+		Title: title,
+		Level: LevelTimeSensitive,
+		Label: label,
+	}
+	for _, line := range lines {
+		if line != "" {
+			msg.Body = joinNonEmpty("\n", msg.Body, line)
+		}
+	}
+	if p.Kind == KindSuspended && strings.HasPrefix(p.AppealURL, "https://") {
+		msg.JumpURL = p.AppealURL
+	}
+	return msg
+}
+
+// CredentialOKMessage is sent when a credential that a CredentialMessage
+// reported works again.
+func CredentialOKMessage(lang, label string, ignition bool) Message {
+	body := T(lang, "credential_ok_query")
+	if ignition {
+		body = T(lang, "credential_ok_ignite")
+	}
+	return Message{
+		Kind:  KindCredentialOK,
+		Title: T(lang, "credential_ok_title", label),
+		Body:  body,
+		Level: LevelActive,
+		Label: label,
+	}
+}
+
+func joinNonEmpty(sep string, parts ...string) string {
+	var kept []string
+	for _, part := range parts {
+		if part = strings.TrimSpace(part); part != "" {
+			kept = append(kept, part)
+		}
+	}
+	return strings.Join(kept, sep)
 }

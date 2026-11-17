@@ -355,6 +355,7 @@ func (e *Engine) poll(ctx context.Context, cfg config.Config, slot time.Time, on
 	e.mu.Unlock()
 	e.dirty = true
 	e.checkCooldowns(ctx, cfg)
+	e.flushCredentialNotices(ctx)
 }
 
 // refreshCred runs the active query of one credential.
@@ -369,13 +370,17 @@ func (e *Engine) refreshCred(ctx context.Context, cfg config.Config, cred *Cred)
 	}
 	credential := providers.ParseCredential(raw)
 	credential.Provider, credential.ID, credential.Name = cred.HostProvider, cred.ID, cred.Name
+	fingerprint := providers.Fingerprint(raw)
+	e.noteFingerprint(cred, fingerprint)
 	readAt := e.now()
 	groups, err := providers.Fetch(ctx, p, e.egress, credential, readAt)
 	if err != nil {
+		e.noteQueryFailure(ctx, cred, fingerprint, err)
 		return err
 	}
 	now := e.now()
 	e.activeAt[cred.AuthIndex] = now
+	e.noteCredentialOK(ctx, cred, sourceQuery)
 	// The plan comes first, so that a changed plan resets the notification
 	// baselines before the new windows are compared with them.
 	confirmed := e.notePlan(ctx, p, cred, credential, groups, now)
@@ -792,8 +797,8 @@ func (e *Engine) pollResetFeed(ctx context.Context, cfg config.Config) {
 		return
 	}
 	var sender notify.Sender
-	if e.alerts != nil {
-		sender = e.alerts.Sender
+	if e.alerts != nil && e.alerts.Sender != nil {
+		sender = recordingSender{e: e, next: e.alerts.Sender}
 	}
 	sent := notify.ProcessResetRecords(ctx, e.state, records, cfg.CodexResetUpdates.NotifyCurrentPending, sender, cfg.Location(), e.language(), e.now())
 	if sent > 0 {

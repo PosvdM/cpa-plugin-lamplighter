@@ -37,6 +37,11 @@ type WindowState struct {
 	// EndedReset is the reset time of the last cycle that ended. Readings
 	// that still report it arrive late and are ignored.
 	EndedReset string `json:"ended_reset,omitempty"`
+	// BounceSince and BounceReadings count the readings in a row that report
+	// EndedReset as a future reset, from when the first one was seen, in Unix
+	// seconds; see notify.Bounced.
+	BounceSince    int64 `json:"bounce_since,omitempty"`
+	BounceReadings int   `json:"bounce_readings,omitempty"`
 	// PendingRecovery is a recovery notification not delivered yet.
 	PendingRecovery *PendingRecovery `json:"pending_recovery,omitempty"`
 	// Rebase 表示套餐变化或主动查询确认窗口缺席；窗口返回后的首次读数
@@ -123,6 +128,60 @@ type State struct {
 	Language string `json:"language,omitempty"`
 	// Plans maps an auth index to the plan last read for the account.
 	Plans map[string]*PlanState `json:"plans,omitempty"`
+	// Credentials maps an auth index to the credential problem of the
+	// account, see CredentialState.
+	Credentials map[string]*CredentialState `json:"credentials,omitempty"`
+}
+
+// CredentialState is a credential problem of one account: the provider
+// rejected the credential (reason "auth") or disabled the account
+// ("suspended"). Ignition stays paused while it lasts, and it is notified
+// once. See internal/engine/credential.go.
+type CredentialState struct {
+	// Reason is "auth" or "suspended", empty when the account has no
+	// problem.
+	Reason    string `json:"reason,omitempty"`
+	Status    string `json:"status,omitempty"`
+	Code      string `json:"code,omitempty"`
+	Summary   string `json:"summary,omitempty"`
+	AppealURL string `json:"appeal_url,omitempty"`
+	// Source is "ignite" or "query", whichever found the problem, and
+	// Group the quota group key of its event, which its notification
+	// carries too.
+	Source string `json:"source,omitempty"`
+	Group  string `json:"group,omitempty"`
+	// Since is when the problem was found, in Unix seconds.
+	Since int64 `json:"since,omitempty"`
+	// Fingerprint identifies the credential the problem was found with; a
+	// different one, after logging in again, lets ignition try again.
+	Fingerprint string `json:"fingerprint,omitempty"`
+	// Changed is set when the credential differs from Fingerprint.
+	Changed bool `json:"changed,omitempty"`
+	// Notice is the notification still to send: "problem" or "restored",
+	// empty when there is none. NoticeAt is when it became due, and
+	// Notified tells whether the problem notification was delivered.
+	Notice   string `json:"notice,omitempty"`
+	NoticeAt int64  `json:"notice_at,omitempty"`
+	Notified bool   `json:"notified,omitempty"`
+	// QueryReason, QuerySince and QueryCount count the quota queries in a
+	// row that failed with a credential problem not confirmed yet.
+	QueryReason string `json:"query_reason,omitempty"`
+	QuerySince  int64  `json:"query_since,omitempty"`
+	QueryCount  int    `json:"query_count,omitempty"`
+}
+
+// Credential returns the credential state of authIndex, creating it when
+// missing.
+func (s *State) Credential(authIndex string) *CredentialState {
+	if s.Credentials == nil {
+		s.Credentials = map[string]*CredentialState{}
+	}
+	c, ok := s.Credentials[authIndex]
+	if !ok || c == nil {
+		c = &CredentialState{}
+		s.Credentials[authIndex] = c
+	}
+	return c
 }
 
 // PlanState is the raw plan value of one account, see providers.PlanOf.

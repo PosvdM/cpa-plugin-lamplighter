@@ -614,7 +614,10 @@ func TestIgnitionStreamErrorsKeepFailureProtection(t *testing.T) {
 					if err != nil || h.calls != 2 || h.closes != 2 || ts.LastSuccessEpoch == 0 || len(e.refused) != 1 {
 						t.Fatalf("model fallback: err=%v calls=%d closes=%d state=%+v refused=%v", err, h.calls, h.closes, ts, e.refused)
 					}
-				} else if err == nil || ignite.Classify(err) != ignite.Hard || h.calls != 1 || h.closes != 1 || ts.CircuitOpenUntilEpoch == 0 || ts.ConsecutiveFailures != 1 || ts.LastSuccessEpoch != 0 {
+				} else if paused := ts.CircuitOpenUntilEpoch != 0; err == nil || ignite.Classify(err) != ignite.Hard || h.calls != 1 || h.closes != 1 || ts.ConsecutiveFailures != 1 || ts.LastSuccessEpoch != 0 ||
+					// A rejected credential waits for a new one instead of the next day.
+					strings.Contains(failure, "authentication") != (!paused && e.credentialBlocked(chosen.cred.AuthIndex)) ||
+					!strings.Contains(failure, "authentication") && !paused {
 					t.Fatalf("hard failure protection: err=%v calls=%d closes=%d state=%+v", err, h.calls, h.closes, ts)
 				}
 				if strings.Contains(ts.LastError+strings.Join(h.messages, ""), "SECRET") {

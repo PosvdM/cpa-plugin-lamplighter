@@ -13,7 +13,9 @@ import (
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/quota"
 )
 
-const maxErrorBodyLength = 300
+// maxErrorBodyLength is how much of an error response is kept for
+// failure.Diagnose; quota.HTTPError shows less of it.
+const maxErrorBodyLength = 4096
 
 func send(ctx context.Context, doer quota.Doer, cred Credential, req quota.Request) (map[string]any, error) {
 	resp, err := doer.Do(ctx, cred.ProxyURL, req)
@@ -28,7 +30,7 @@ func send(ctx context.Context, doer quota.Doer, cred Credential, req quota.Reque
 		if len(body) > maxErrorBodyLength {
 			body = body[:maxErrorBodyLength]
 		}
-		return nil, fmt.Errorf("上游 HTTP %d: %s", resp.Status, body)
+		return nil, &quota.HTTPError{Status: resp.Status, Body: body}
 	}
 	decoder := json.NewDecoder(bytes.NewReader(resp.Body))
 	decoder.UseNumber()

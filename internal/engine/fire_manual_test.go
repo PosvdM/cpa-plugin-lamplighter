@@ -37,7 +37,8 @@ func checkManualFailure(t *testing.T, e *Engine, sender *fakeSender, c *clock, c
 			t.Fatalf("manual failure changed automatic state: before=%+v after=%+v", before, ts)
 		}
 		ev := e.events[len(e.events)-1]
-		if ev.Kind != "ignite_failed" || ev.Params != nil || ev.Detail != err.Error() || strings.Contains(ev.Message+ev.Detail, "重试") {
+		if p := ev.Params; ev.Kind != "ignite_failed" || p["manual"] != "1" || p["error"] != err.Error() || p["summary"] == "" || p["retry_seconds"] != "" ||
+			ev.Detail != err.Error() || strings.Contains(ev.Message+ev.Detail, "重试") {
 			t.Fatalf("manual failure must display error without retry: %+v", ev)
 		}
 	}

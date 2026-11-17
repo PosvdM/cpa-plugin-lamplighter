@@ -104,6 +104,9 @@ type Engine struct {
 	releaseAt    time.Time
 	// plans is the raw plan per auth index, a copy of state.Plans.
 	plans map[string]string
+	// credProblems is the reason of the credential problem per auth index,
+	// a copy of state.Credentials.
+	credProblems map[string]string
 
 	// Owned by the loop goroutine.
 	state     *store.State
@@ -384,6 +387,12 @@ func (e *Engine) openStores(cfg config.Config) error {
 	e.mu.Lock()
 	e.dataDir = dir
 	e.lang = notify.NormalizeLang(state.Language)
+	e.credProblems = map[string]string{}
+	for authIndex, st := range state.Credentials {
+		if st != nil && st.Reason != "" {
+			e.credProblems[authIndex] = st.Reason
+		}
+	}
 	e.plans = map[string]string{}
 	for authIndex, plan := range state.Plans {
 		if plan != nil && plan.Plan != "" {

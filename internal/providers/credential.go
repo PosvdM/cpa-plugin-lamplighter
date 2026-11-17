@@ -1,10 +1,39 @@
 package providers
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"strconv"
 	"strings"
 )
+
+// Fingerprint identifies the login behind a CPA credential file, or returns
+// "" when the file holds no secret it knows. It hashes the refresh token,
+// else the API key, else the access token.
+//
+// CPA writes credential files on its own: every token refresh replaces the
+// access token, and after an upstream error CPA adds fields such as
+// tos_appeal_url. Neither the modification time nor the whole file tells a
+// new login apart from that. Google, as used by Antigravity, keeps the
+// refresh token across refreshes and issues a new one with a new login.
+// Providers that rotate refresh tokens, such as Claude, change the
+// fingerprint with a successful refresh, which a rejected credential
+// cannot do.
+func Fingerprint(raw json.RawMessage) string {
+	var data map[string]any
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return ""
+	}
+	metadata, _ := data["metadata"].(map[string]any)
+	for _, keys := range [][]string{{"refresh_token", "refreshToken"}, {"api_key", "apiKey"}, {"access_token", "accessToken"}} {
+		if value := firstString(data, metadata, keys...); value != "" {
+			sum := sha256.Sum256([]byte(keys[0] + "\x00" + value))
+			return hex.EncodeToString(sum[:8])
+		}
+	}
+	return ""
+}
 
 // Credential holds the fields Lamplighter reads from a credential file.
 type Credential struct {

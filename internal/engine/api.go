@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -301,9 +302,13 @@ type AccountStatus struct {
 	// CooldownUntil is when CPA ends its cooldown of the account.
 	CooldownUntil time.Time `json:"cooldown_until,omitempty"`
 	// StaleCooldown is true when the cooldown outlasts a recovered quota.
-	StaleCooldown bool          `json:"stale_cooldown,omitempty"`
-	Error         string        `json:"error,omitempty"`
-	Groups        []GroupStatus `json:"groups"`
+	StaleCooldown bool   `json:"stale_cooldown,omitempty"`
+	Error         string `json:"error,omitempty"`
+	// CredentialProblem is "auth" when the provider rejects the credential
+	// and "suspended" when it disabled the account, see
+	// store.CredentialState; empty otherwise.
+	CredentialProblem string        `json:"credential_problem,omitempty"`
+	Groups            []GroupStatus `json:"groups"`
 	// Plan is the name of the account's plan, empty while it is not known,
 	// and DefaultWeight the weight of the account in the total of several
 	// accounts when account_weights does not set one.
@@ -471,6 +476,8 @@ func (e *Engine) Status() Status {
 			Note:        cred.Note,
 			Unavailable: cred.Unavailable,
 			Error:       e.pollErrs[cred.AuthIndex],
+
+			CredentialProblem: e.credProblems[cred.AuthIndex],
 		}
 		plan := providers.PlanOf(cred.Provider, e.plans[cred.AuthIndex])
 		account.Plan, account.DefaultWeight = plan.Name, plan.Weight
@@ -775,16 +782,55 @@ func (e *Engine) historyContext(ctx context.Context, span time.Duration, kind st
 	return resp, nil
 }
 
+// notifyParams returns the event params of a notification: its title, its
+// kind as notify_kind and, for a recovery, the IDs of the reset windows.
+// The page attaches the notification to the event that triggered it.
+func notifyParams(msg notify.Message) map[string]string {
+	params := map[string]string{"title": msg.Title, "notify_kind": msg.Kind}
+	if len(msg.Windows) > 0 {
+		params["windows"] = strings.Join(msg.Windows, ",")
+	}
+	return params
+}
+
 // notified records a delivered notification. The page shows its title, which
-// is already in the notification language.
+// is already in the notification language. group is the quota group that
+// triggered it; when empty, the group of msg is used.
 func (e *Engine) notified(group string, msg notify.Message) {
-	e.addEventDetail("info", "notify", group, msg.Label, msg.Title, msg.Title, map[string]string{"title": msg.Title})
+	if group == "" {
+		group = msg.Group
+	}
+	e.addEventDetail("info", "notify", group, msg.Label, msg.Title, msg.Title, notifyParams(msg))
 }
 
 // notifyFailed records a notification that a channel did not accept.
 func (e *Engine) notifyFailed(group string, msg notify.Message, err error) {
+	if group == "" {
+		group = msg.Group
+	}
+	params := notifyParams(msg)
+	params["error"] = err.Error()
 	e.addEventDetail("warn", "notify_failed", group, msg.Label, fmt.Sprintf("%s：%v", msg.Title, err),
-		fmt.Sprintf("推送失败 %s：%v", msg.Title, err), map[string]string{"title": msg.Title, "error": err.Error()})
+		fmt.Sprintf("推送失败 %s：%v", msg.Title, err), params)
+}
+
+// recordingSender records the notifications it delivers and the ones that
+// fail, for senders that report neither, such as ProcessResetRecords.
+type recordingSender struct {
+	e    *Engine
+	next notify.Sender
+}
+
+func (r recordingSender) Send(ctx context.Context, msg notify.Message) error {
+	err := r.next.Send(ctx, msg)
+	switch {
+	case errors.Is(err, notify.ErrNotConfigured):
+	case err != nil:
+		r.e.notifyFailed("", msg, err)
+	default:
+		r.e.notified("", msg)
+	}
+	return err
 }
 
 // language returns the notification language.

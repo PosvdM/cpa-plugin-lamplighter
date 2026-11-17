@@ -257,6 +257,20 @@ func (s Schedule) RecordFailure(ts *store.TargetState, now time.Time, err error)
 	return FailureOutcome{RetryIn: delay}
 }
 
+// RecordCredentialFailure records a failure caused by the credential: the
+// provider rejected it or disabled the account. Retrying cannot help, so no
+// retry time is set; the engine skips the target until the credential
+// changes or a manual ignition succeeds. summary is the error in one
+// sentence, shown as the pause reason.
+func RecordCredentialFailure(ts *store.TargetState, now time.Time, err error, summary string) {
+	ts.ConsecutiveFailures++
+	ts.LastError = truncate(errorText(err), 500)
+	ts.LastFailureEpoch = epoch(now)
+	ts.RetryAtEpoch = 0
+	ts.CircuitOpenUntilEpoch = 0
+	ts.CircuitReason = truncate(summary, 500)
+}
+
 // recentCooldown reports whether the previous failure, shortly before now,
 // was already a CPA cooldown.
 func (s Schedule) recentCooldown(ts *store.TargetState, now time.Time) bool {

@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/PosvdM/cpa-plugin-lamplighter/internal/failure"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/notify"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/providers"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/quota"
@@ -141,6 +142,13 @@ func matchesAccount(a AccountStatus, index int, label, filter string, emails *st
 	return filter == "" || filter == label || filter == baseAccountLabel(a, index, emails) ||
 		filter == accountNoteName(a) || a.Email != "" && filter == a.Email
 }
+
+// credentialInvalid reports whether the provider rejects the account's
+// credential: a confirmed problem, or a failed query that says so.
+func credentialInvalid(a AccountStatus) bool {
+	return a.CredentialProblem == failure.ReasonAuth || safeQueryError(a) == "credential authentication failed"
+}
+
 func safeQueryError(a AccountStatus) string {
 	if a.Error == "" {
 		return ""
@@ -256,6 +264,7 @@ type quotaAccountDTO struct {
 	Weight            float64          `json:"weight"`
 	Unavailable       bool             `json:"unavailable"`
 	CredentialInvalid bool             `json:"credential_invalid"`
+	Suspended         bool             `json:"account_suspended"`
 	Error             string           `json:"recent_error,omitempty"`
 	Cooldown          *modelTime       `json:"cooldown_until"`
 	NextIgnition      *modelTime       `json:"next_ignition"`
@@ -351,7 +360,7 @@ func (b *MCPBackend) listContext(ctx context.Context, args map[string]string) (a
 				groups = append(groups, group)
 			}
 			queryErr := safeQueryError(a)
-			account := quotaAccountDTO{Account: label, Plan: a.Plan, Weight: weight, Unavailable: a.Unavailable, CredentialInvalid: queryErr == "credential authentication failed", Error: queryErr, Cooldown: describeTime(a.CooldownUntil, s.Now), NextIgnition: describeTime(targets[g.Key].NextDue, s.Now), Windows: []quotaWindowDTO{}}
+			account := quotaAccountDTO{Account: label, Plan: a.Plan, Weight: weight, Unavailable: a.Unavailable, CredentialInvalid: credentialInvalid(a), Suspended: a.CredentialProblem == failure.ReasonSuspended, Error: queryErr, Cooldown: describeTime(a.CooldownUntil, s.Now), NextIgnition: describeTime(targets[g.Key].NextDue, s.Now), Windows: []quotaWindowDTO{}}
 			for _, w := range g.Windows {
 				target := targets[g.Key]
 				target.Rolling = startStates[g.Key][1]
@@ -386,7 +395,7 @@ func (b *MCPBackend) listContext(ctx context.Context, args map[string]string) (a
 			group.Accounts = append(group.Accounts, account)
 		}
 		if !hasWindows {
-			withoutWindows = append(withoutWindows, map[string]any{"account": label, "provider": a.Provider, "plan": a.Plan, "weight": weight, "unavailable": a.Unavailable, "credential_invalid": safeQueryError(a) == "credential authentication failed", "recent_error": safeQueryError(a)})
+			withoutWindows = append(withoutWindows, map[string]any{"account": label, "provider": a.Provider, "plan": a.Plan, "weight": weight, "unavailable": a.Unavailable, "credential_invalid": credentialInvalid(a), "account_suspended": a.CredentialProblem == failure.ReasonSuspended, "recent_error": safeQueryError(a)})
 		}
 	}
 	for _, g := range groups {
@@ -771,7 +780,7 @@ func (b *MCPBackend) events(ctx context.Context, args map[string]string) (any, e
 			continue
 		}
 		switch event.Kind {
-		case "reset", "exhausted", "ignite", "ignite_manual", "ignite_failed", "ignite_paused":
+		case "reset", "exhausted", "ignite", "ignite_manual", "ignite_failed", "ignite_paused", "credential_invalid", "credential_restored":
 		default:
 			continue
 		}
@@ -779,7 +788,20 @@ func (b *MCPBackend) events(ctx context.Context, args map[string]string) (any, e
 		if !ok {
 			continue
 		}
-		out = append(out, map[string]any{"time": describeTime(event.Time, s.Now), "kind": event.Kind, "account": label[0], "group": label[1], "level": event.Level, "window": event.Params["window"], "reset": describeTime(quota.ParseTime(event.Params["reset"]), s.Now)})
+		item := map[string]any{"time": describeTime(event.Time, s.Now), "kind": event.Kind, "account": label[0], "group": label[1], "level": event.Level, "window": event.Params["window"], "reset": describeTime(quota.ParseTime(event.Params["reset"]), s.Now)}
+		// Only the fixed reason and source values; summaries and errors
+		// are provider text.
+		switch event.Params["reason"] {
+		case failure.ReasonAuth, failure.ReasonSuspended, failure.ReasonRateLimited:
+			item["reason"] = event.Params["reason"]
+		}
+		if event.Kind == "credential_invalid" || event.Kind == "credential_restored" {
+			switch event.Params["source"] {
+			case sourceIgnite, sourceQuery:
+				item["source"] = event.Params["source"]
+			}
+		}
+		out = append(out, item)
 		if len(out) >= limit {
 			break
 		}
@@ -787,23 +809,44 @@ func (b *MCPBackend) events(ctx context.Context, args map[string]string) (any, e
 	return map[string]any{"events": out, "retention_note": "At most 200 recent engine events of all kinds are retained."}, nil
 }
 
+// windowKind returns "7d" for a window the recovery and reminder settings
+// treat as a 7-day window, "5h" for a 5-hour window and "" otherwise.
+func windowKind(w quota.Window, ws *store.WindowState) string {
+	switch {
+	case notify.SevenDayClass(w, ws):
+		return quota.KindSevenDay
+	case quota.IsFiveHour(w):
+		return quota.KindFiveHour
+	}
+	return ""
+}
+
 // recordQuotaTransitions is independent of notification delivery. Missing or
-// rebased windows produce no transitions when a subscription changes.
+// rebased windows produce no transitions when a subscription changes. It
+// runs before the alerts, so the stored baseline still describes the last
+// reading the alerts accepted. A reading that bounced back to the cycle
+// that ended (notify.Bounced) records nothing, and the reading after it is
+// compared with that baseline instead of the bounced reading.
 func (e *Engine) recordQuotaTransitions(group *GroupView, previous []WindowView, now time.Time) {
 	for _, w := range group.Windows {
 		if !w.ObservedAt.Equal(now) {
 			continue
 		}
+		var ws *store.WindowState
 		if e.state != nil {
 			if stored := e.state.Groups[group.Key]; stored != nil {
-				if ws := stored.Windows[w.ID]; ws != nil && ws.Rebase {
-					continue
-				}
+				ws = stored.Windows[w.ID]
 			}
+		}
+		if ws != nil && ws.Rebase || notify.Bounced(ws, w.Window) {
+			continue
 		}
 		for _, old := range previous {
 			if old.ID != w.ID {
 				continue
+			}
+			if notify.Bounced(ws, old.Window) {
+				old.Remaining, old.Reset = ws.Remaining, quota.ParseTime(ws.Reset)
 			}
 			kind := ""
 			rise := w.Remaining-old.Remaining >= notify.RecoveryJump
@@ -819,7 +862,8 @@ func (e *Engine) recordQuotaTransitions(group *GroupView, previous []WindowView,
 					description = "额度耗尽"
 				}
 				detail := w.ID + " " + description
-				params := map[string]string{"window": w.ID, "remaining": strconv.FormatFloat(w.Remaining, 'f', 2, 64)}
+				params := map[string]string{"window": w.ID, "remaining": strconv.FormatFloat(w.Remaining, 'f', 2, 64),
+					"kind": windowKind(w.Window, ws), "label": quota.ShortLabel(w.Label)}
 				if !w.Reset.IsZero() {
 					params["reset"] = eventTime(w.Reset)
 				}
