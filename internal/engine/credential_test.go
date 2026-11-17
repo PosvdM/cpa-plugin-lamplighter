@@ -496,7 +496,7 @@ func TestIgnitionConfirmsAQueryProblem(t *testing.T) {
 	h.files["3"] = `{"access_token":"t3-new","refresh_token":"r3-new"}`
 	e.poll(ctx, cfg, c.t, "", false)
 	e.performDue(ctx, cfg)
-	if st := e.state.Credentials["3"]; len(h.executed) != 1 || st.Source != sourceIgnite || !e.credentialBlocked("3") || len(sender.sent) != 1 {
+	if st := e.state.Credentials["3"]; len(h.executed) != 1 || st.Source != sourceQuery || !st.Ignited || !e.credentialBlocked("3") || len(sender.sent) != 1 {
 		t.Fatalf("ignition after a new login: %d ignitions, state %+v, sent %+v", len(h.executed), st, sender.sent)
 	}
 	rejected = false
@@ -621,5 +621,117 @@ func TestFailedCredentialNotificationIsTriedOncePerPoll(t *testing.T) {
 	e.poll(ctx, cfg, c.t, "", true)
 	if len(sender.sent) != 3 || len(eventsOf(e, "notify")) != 1 || !e.state.Credentials["3"].Notified {
 		t.Fatalf("delivered: %d sends, %+v", len(sender.sent), e.state.Credentials["3"])
+	}
+}
+
+// An ignition-confirmed problem replaced by a problem of another reason,
+// found by queries, stays ignition-confirmed across a restart: a working
+// query does not end it.
+func TestReasonChangeKeepsIgnitionConfirmation(t *testing.T) {
+	c := &clock{t: time.Date(2026, 11, 16, 7, 0, 0, 0, shanghai)}
+	h := claudeIgnitionHost(c, nil)
+	h.files["3"] = `{"access_token":"t3","refresh_token":"r3"}`
+	h.execute = func(pluginapi.HostModelExecutionRequest) (pluginapi.HostModelExecutionResponse, error) {
+		return pluginapi.HostModelExecutionResponse{}, tosError
+	}
+	rejected := false
+	base := h.http
+	h.http = func(req pluginapi.HTTPRequest) pluginapi.HTTPResponse {
+		if req.URL == providers.ClaudeUsageURL && rejected {
+			return pluginapi.HTTPResponse{StatusCode: 401, Body: []byte(`{"type":"error","error":{"type":"authentication_error","message":"Invalid bearer token."}}`)}
+		}
+		return base(req)
+	}
+	dir := t.TempDir()
+	e, sender := newTestEngineIn(t, h, c, dir)
+	ctx := context.Background()
+	cfg := e.config()
+	cfg.Providers["codex"] = config.Provider{}
+	e.Configure(cfg, nil)
+	e.poll(ctx, cfg, c.t, "", false)
+	e.performDue(ctx, cfg)
+	if st := e.state.Credentials["3"]; st == nil || st.Reason != "suspended" || !st.Ignited {
+		t.Fatalf("ignition problem %+v", st)
+	}
+	// Queries are rejected long enough to report a rejected credential.
+	rejected = true
+	for i := 0; i < 7; i++ {
+		e.poll(ctx, cfg, c.t, "", true)
+		c.add(5 * time.Minute)
+	}
+	st := e.state.Credentials["3"]
+	if st == nil || st.Reason != "auth" || st.Source != sourceQuery || !st.Ignited || !e.credentialBlocked("3") {
+		t.Fatalf("replaced problem %+v", st)
+	}
+	if ev := eventsOf(e, "credential_invalid"); len(ev) != 2 || ev[1].Params["reason"] != "auth" || ev[1].Params["source"] != "query" ||
+		len(messagesOf(sender, notify.KindCredential)) != 1 {
+		t.Fatalf("events %+v, sent %+v", ev, sender.sent)
+	}
+	e.saveState()
+
+	e2, sender2 := newTestEngineIn(t, h, c, dir)
+	e2.Configure(cfg, nil)
+	rejected = false
+	e2.poll(ctx, cfg, c.t, "", true)
+	e2.performDue(ctx, cfg)
+	if !e2.credentialBlocked("3") || len(eventsOf(e2, "credential_restored")) != 0 || len(sender2.sent) != 0 || len(h.executed) != 1 {
+		t.Fatalf("a working query ended an ignition-confirmed problem: %+v, sent %+v", e2.state.Credentials["3"], sender2.sent)
+	}
+
+	// A new credential drops the confirmation: a problem of another
+	// reason that a query finds with it ends with a working query.
+	h.files["3"] = `{"access_token":"t3-new","refresh_token":"r3-new"}`
+	suspendedQuery := true
+	h.http = func(req pluginapi.HTTPRequest) pluginapi.HTTPResponse {
+		if req.URL == providers.ClaudeUsageURL && suspendedQuery {
+			return pluginapi.HTTPResponse{StatusCode: 403, Body: []byte(tosBody)}
+		}
+		return base(req)
+	}
+	c.add(5 * time.Minute)
+	e2.poll(ctx, cfg, c.t, "", true)
+	if st := e2.state.Credentials["3"]; st == nil || st.Reason != "suspended" || st.Ignited {
+		t.Fatalf("problem of the new credential %+v", st)
+	}
+	suspendedQuery = false
+	c.add(5 * time.Minute)
+	e2.poll(ctx, cfg, c.t, "", true)
+	if e2.credentialBlocked("3") || len(eventsOf(e2, "credential_restored")) != 1 {
+		t.Fatalf("query problem of the new credential: %+v", e2.state.Credentials["3"])
+	}
+}
+
+// When the credential cannot be read before the request, a rejection does
+// not take the file read afterwards for the rejected credential: a login
+// that replaced it while the request was out still gets its ignition.
+func TestLoginDuringTheRequestIsNotBlocked(t *testing.T) {
+	c := &clock{t: time.Date(2026, 11, 16, 7, 0, 0, 0, shanghai)}
+	h := claudeIgnitionHost(c, nil)
+	h.files["3"] = `{"access_token":"t3","refresh_token":"r3"}`
+	newLogin := `{"access_token":"t3-new","refresh_token":"r3-new"}`
+	h.execute = func(pluginapi.HostModelExecutionRequest) (pluginapi.HostModelExecutionResponse, error) {
+		h.files["3"] = newLogin
+		return pluginapi.HostModelExecutionResponse{}, tosError
+	}
+	dir := t.TempDir()
+	e, _ := newTestEngineIn(t, h, c, dir)
+	ctx := context.Background()
+	cfg := e.config()
+	cfg.Providers["codex"] = config.Provider{}
+	e.Configure(cfg, nil)
+	e.poll(ctx, cfg, c.t, "", false)
+	delete(h.files, "3")
+	e.performDue(ctx, cfg)
+	if st := e.state.Credentials["3"]; len(h.executed) != 1 || st == nil || st.Fingerprint != "" {
+		t.Fatalf("the login read after the request was taken for the rejected one: %+v", st)
+	}
+	e.saveState()
+
+	e2, _ := newTestEngineIn(t, h, c, dir)
+	e2.Configure(cfg, nil)
+	e2.poll(ctx, cfg, c.t, "", false)
+	e2.performDue(ctx, cfg)
+	if st := e2.state.Credentials["3"]; len(h.executed) != 2 || st == nil || st.Fingerprint != providers.Fingerprint(json.RawMessage(newLogin)) {
+		t.Fatalf("the new login was not tried: %d ignitions, %+v", len(h.executed), st)
 	}
 }

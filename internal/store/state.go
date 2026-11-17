@@ -157,6 +157,11 @@ type CredentialState struct {
 	Fingerprint string `json:"fingerprint,omitempty"`
 	// Changed is set when the credential differs from Fingerprint.
 	Changed bool `json:"changed,omitempty"`
+	// Ignited is set when an ignition failed with a problem of this
+	// credential, also one a query found first. Only a successful ignition
+	// ends such a problem, not a working query; a problem of another reason
+	// that replaces it keeps the flag until the credential changes.
+	Ignited bool `json:"ignited,omitempty"`
 	// Notice is the notification still to send: "problem" or "restored",
 	// empty when there is none. NoticeAt is when it became due, and
 	// Notified tells whether the problem notification was delivered.

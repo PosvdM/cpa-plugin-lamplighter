@@ -225,7 +225,9 @@ func (e *Engine) igniteTarget(ctx context.Context, cfg config.Config, t target, 
 	ts.LastAttemptEpoch = float64(start.UnixNano()) / 1e9
 	e.dirty = true
 	// The fingerprint of the credential the request goes out with; a
-	// rejection waits for another one. See noteFingerprint.
+	// rejection waits for another one. When it cannot be read, a rejection
+	// keeps it unknown: the file read after the request may already hold a
+	// new login the request did not use. See noteFingerprint.
 	fingerprint := ""
 	if !manual {
 		fingerprint = e.credentialFingerprint(t.cred)
@@ -257,9 +259,6 @@ func (e *Engine) igniteTarget(ctx context.Context, cfg config.Config, t target, 
 				fmt.Sprintf("暂停，%s：%s", wait, d.Summary),
 				fmt.Sprintf("%s 点火失败，暂停，%s：%v", t.group.Label, wait, err),
 				map[string]string{"error": err.Error(), "summary": d.Summary, "reason": d.Reason})
-			if fingerprint == "" {
-				fingerprint = e.credentialFingerprint(t.cred)
-			}
 			e.noteCredentialProblem(ctx, t.cred, t.group.Key, d, sourceIgnite, fingerprint)
 			return err
 		}

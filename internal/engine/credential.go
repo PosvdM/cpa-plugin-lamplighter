@@ -172,8 +172,9 @@ func (e *Engine) noteQueryFailure(ctx context.Context, cred *Cred, fingerprint s
 // noteCredentialProblem records that the provider rejected cred or disabled
 // its account, records a credential_invalid event and sends one
 // notification. The same problem found again, by ignition or by a query,
-// only updates the fingerprint; found again by ignition, it also counts as
-// found by ignition, so that only a successful ignition ends it.
+// only updates the fingerprint. A problem ignition found or confirmed stays
+// ignition-confirmed (Ignited), also when a problem of another reason
+// replaces it, until the credential changes; see ignitionConfirmed.
 func (e *Engine) noteCredentialProblem(ctx context.Context, cred *Cred, group string, d failure.Diagnosis, source, fingerprint string) {
 	st := e.state.Credential(cred.AuthIndex)
 	e.dirty = true
@@ -181,20 +182,28 @@ func (e *Engine) noteCredentialProblem(ctx context.Context, cred *Cred, group st
 		// An unknown fingerprint stays unknown; see noteFingerprint.
 		st.Fingerprint = fingerprint
 		if source == sourceIgnite {
-			st.Source = sourceIgnite
+			st.Ignited = true
 		}
 		st.Changed = false
 		return
 	}
+	ignited := source == sourceIgnite || st.Reason != "" && !st.Changed && ignitionConfirmed(st)
 	now := e.now()
 	*st = store.CredentialState{
 		Reason: d.Reason, Status: d.StatusText(), Code: d.Code, Summary: credentialSummary(d), AppealURL: d.AppealURL,
-		Source: source, Group: group, Since: now.Unix(), Fingerprint: fingerprint,
+		Source: source, Group: group, Since: now.Unix(), Fingerprint: fingerprint, Ignited: ignited,
 		Notice: noticeProblem, NoticeAt: now.Unix(),
 	}
 	e.publishCredential(cred.AuthIndex, d.Reason)
 	e.credentialEvent(cred, group, d, source, time.Time{})
 	e.sendCredentialNotice(ctx, cred, st, now)
+}
+
+// ignitionConfirmed reports whether an ignition found or confirmed the
+// problem of st, which a working query then does not end. State saved
+// before Ignited existed has only Source.
+func ignitionConfirmed(st *store.CredentialState) bool {
+	return st.Ignited || st.Source == sourceIgnite
 }
 
 // credentialEvent records a credential_invalid event. until is the end of
@@ -247,7 +256,7 @@ func (e *Engine) noteCredentialOK(ctx context.Context, cred *Cred, source string
 		st.QueryReason, st.QuerySince, st.QueryCount = "", 0, 0
 		e.dirty = true
 	}
-	if st.Reason == "" || source == sourceQuery && st.Source != sourceQuery {
+	if st.Reason == "" || source == sourceQuery && ignitionConfirmed(st) {
 		e.forgetEmptyCredential(cred.AuthIndex)
 		return
 	}
