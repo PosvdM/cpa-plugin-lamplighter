@@ -558,7 +558,7 @@ func TestIgnitionStreamCleanupPriority(t *testing.T) {
 
 func TestIgnitionStreamErrorsKeepFailureProtection(t *testing.T) {
 	for _, channel := range []string{"host", "error", "response.failed"} {
-		for _, failure := range []string{"rate_limit_exceeded", "authentication_error", "model_not_found", "normalized_authentication", "explicit_authentication_status", "usage_limit_reached"} {
+		for _, failure := range []string{"rate_limit_exceeded", "authentication_error", "model_not_found", "normalized_authentication", "explicit_authentication_status", "usage_limit_reached", "suspended"} {
 			t.Run(channel+"/"+failure, func(t *testing.T) {
 				c := &clock{t: time.Date(2026, 10, 4, 10, 0, 0, 0, shanghai)}
 				base := claudeIgnitionHost(c, nil)
@@ -588,6 +588,8 @@ func TestIgnitionStreamErrorsKeepFailureProtection(t *testing.T) {
 						detail = `{"status":401,"code":"auth_unavailable","message":"SECRET"}`
 					case "usage_limit_reached":
 						detail = `{"type":"usage_limit_reached","message":"SECRET"}`
+					case "suspended":
+						detail = `{"code":403,"message":"SECRET","status":"PERMISSION_DENIED","details":[{"reason":"TOS_VIOLATION","metadata":{"appeal_url":"https://forms.gle/hGzM9MEUv2azZsrb9"}}]}`
 					}
 					switch channel {
 					case "host":
@@ -610,18 +612,25 @@ func TestIgnitionStreamErrorsKeepFailureProtection(t *testing.T) {
 				}
 				err := e.igniteTarget(context.Background(), e.config(), chosen, false)
 				ts := e.state.Target(chosen.group.Key)
+				// A rejected credential and a disabled account wait for a
+				// new credential instead of the next day.
+				waits := strings.Contains(failure, "authentication") || failure == "suspended"
 				if failure == "model_not_found" {
 					if err != nil || h.calls != 2 || h.closes != 2 || ts.LastSuccessEpoch == 0 || len(e.refused) != 1 {
 						t.Fatalf("model fallback: err=%v calls=%d closes=%d state=%+v refused=%v", err, h.calls, h.closes, ts, e.refused)
 					}
 				} else if paused := ts.CircuitOpenUntilEpoch != 0; err == nil || ignite.Classify(err) != ignite.Hard || h.calls != 1 || h.closes != 1 || ts.ConsecutiveFailures != 1 || ts.LastSuccessEpoch != 0 ||
-					// A rejected credential waits for a new one instead of the next day.
-					strings.Contains(failure, "authentication") != (!paused && e.credentialBlocked(chosen.cred.AuthIndex)) ||
-					!strings.Contains(failure, "authentication") && !paused {
+					waits != (!paused && e.credentialBlocked(chosen.cred.AuthIndex)) || !waits && !paused {
 					t.Fatalf("hard failure protection: err=%v calls=%d closes=%d state=%+v", err, h.calls, h.closes, ts)
 				}
 				if strings.Contains(ts.LastError+strings.Join(h.messages, ""), "SECRET") {
 					t.Fatal("raw provider message escaped into state or logs")
+				}
+				if failure == "suspended" {
+					st := e.state.Credentials[chosen.cred.AuthIndex]
+					if st == nil || st.Reason != "suspended" || st.Code != "TOS_VIOLATION" || st.AppealURL != "https://forms.gle/hGzM9MEUv2azZsrb9" {
+						t.Fatalf("suspension in the stream: %+v", st)
+					}
 				}
 			})
 		}

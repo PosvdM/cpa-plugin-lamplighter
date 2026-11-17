@@ -360,6 +360,13 @@ func (e *Engine) poll(ctx context.Context, cfg config.Config, slot time.Time, on
 
 // refreshCred runs the active query of one credential.
 func (e *Engine) refreshCred(ctx context.Context, cfg config.Config, cred *Cred) error {
+	return e.queryCred(ctx, cfg, cred, true)
+}
+
+// queryCred runs the active query of one credential. Without track, the
+// result does not change the credential state: no new or ended credential
+// problem, event or notification.
+func (e *Engine) queryCred(ctx context.Context, cfg config.Config, cred *Cred, track bool) error {
 	raw, err := e.host.AuthGet(cred.AuthIndex)
 	if err != nil {
 		return fmt.Errorf("读取凭证文件失败：%w", err)
@@ -371,16 +378,22 @@ func (e *Engine) refreshCred(ctx context.Context, cfg config.Config, cred *Cred)
 	credential := providers.ParseCredential(raw)
 	credential.Provider, credential.ID, credential.Name = cred.HostProvider, cred.ID, cred.Name
 	fingerprint := providers.Fingerprint(raw)
-	e.noteFingerprint(cred, fingerprint)
+	if track {
+		e.noteFingerprint(cred, fingerprint)
+	}
 	readAt := e.now()
 	groups, err := providers.Fetch(ctx, p, e.egress, credential, readAt)
 	if err != nil {
-		e.noteQueryFailure(ctx, cred, fingerprint, err)
+		if track {
+			e.noteQueryFailure(ctx, cred, fingerprint, err)
+		}
 		return err
 	}
 	now := e.now()
 	e.activeAt[cred.AuthIndex] = now
-	e.noteCredentialOK(ctx, cred, sourceQuery)
+	if track {
+		e.noteCredentialOK(ctx, cred, sourceQuery)
+	}
 	// The plan comes first, so that a changed plan resets the notification
 	// baselines before the new windows are compared with them.
 	confirmed := e.notePlan(ctx, p, cred, credential, groups, now)

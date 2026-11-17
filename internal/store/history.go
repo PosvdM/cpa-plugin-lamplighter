@@ -33,6 +33,10 @@ type Record struct {
 	// Params holds the values the page builds the event text from in its
 	// own language, events only.
 	Params map[string]string `json:"p,omitempty"`
+	// Account is the auth index of the account an account event concerns,
+	// such as a credential problem found before the account has a quota
+	// group, events only.
+	Account string `json:"a,omitempty"`
 }
 
 // History stores records in one JSON Lines file per UTC day under Dir.

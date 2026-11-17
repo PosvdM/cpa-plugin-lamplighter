@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/config"
+	"github.com/PosvdM/cpa-plugin-lamplighter/internal/failure"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/host"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/store"
 )
@@ -358,6 +359,10 @@ func Classify(err error) Kind {
 // rate limits concern the account and are not model rejections.
 func ModelRejected(err error) bool {
 	if Classify(err) != Hard || errors.Is(err, ErrNotConfirmed) || errors.Is(err, ErrNoModel) {
+		return false
+	}
+	// A disabled account refuses every model, sometimes with HTTP 400.
+	if failure.Diagnose(err).Reason == failure.ReasonSuspended {
 		return false
 	}
 	if status := host.StatusOf(err); status != 0 {

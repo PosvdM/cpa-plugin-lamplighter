@@ -760,8 +760,10 @@ func (b *MCPBackend) events(ctx context.Context, args map[string]string) (any, e
 	}
 	s := b.engine.Status()
 	labels := map[string][2]string{}
+	accounts := map[string]string{}
 	accountNames := accountLabels(s.Accounts)
 	for i, a := range s.Accounts {
+		accounts[a.AuthIndex] = accountNames[i]
 		for _, g := range a.Groups {
 			labels[g.Key] = [2]string{accountNames[i], g.SourceLabel}
 		}
@@ -785,6 +787,11 @@ func (b *MCPBackend) events(ctx context.Context, args map[string]string) (any, e
 			continue
 		}
 		label, ok := labels[event.Group]
+		if !ok && event.Account != "" {
+			// An account event, such as a credential problem found
+			// before the account had a quota group.
+			label[0], ok = accounts[event.Account]
+		}
 		if !ok {
 			continue
 		}

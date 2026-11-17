@@ -28,6 +28,9 @@ type Error struct {
 	Code    string
 	Message string
 	Status  int
+	// AppealURL is the appeal form of a suspended account. Only the
+	// normalized stream errors set it, from an allowlisted address.
+	AppealURL string
 }
 
 func (e *Error) Error() string {

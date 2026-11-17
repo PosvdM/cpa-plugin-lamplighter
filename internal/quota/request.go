@@ -29,14 +29,15 @@ type Doer interface {
 }
 
 // ErrUnauthorized means the upstream rejected the access token. CPA refreshes
-// tokens in the background, so the caller skips this round.
+// tokens in the background, so the caller skips this round. An HTTPError
+// with status 401 matches it in errors.Is and keeps the response.
 var ErrUnauthorized = errors.New("上游返回 401，access token 可能刚过期，等待 CPA 刷新")
 
 // errorTextLength is how much of an error response Error includes; the text
 // is shown on the management page.
 const errorTextLength = 300
 
-// HTTPError is an upstream response with a status other than 2xx and 401.
+// HTTPError is an upstream response with a status other than 2xx.
 // Body keeps the start of the response, longer than the text of Error, so
 // that failure.Diagnose can read reasons placed late in a JSON error.
 type HTTPError struct {
@@ -50,4 +51,9 @@ func (e *HTTPError) Error() string {
 		body = body[:errorTextLength]
 	}
 	return fmt.Sprintf("上游 HTTP %d: %s", e.Status, body)
+}
+
+// Is makes a 401 response match ErrUnauthorized.
+func (e *HTTPError) Is(target error) bool {
+	return target == ErrUnauthorized && e.Status == http.StatusUnauthorized
 }

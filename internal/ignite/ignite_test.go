@@ -154,6 +154,9 @@ func TestModelRejected(t *testing.T) {
 		{&host.Error{Code: "model_execution_failed", Message: "rate_limit_error", Status: 429}, false},
 		{&host.Error{Code: "host_call_failed", Message: "auth_not_found: no auth available", Status: 503}, false},
 		{&host.Error{Code: "host_call_failed", Message: "upstream error", Status: 502}, false},
+		// A disabled account refuses every model; it is no model rejection.
+		{&host.Error{Code: "host_call_failed", Message: `{"error":{"code":400,"message":"This service has been disabled in this account.","status":"FAILED_PRECONDITION"}}`, Status: 400}, false},
+		{&host.Error{Code: "host_call_failed", Message: `{"error":{"message":"Your account has been deactivated.","type":"invalid_request_error","code":"account_deactivated"}}`, Status: 400}, false},
 		{ErrNotConfirmed, false},
 		{errors.Join(ErrNoModel, errors.New("not found")), false},
 	}

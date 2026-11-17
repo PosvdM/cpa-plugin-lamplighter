@@ -106,17 +106,24 @@ func (e *Engine) publishCredential(authIndex, reason string) {
 
 // noteFingerprint marks the credential problem of cred as changed when the
 // credential file holds another login than the one the problem was found
-// with. Ignition then tries again.
+// with. Ignition then tries again. A problem recorded while the file could
+// not be read has no fingerprint to compare; the first readable file counts
+// as changed, so that ignition tries once and records the fingerprint if it
+// fails again.
 func (e *Engine) noteFingerprint(cred *Cred, fingerprint string) {
 	if e.state == nil {
 		return
 	}
 	st := e.state.Credentials[cred.AuthIndex]
-	if st == nil || st.Reason == "" || st.Changed || fingerprint == "" || st.Fingerprint == "" || fingerprint == st.Fingerprint {
+	if st == nil || st.Reason == "" || st.Changed || fingerprint == "" || fingerprint == st.Fingerprint {
 		return
 	}
 	st.Changed = true
 	e.dirty = true
+	if st.Fingerprint == "" {
+		e.logf("info", "%s 的凭证在出现问题时无法读取，现在可以读取，恢复自动点火", accountLabel(cred))
+		return
+	}
 	e.logf("info", "%s 的凭证已更新，恢复自动点火", accountLabel(cred))
 }
 
@@ -165,20 +172,23 @@ func (e *Engine) noteQueryFailure(ctx context.Context, cred *Cred, fingerprint s
 // noteCredentialProblem records that the provider rejected cred or disabled
 // its account, records a credential_invalid event and sends one
 // notification. The same problem found again, by ignition or by a query,
-// only updates the fingerprint.
+// only updates the fingerprint; found again by ignition, it also counts as
+// found by ignition, so that only a successful ignition ends it.
 func (e *Engine) noteCredentialProblem(ctx context.Context, cred *Cred, group string, d failure.Diagnosis, source, fingerprint string) {
 	st := e.state.Credential(cred.AuthIndex)
 	e.dirty = true
 	if st.Reason == d.Reason {
-		if fingerprint != "" {
-			st.Fingerprint = fingerprint
+		// An unknown fingerprint stays unknown; see noteFingerprint.
+		st.Fingerprint = fingerprint
+		if source == sourceIgnite {
+			st.Source = sourceIgnite
 		}
 		st.Changed = false
 		return
 	}
 	now := e.now()
 	*st = store.CredentialState{
-		Reason: d.Reason, Status: d.StatusText(), Code: d.Code, Summary: d.Summary, AppealURL: d.AppealURL,
+		Reason: d.Reason, Status: d.StatusText(), Code: d.Code, Summary: credentialSummary(d), AppealURL: d.AppealURL,
 		Source: source, Group: group, Since: now.Unix(), Fingerprint: fingerprint,
 		Notice: noticeProblem, NoticeAt: now.Unix(),
 	}
@@ -197,17 +207,27 @@ func (e *Engine) credentialEvent(cred *Cred, group string, d failure.Diagnosis, 
 		failure.ReasonRateLimited: "被限流",
 	}[d.Reason]
 	detail := joinParts(" · ", d.StatusText(), d.Code, description)
-	if d.Summary != "" {
-		detail += "：" + d.Summary
+	if summary := credentialSummary(d); summary != "" {
+		detail += "：" + summary
 	}
 	params := map[string]string{
-		"reason": d.Reason, "status": d.StatusText(), "code": d.Code, "summary": d.Summary,
+		"reason": d.Reason, "status": d.StatusText(), "code": d.Code, "summary": credentialSummary(d),
 		"appeal_url": d.AppealURL, "source": source,
 	}
 	if !until.IsZero() {
 		params["until"] = eventTime(until)
 	}
-	e.addEventDetail("error", "credential_invalid", group, label, detail, label+" "+detail, params)
+	e.addAccountEvent(cred.AuthIndex, "error", "credential_invalid", group, label, detail, label+" "+detail, params)
+}
+
+// credentialSummary returns the summary of d for credential events and
+// notifications, which show the status and code next to it: empty when the
+// summary only repeats them.
+func credentialSummary(d failure.Diagnosis) string {
+	if d.SummaryFallback {
+		return ""
+	}
+	return d.Summary
 }
 
 // noteCredentialOK records that cred worked for source. A working quota
@@ -239,7 +259,7 @@ func (e *Engine) noteCredentialOK(ctx context.Context, cred *Cred, source string
 	label := accountLabel(cred)
 	detail := map[string]string{sourceIgnite: "点火成功", sourceQuery: "额度查询恢复正常"}[source]
 	group := e.accountGroup(cred.AuthIndex)
-	e.addEventDetail("info", "credential_restored", group, label, detail,
+	e.addAccountEvent(cred.AuthIndex, "info", "credential_restored", group, label, detail,
 		label+" 凭证已恢复："+detail, map[string]string{"source": source})
 	if !notified {
 		e.forgetEmptyCredential(cred.AuthIndex)
@@ -339,7 +359,7 @@ func joinParts(sep string, parts ...string) string {
 // rate limit until the next daily start.
 func rateLimitedNotice(lang, label string, d failure.Diagnosis, until time.Time, loc *time.Location) notify.Message {
 	return notify.CredentialMessage(lang, label, notify.Problem{
-		Kind: notify.KindRateLimited, Status: d.StatusText(), Code: d.Code, Summary: d.Summary,
+		Kind: notify.KindRateLimited, Status: d.StatusText(), Code: d.Code, Summary: credentialSummary(d),
 		Ignition: true, Until: until,
 	}, loc)
 }

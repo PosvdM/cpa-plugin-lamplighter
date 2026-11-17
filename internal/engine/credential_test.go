@@ -12,6 +12,7 @@ import (
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/host"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/notify"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/providers"
+	"github.com/PosvdM/cpa-plugin-lamplighter/internal/quota"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginapi"
 )
 
@@ -332,5 +333,241 @@ func TestMCPReportsCredentialProblems(t *testing.T) {
 	raw, _ = json.Marshal(result)
 	if text := string(raw); !strings.Contains(text, `"account_suspended":true`) || !strings.Contains(text, `"credential_invalid":false`) {
 		t.Fatalf("list %s", text)
+	}
+}
+
+// tosBody is the quota query answer of a suspended Antigravity account.
+const tosBody = `{"error":{"code":403,"message":"This service has been disabled in this account for violation of Terms of Service.","status":"PERMISSION_DENIED","details":[{"reason":"TOS_VIOLATION","metadata":{"appeal_url":"https://forms.gle/hGzM9MEUv2azZsrb9"}}]}}`
+
+// mcpText calls an MCP tool of e and returns its JSON result.
+func mcpText(t *testing.T, e *Engine, tool string, args map[string]string) string {
+	t.Helper()
+	e.mu.Lock()
+	e.running, e.lastPoll = true, e.now()
+	e.mu.Unlock()
+	result, err := NewMCPBackend(e).CallTool(context.Background(), tool, args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(result)
+	return string(raw)
+}
+
+// A 401 that names a disabled account is a suspension from the first query,
+// also for an account whose first query fails and that has no quota group;
+// MCP still reports its event, also after a restart.
+func TestDeactivatedAccountQueryWithoutGroups(t *testing.T) {
+	c := &clock{t: time.Date(2026, 11, 16, 7, 0, 0, 0, shanghai)}
+	h := standardHost(c)
+	base := h.http
+	h.http = func(req pluginapi.HTTPRequest) pluginapi.HTTPResponse {
+		if req.URL == providers.ClaudeUsageURL {
+			return pluginapi.HTTPResponse{StatusCode: 401, Body: []byte(`{"error":{"message":"Your account has been deactivated.","type":"invalid_request_error","code":"account_deactivated"}}`)}
+		}
+		return base(req)
+	}
+	dir := t.TempDir()
+	e, sender := newTestEngineIn(t, h, c, dir)
+	ctx := context.Background()
+	cfg := e.config()
+	cfg.Providers["codex"] = config.Provider{}
+	e.Configure(cfg, nil)
+	e.poll(ctx, cfg, c.t, "", true)
+	suspended := messagesOf(sender, notify.KindSuspended)
+	if len(sender.sent) != 1 || len(suspended) != 1 || !strings.HasPrefix(suspended[0].Body, "401 · account_deactivated · ") || !strings.Contains(suspended[0].Body, "来源：额度查询") {
+		t.Fatalf("want one suspension notification, got %+v", sender.sent)
+	}
+	invalid := eventsOf(e, "credential_invalid")
+	if len(invalid) != 1 || invalid[0].Params["reason"] != "suspended" || invalid[0].Params["source"] != "query" || invalid[0].Group != "" || invalid[0].Account != "3" {
+		t.Fatalf("events %+v", invalid)
+	}
+	if n := eventsOf(e, "notify"); len(n) != 1 || n[0].Group != invalid[0].Group {
+		t.Fatalf("notify events %+v", n)
+	}
+	var label string
+	for i, a := range e.Status().Accounts {
+		if a.AuthIndex == "3" {
+			label = accountLabels(e.Status().Accounts)[i]
+		}
+	}
+	want := `"account":"` + label + `"`
+	if text := mcpText(t, e, "get_quota_events", nil); label == "" || !strings.Contains(text, `"kind":"credential_invalid"`) || !strings.Contains(text, want) ||
+		!strings.Contains(text, `"reason":"suspended"`) || strings.Contains(text, "deactivated.") {
+		t.Fatalf("events %s", text)
+	}
+	if text := mcpText(t, e, "list_quotas", map[string]string{"provider": "claude"}); !strings.Contains(text, `"account_suspended":true`) {
+		t.Fatalf("list %s", text)
+	}
+	e.saveState()
+
+	e2, _ := newTestEngineIn(t, h, c, dir)
+	e2.Configure(cfg, nil)
+	e2.poll(ctx, cfg, c.t, "", true)
+	if n := len(eventsOf(e2, "credential_invalid")); n != 1 {
+		t.Fatalf("%d credential events after a restart", n)
+	}
+	if text := mcpText(t, e2, "get_quota_events", nil); !strings.Contains(text, `"kind":"credential_invalid"`) || !strings.Contains(text, want) {
+		t.Fatalf("events after a restart %s", text)
+	}
+}
+
+// A problem recorded while the credential file could not be read has no
+// fingerprint. The first readable file, also after a restart, lets ignition
+// try again; the fingerprint is then taken before the request.
+func TestUnknownFingerprintIsSampledAgain(t *testing.T) {
+	c := &clock{t: time.Date(2026, 11, 16, 7, 0, 0, 0, shanghai)}
+	h := claudeIgnitionHost(c, nil)
+	h.files["3"] = `{"access_token":"t3","refresh_token":"r3"}`
+	h.execute = func(pluginapi.HostModelExecutionRequest) (pluginapi.HostModelExecutionResponse, error) {
+		return pluginapi.HostModelExecutionResponse{}, tosError
+	}
+	dir := t.TempDir()
+	e, sender := newTestEngineIn(t, h, c, dir)
+	ctx := context.Background()
+	cfg := e.config()
+	cfg.Providers["codex"] = config.Provider{}
+	e.Configure(cfg, nil)
+	e.poll(ctx, cfg, c.t, "", false)
+	delete(h.files, "3")
+	e.performDue(ctx, cfg)
+	if st := e.state.Credentials["3"]; len(h.executed) != 1 || st == nil || st.Fingerprint != "" || !e.credentialBlocked("3") || len(sender.sent) != 1 {
+		t.Fatalf("problem with an unknown fingerprint: %d ignitions, %+v", len(h.executed), st)
+	}
+	e.saveState()
+
+	c.t = time.Date(2026, 11, 17, 7, 0, 0, 0, shanghai)
+	newLogin := `{"access_token":"t3-new","refresh_token":"r3-new"}`
+	h.files["3"] = newLogin
+	e2, sender2 := newTestEngineIn(t, h, c, dir)
+	e2.Configure(cfg, nil)
+	e2.poll(ctx, cfg, c.t, "", false)
+	if e2.credentialBlocked("3") {
+		t.Fatal("a readable credential after an unknown one must let ignition try again")
+	}
+	// The file disappears while the request is out; the fingerprint read
+	// before it is kept.
+	h.execute = func(pluginapi.HostModelExecutionRequest) (pluginapi.HostModelExecutionResponse, error) {
+		delete(h.files, "3")
+		return pluginapi.HostModelExecutionResponse{}, tosError
+	}
+	e2.performDue(ctx, cfg)
+	st := e2.state.Credentials["3"]
+	if len(h.executed) != 2 || st == nil || st.Fingerprint != providers.Fingerprint(json.RawMessage(newLogin)) || !e2.credentialBlocked("3") || len(sender2.sent) != 0 {
+		t.Fatalf("retry: %d ignitions, state %+v, sent %+v", len(h.executed), st, sender2.sent)
+	}
+	h.files["3"] = newLogin
+	e2.poll(ctx, cfg, c.t, "", false)
+	e2.performDue(ctx, cfg)
+	if len(h.executed) != 2 {
+		t.Fatal("the same credential must stay blocked")
+	}
+}
+
+// A problem a query found and an ignition confirmed after a new login ends
+// only with a successful ignition, not with the next working query.
+func TestIgnitionConfirmsAQueryProblem(t *testing.T) {
+	c := &clock{t: time.Date(2026, 11, 16, 7, 0, 0, 0, shanghai)}
+	h := claudeIgnitionHost(c, nil)
+	h.files["3"] = `{"access_token":"t3","refresh_token":"r3"}`
+	rejected := false
+	base := h.http
+	h.http = func(req pluginapi.HTTPRequest) pluginapi.HTTPResponse {
+		if req.URL == providers.ClaudeUsageURL && rejected {
+			return pluginapi.HTTPResponse{StatusCode: 403, Body: []byte(tosBody)}
+		}
+		return base(req)
+	}
+	h.execute = func(pluginapi.HostModelExecutionRequest) (pluginapi.HostModelExecutionResponse, error) {
+		return pluginapi.HostModelExecutionResponse{}, tosError
+	}
+	e, sender := newTestEngine(t, h, c)
+	ctx := context.Background()
+	cfg := e.config()
+	cfg.Providers["codex"] = config.Provider{}
+	e.Configure(cfg, nil)
+	e.poll(ctx, cfg, c.t, "", false)
+	rejected = true
+	e.poll(ctx, cfg, c.t, "", false)
+	e.performDue(ctx, cfg)
+	if len(h.executed) != 0 || len(messagesOf(sender, notify.KindSuspended)) != 1 || e.state.Credentials["3"].Source != sourceQuery {
+		t.Fatalf("query problem: %d ignitions, %+v", len(h.executed), sender.sent)
+	}
+	h.files["3"] = `{"access_token":"t3-new","refresh_token":"r3-new"}`
+	e.poll(ctx, cfg, c.t, "", false)
+	e.performDue(ctx, cfg)
+	if st := e.state.Credentials["3"]; len(h.executed) != 1 || st.Source != sourceIgnite || !e.credentialBlocked("3") || len(sender.sent) != 1 {
+		t.Fatalf("ignition after a new login: %d ignitions, state %+v, sent %+v", len(h.executed), st, sender.sent)
+	}
+	rejected = false
+	e.poll(ctx, cfg, c.t, "", false)
+	e.performDue(ctx, cfg)
+	if len(h.executed) != 1 || !e.credentialBlocked("3") || len(eventsOf(e, "credential_restored")) != 0 || len(sender.sent) != 1 {
+		t.Fatalf("a working query ended a problem ignition confirmed: %d ignitions, %+v", len(h.executed), sender.sent)
+	}
+}
+
+// The confirmation queries of a manual ignition leave the credential state
+// alone, like its failure.
+func TestManualConfirmationLeavesCredentialState(t *testing.T) {
+	old := confirmDelays
+	confirmDelays = []time.Duration{time.Millisecond}
+	defer func() { confirmDelays = old }()
+	c := &clock{t: time.Date(2026, 11, 16, 7, 0, 0, 0, shanghai)}
+	h := claudeIgnitionHost(c, nil)
+	rejected := false
+	base := h.http
+	h.http = func(req pluginapi.HTTPRequest) pluginapi.HTTPResponse {
+		if req.URL == providers.ClaudeUsageURL && rejected {
+			return pluginapi.HTTPResponse{StatusCode: 403, Body: []byte(tosBody)}
+		}
+		return base(req)
+	}
+	// The response has no quota headers, so a query has to confirm it.
+	h.execute = func(pluginapi.HostModelExecutionRequest) (pluginapi.HostModelExecutionResponse, error) {
+		return pluginapi.HostModelExecutionResponse{StatusCode: 200}, nil
+	}
+	e, sender := newTestEngine(t, h, c)
+	ctx := context.Background()
+	cfg := e.config()
+	cfg.Providers["codex"] = config.Provider{}
+	e.Configure(cfg, nil)
+	e.poll(ctx, cfg, c.t, "", false)
+	rejected = true
+	err := e.igniteTarget(ctx, cfg, claudeTarget(t, e), true)
+	if err == nil || len(h.executed) != 1 {
+		t.Fatalf("manual ignition: err=%v ignitions=%d", err, len(h.executed))
+	}
+	if _, ok := e.state.Credentials["3"]; ok || e.credentialBlocked("3") || len(eventsOf(e, "credential_invalid")) != 0 || len(sender.sent) != 0 {
+		t.Fatalf("manual confirmation changed the credential state: %+v %+v", e.state.Credentials["3"], sender.sent)
+	}
+	if failed := eventsOf(e, "ignite_failed"); len(failed) != 1 || failed[0].Params["manual"] != "1" {
+		t.Fatalf("ignite_failed %+v", failed)
+	}
+	// The next poll finds the suspension.
+	e.poll(ctx, cfg, c.t, "", false)
+	if !e.credentialBlocked("3") || len(messagesOf(sender, notify.KindSuspended)) != 1 {
+		t.Fatalf("poll after the manual ignition: %+v", sender.sent)
+	}
+}
+
+// A credential problem without a readable message shows its status and code
+// once, without the fixed summary that repeats them.
+func TestCredentialProblemWithoutMessage(t *testing.T) {
+	c := &clock{t: time.Date(2026, 11, 16, 7, 0, 0, 0, shanghai)}
+	e, sender := newTestEngine(t, standardHost(c), c)
+	ctx := context.Background()
+	e.poll(ctx, e.config(), c.t, "", false)
+	sender.sent = nil
+	d := failure.Diagnose(&quota.HTTPError{Status: 403, Body: `{"error":{"code":403,"status":"PERMISSION_DENIED","details":[{"reason":"TOS_VIOLATION"}]}}`})
+	if d.Reason != failure.ReasonSuspended || !d.SummaryFallback || d.Summary != "HTTP 403 · TOS_VIOLATION" {
+		t.Fatalf("%+v", d)
+	}
+	e.noteCredentialProblem(ctx, e.creds["3"], e.accountGroup("3"), d, sourceQuery, "fp")
+	ev := eventsOf(e, "credential_invalid")
+	if len(ev) != 1 || ev[0].Params["summary"] != "" || ev[0].Detail != "403 · TOS_VIOLATION · 账号已停用" {
+		t.Fatalf("events %+v", ev)
+	}
+	if len(sender.sent) != 1 || strings.Contains(sender.sent[0].Body, "HTTP 403") || !strings.HasPrefix(sender.sent[0].Body, "403 · TOS_VIOLATION · 账号已被停用，需要申诉\n来源：额度查询") {
+		t.Fatalf("notification %+v", sender.sent)
 	}
 }

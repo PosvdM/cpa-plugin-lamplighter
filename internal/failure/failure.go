@@ -36,8 +36,11 @@ type Diagnosis struct {
 	// Code is the most specific error code found, such as TOS_VIOLATION,
 	// invalid_grant or RESOURCE_EXHAUSTED, or empty.
 	Code string
-	// Summary is one sentence describing the error, without JSON.
-	Summary string
+	// Summary is one sentence describing the error, without JSON. When the
+	// error has no readable message, it is "HTTP <status> · <code>", or
+	// "upstream error" without either, and SummaryFallback is true.
+	Summary         string
+	SummaryFallback bool
 	// AppealURL is the appeal form of a suspended account, when given.
 	AppealURL string
 }
@@ -100,6 +103,9 @@ func Diagnose(err error) Diagnosis {
 		return Diagnosis{}
 	}
 	text := err.Error()
+	// summaryText is the text a summary is taken from when the JSON has no
+	// message, without the code prefix of host errors.
+	summaryText := text
 	var httpErr *quota.HTTPError
 	if errors.As(err, &httpErr) {
 		text = httpErr.Body
@@ -112,6 +118,23 @@ func Diagnose(err error) Diagnosis {
 		d.Status = 401
 	}
 	info := parseJSON(text)
+	var hostErr *host.Error
+	if errors.As(err, &hostErr) {
+		summaryText = hostErr.Message
+		// Normalized stream errors keep allowlisted suspension codes in
+		// Code and the appeal form in AppealURL.
+		for _, code := range strings.Split(hostErr.Code, "/") {
+			if SuspendedCode(code) {
+				info.codes = append([]string{code}, info.codes...)
+				if info.code == "" {
+					info.code = code
+				}
+			}
+		}
+		if info.appeal == "" {
+			info.appeal = hostErr.AppealURL
+		}
+	}
 	if d.Status == 0 {
 		d.Status = info.status
 	}
@@ -121,7 +144,10 @@ func Diagnose(err error) Diagnosis {
 		}
 	}
 	d.Code, d.AppealURL = info.code, info.appeal
-	d.Summary = summarize(info.message, err.Error())
+	d.Summary = summarize(info.message, summaryText)
+	if d.Summary == "" {
+		d.Summary, d.SummaryFallback = fallbackSummary(d.StatusText(), d.Code), true
+	}
 
 	lower := strings.ToLower(text + "\n" + info.code + "\n" + info.message)
 	codes := strings.ToLower(strings.Join(info.codes, "\n"))
@@ -141,6 +167,46 @@ func Diagnose(err error) Diagnosis {
 
 // Summary returns the one sentence of Diagnose.
 func Summary(err error) string { return Diagnose(err).Summary }
+
+// SuspendedCode reports whether code names a disabled account, such as
+// TOS_VIOLATION or account_deactivated.
+func SuspendedCode(code string) bool {
+	code = strings.ToLower(strings.TrimSpace(code))
+	for _, known := range suspendedCodes {
+		if code == known {
+			return true
+		}
+	}
+	return false
+}
+
+// SuspendedPhrase returns the suspendedPhrases entry text contains, empty
+// when there is none. The result is a constant and never provider text.
+func SuspendedPhrase(text string) string {
+	lower := strings.ToLower(text)
+	for _, phrase := range suspendedPhrases {
+		if strings.Contains(lower, phrase) {
+			return phrase
+		}
+	}
+	return ""
+}
+
+// fallbackSummary is the summary of an error without a readable message.
+// It never contains the response, which may be JSON.
+func fallbackSummary(status, code string) string {
+	var parts []string
+	if status != "" {
+		parts = append(parts, "HTTP "+status)
+	}
+	if code != "" {
+		parts = append(parts, code)
+	}
+	if len(parts) == 0 {
+		return "upstream error"
+	}
+	return strings.Join(parts, " · ")
+}
 
 func containsAny(text string, markers []string) bool {
 	for _, marker := range markers {
@@ -173,6 +239,14 @@ func parseJSON(text string) errorInfo {
 	decoder := json.NewDecoder(strings.NewReader(text[start:]))
 	decoder.UseNumber()
 	if decoder.Decode(&payload) != nil {
+		// A response cut at maxErrorBodyLength is no valid JSON; its
+		// message, which comes first, can still be complete.
+		if match := truncatedMessage.FindStringSubmatch(text[start:]); match != nil {
+			var message string
+			if json.Unmarshal([]byte(`"`+match[1]+`"`), &message) == nil {
+				info.message = strings.TrimSpace(message)
+			}
+		}
 		return info
 	}
 	add := func(code string) {
@@ -230,6 +304,10 @@ func stringOf(value any) string {
 	return ""
 }
 
+// truncatedMessage finds a complete "message" string in JSON that cannot be
+// decoded.
+var truncatedMessage = regexp.MustCompile(`"message"\s*:\s*"((?:[^"\\]|\\.)*)"`)
+
 var (
 	jsonTail = regexp.MustCompile(`\s*\(HTTP \d{3}\)\s*$`)
 	// sentenceEnd matches the end of a sentence: a full stop before a
@@ -238,7 +316,8 @@ var (
 )
 
 // summarize returns the first sentence of the provider's message, or of
-// the error text without JSON, host error codes and status suffixes.
+// the error text without JSON, host error codes and status suffixes; empty
+// when nothing but JSON or a status is left.
 func summarize(message, text string) string {
 	if message == "" {
 		message = text
@@ -250,8 +329,8 @@ func summarize(message, text string) string {
 			message = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(message), prefix))
 		}
 		message = strings.TrimRight(message, " :：")
-		if message == "" || isStatusOnly(message) {
-			message = strings.TrimSpace(jsonTail.ReplaceAllString(text, ""))
+		if isStatusOnly(message) {
+			return ""
 		}
 	}
 	message, _, _ = strings.Cut(strings.TrimSpace(message), "\n")

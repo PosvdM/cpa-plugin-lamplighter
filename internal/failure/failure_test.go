@@ -108,3 +108,45 @@ func TestSummaryOfPlainErrors(t *testing.T) {
 		t.Fatalf("%+v", d)
 	}
 }
+
+// An error without a readable message gets a fixed summary from its status
+// and code, never the JSON.
+func TestSummaryWithoutMessage(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		err      error
+		summary  string
+		fallback bool
+	}{
+		{"no message", &quota.HTTPError{Status: 403, Body: `{"error":{"code":403,"status":"PERMISSION_DENIED"}}`}, "HTTP 403 · PERMISSION_DENIED", true},
+		{"unknown structure", &host.Error{Code: "host_call_failed", Status: 502, Message: `{"detail":{"trace":"abc","items":[1,2]}}`}, "HTTP 502", true},
+		{"status only", &quota.HTTPError{Status: 500, Body: `{"ok":false}`}, "HTTP 500", true},
+		{"nothing known", errors.New(`{"trace":"abc"}`), "upstream error", true},
+		{"truncated JSON", &quota.HTTPError{Status: 400, Body: `{"error":{"code":400,"message":"Request contains an invalid argument. More text.","details":[{"reason":"BAD_`}, "Request contains an invalid argument.", false},
+		{"truncated message", &quota.HTTPError{Status: 400, Body: `{"error":{"code":400,"message":"Request contains an inv`}, "HTTP 400", true},
+		{"escaped message", &quota.HTTPError{Status: 400, Body: `{"error":{"message":"Field \"model\" is unknown.","details":[`}, `Field "model" is unknown.`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := Diagnose(tc.err)
+			if d.Summary != tc.summary || d.SummaryFallback != tc.fallback || Summary(tc.err) != d.Summary {
+				t.Fatalf("%+v", d)
+			}
+		})
+	}
+}
+
+// Normalized stream errors keep the suspension code and appeal form without
+// the provider's message.
+func TestDiagnoseNormalizedStreamSuspension(t *testing.T) {
+	err := &host.Error{Code: "TOS_VIOLATION", Status: 403, Message: "ignition provider stream error", AppealURL: "https://forms.gle/abc"}
+	if d := Diagnose(err); d.Reason != ReasonSuspended || d.Code != "TOS_VIOLATION" || d.AppealURL != "https://forms.gle/abc" || d.Summary != "ignition provider stream error" {
+		t.Fatalf("%+v", d)
+	}
+	phrase := &host.Error{Code: "provider_stream_error", Status: 403, Message: "ignition provider stream error: " + SuspendedPhrase("This service has been disabled in this account.")}
+	if d := Diagnose(phrase); d.Reason != ReasonSuspended || d.Code != "" {
+		t.Fatalf("%+v", d)
+	}
+	if d := Diagnose(&host.Error{Code: "permission_denied", Status: 403, Message: "ignition provider stream error"}); d.Reason != "" {
+		t.Fatalf("%+v", d)
+	}
+}

@@ -224,10 +224,16 @@ func (e *Engine) igniteTarget(ctx context.Context, cfg config.Config, t target, 
 	start := e.now()
 	ts.LastAttemptEpoch = float64(start.UnixNano()) / 1e9
 	e.dirty = true
+	// The fingerprint of the credential the request goes out with; a
+	// rejection waits for another one. See noteFingerprint.
+	fingerprint := ""
+	if !manual {
+		fingerprint = e.credentialFingerprint(t.cred)
+	}
 
 	model, resp, err := e.execute(ctx, cfg, t)
 	if err == nil {
-		err = e.confirm(ctx, cfg, t, start, resp)
+		err = e.confirm(ctx, cfg, t, start, resp, manual)
 	}
 	now := e.now()
 	if err != nil {
@@ -251,7 +257,10 @@ func (e *Engine) igniteTarget(ctx context.Context, cfg config.Config, t target, 
 				fmt.Sprintf("暂停，%s：%s", wait, d.Summary),
 				fmt.Sprintf("%s 点火失败，暂停，%s：%v", t.group.Label, wait, err),
 				map[string]string{"error": err.Error(), "summary": d.Summary, "reason": d.Reason})
-			e.noteCredentialProblem(ctx, t.cred, t.group.Key, d, sourceIgnite, e.credentialFingerprint(t.cred))
+			if fingerprint == "" {
+				fingerprint = e.credentialFingerprint(t.cred)
+			}
+			e.noteCredentialProblem(ctx, t.cred, t.group.Key, d, sourceIgnite, fingerprint)
 			return err
 		}
 		outcome := schedule.RecordFailure(ts, now, err)
@@ -535,8 +544,9 @@ func (e *Engine) confirmed(key string, start, now time.Time) bool {
 // confirm checks that the ignition started a window. Claude responses carry
 // the new reset in their headers; Codex reports it through the usage record
 // of the same request. When neither arrives, and for providers without quota
-// in their headers, the credential is queried actively.
-func (e *Engine) confirm(ctx context.Context, cfg config.Config, t target, start time.Time, resp pluginapi.HostModelExecutionResponse) error {
+// in their headers, the credential is queried actively. The queries of a
+// manual ignition leave the credential state alone, like its failure.
+func (e *Engine) confirm(ctx context.Context, cfg config.Config, t target, start time.Time, resp pluginapi.HostModelExecutionResponse, manual bool) error {
 	var groups []quota.RawGroup
 	if spec := providers.Lookup(t.group.Provider); spec != nil && spec.Headers != nil {
 		groups = spec.Headers(resp.Headers, e.now())
@@ -557,7 +567,7 @@ func (e *Engine) confirm(ctx context.Context, cfg config.Config, t target, start
 		if e.confirmed(t.group.Key, start, e.now()) {
 			return nil
 		}
-		if err := e.refreshCred(ctx, cfg, t.cred); err != nil {
+		if err := e.queryCred(ctx, cfg, t.cred, !manual); err != nil {
 			e.logf("warn", "点火确认时刷新额度失败：%s：%v", t.group.Label, err)
 		}
 		if e.confirmed(t.group.Key, start, e.now()) {

@@ -36,6 +36,10 @@ type Event struct {
 	// delay, so the page can write the event in its own language. Message
 	// and Detail stay in Chinese for the CPA log and older events.
 	Params map[string]string `json:"params,omitempty"`
+	// Account is the auth index of the account an account event concerns.
+	// It is internal: MCP maps it to the current account label, and Group
+	// stays the key the page matches events and notifications by.
+	Account string `json:"-"`
 }
 
 func (e *Engine) addEvent(level, kind, group, message string) {
@@ -46,15 +50,21 @@ func (e *Engine) addEvent(level, kind, group, message string) {
 // label and detail are the quota group and a short description for the page,
 // which shows the event type separately.
 func (e *Engine) addEventDetail(level, kind, group, label, detail, message string, params map[string]string) {
+	e.addAccountEvent("", level, kind, group, label, detail, message, params)
+}
+
+// addAccountEvent records an event of the account with auth index account,
+// which may have no quota group yet.
+func (e *Engine) addAccountEvent(account, level, kind, group, label, detail, message string, params map[string]string) {
 	now := e.now()
 	e.mu.Lock()
-	e.events = append(e.events, Event{Time: now, Level: level, Kind: kind, Group: group, Message: message, Label: label, Detail: detail, Params: params})
+	e.events = append(e.events, Event{Time: now, Level: level, Kind: kind, Group: group, Message: message, Label: label, Detail: detail, Params: params, Account: account})
 	if len(e.events) > maxEvents {
 		e.events = e.events[len(e.events)-maxEvents:]
 	}
 	e.mu.Unlock()
 	if e.history != nil {
-		e.history.Append(store.Record{Kind: "e", Time: now.Unix(), Group: group, Event: kind, Level: level, Message: message, Label: label, Detail: detail, Params: params})
+		e.history.Append(store.Record{Kind: "e", Time: now.Unix(), Group: group, Event: kind, Level: level, Message: message, Label: label, Detail: detail, Params: params, Account: account})
 	}
 	e.logf(level, "%s", message)
 }
@@ -79,6 +89,7 @@ func (e *Engine) loadRecentEvents() {
 			Label:   record.Label,
 			Detail:  record.Detail,
 			Params:  record.Params,
+			Account: record.Account,
 		})
 	}
 	if len(events) > maxEvents {
