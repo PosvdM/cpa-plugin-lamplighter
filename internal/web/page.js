@@ -107,6 +107,8 @@
       legend_failed: "✕ 含点火失败",
       legend_reset: "↻ 重置",
       pace_reference: "匀速参考",
+      pace_extended: "匀速参考（往回延长）",
+      legend_pace_extended: "匀速参考往回延长到本周期起点（周期中途预定重置变了）",
       legend_pooled: "多账号的服务显示合计额度，点击行查看详情，再点一次展开各账号",
       data_table: "数据表",
       col_quota: "额度", col_account: "账号", col_latest: "最新", col_min: "最低", col_max: "最高", col_samples: "样本", col_to_reset: "距重置",
@@ -272,6 +274,8 @@
       legend_failed: "✕ an ignition failed",
       legend_reset: "↻ reset",
       pace_reference: "Even pace",
+      pace_extended: "Even pace (extended back)",
+      legend_pace_extended: "Even pace extended back to the cycle start (the reset moved within the cycle)",
       legend_pooled: "Services with several accounts show their total; click a row for details, click again to list the accounts",
       data_table: "Data table",
       col_quota: "Quota", col_account: "Account", col_latest: "Latest", col_min: "Lowest", col_max: "Highest", col_samples: "Samples", col_to_reset: "Until reset",
@@ -2518,6 +2522,30 @@
     return out;
   }
 
+  // Where a line of the even pace starts after its cycle began, because
+  // the reset was unknown before or moved within the cycle, it extends
+  // back to the start of the cycle: the last rise of the samples by a reset
+  // (RESET_JUMP) since one window length before its reset. Segments that
+  // follow each other with resets within RESET_DRIFT count as one line, so
+  // a reset that wavers by seconds extends nothing. The extensions are
+  // [a, b, x] like the segments of paceSegments, and the line they extend
+  // stays as it is.
+  function paceExtensions(segments, points, length) {
+    var out = [];
+    points = points || [];
+    segments.forEach(function (s, i) {
+      var prev = segments[i - 1];
+      if (prev && prev[1] === s[0] && !prev[3] && Math.abs(prev[2] - s[2]) <= RESET_DRIFT) return;
+      if (s[0] <= s[2] - length + RESET_DRIFT) return;
+      var start = null;
+      for (var k = 1; k < points.length && points[k][0] <= s[0]; k++) {
+        if (points[k][0] >= s[2] - length - RESET_DRIFT && points[k][1] - points[k - 1][1] >= RESET_JUMP) start = points[k][0];
+      }
+      if (start != null && start < s[0]) out.push([start, s[0], s[2]]);
+    });
+    return out;
+  }
+
   // The even pace at t, or null outside the segments. Where two segments
   // meet, the later one counts, and where the reset becomes unknown there
   // is none.
@@ -2543,17 +2571,41 @@
     return total ? sum / total : null;
   }
 
-  // The even pace of a row: at(t) is its value, null where it has none, and
-  // breaks are the times where it can bend or jump. A pooled row combines
-  // the even pace of its accounts, each from its own resets.
+  // The extended even pace of a total (paceExtensions): where any account
+  // has an extension, the mean with the extensions in place of the lines
+  // they extend, while every account has a value. parts are {weight,
+  // segments, extensions}.
+  function extendedPace(parts, length, t) {
+    var sum = 0, total = 0, used = false;
+    for (var i = 0; i < parts.length; i++) {
+      var value = null;
+      parts[i].extensions.forEach(function (e) { if (t >= e[0] && t <= e[1]) value = 100 * (e[2] - t) / length; });
+      if (value != null) used = true;
+      else value = paceAt(parts[i].segments, length, t);
+      if (value == null) return null;
+      sum += parts[i].weight * value;
+      total += parts[i].weight;
+    }
+    return used && total ? sum / total : null;
+  }
+
+  // The even pace of a row: at(t) is its value, null where it has none,
+  // extended(t) the value of its extensions back to the cycle start, and
+  // breaks are the times where either can bend or jump. A pooled row
+  // combines the even pace of its accounts, each from its own resets.
   function rowPace(row, now) {
     var length = WINDOW_SECONDS[historyWindow];
     var parts = !length ? [] : (row.children || [row]).map(function (r) {
-      return { weight: row.children ? r.weight : 1, segments: paceSegments(r.resets, length, r.reset, now) };
+      var segments = paceSegments(r.resets, length, r.reset, now);
+      return { weight: row.children ? r.weight : 1, segments: segments, extensions: paceExtensions(segments, r.points, length) };
     });
     var breaks = [];
-    parts.forEach(function (part) { part.segments.forEach(function (s) { breaks.push(s[0], s[1]); }); });
-    return { breaks: breaks, at: function (t) { return parts.length ? pooledPace(parts, length, t) : null; } };
+    parts.forEach(function (part) {
+      part.segments.forEach(function (s) { breaks.push(s[0], s[1]); });
+      part.extensions.forEach(function (e) { breaks.push(e[0], e[1]); });
+    });
+    return { breaks: breaks, at: function (t) { return parts.length ? pooledPace(parts, length, t) : null; },
+      extended: function (t) { return parts.length ? extendedPace(parts, length, t) : null; } };
   }
 
   // The least-squares line through pts[a..b]: its slope per second and the
@@ -2674,7 +2726,7 @@
     });
     var resets = [];
     pieces.forEach(function (piece) { resets = resets.concat(piece.split.resets); });
-    var even = row.inactive ? { breaks: [], at: function () { return null; } } : rowPace(row, g.now);
+    var even = row.inactive ? { breaks: [], at: function () { return null; }, extended: function () { return null; } } : rowPace(row, g.now);
 
     head.appendChild(el("span", { class: "detail-name" }, (row.orphan ? [el("span", { class: SENSITIVE, text: row.name })] : maskedNodes(row.name)).concat([" · " + translate(historyWindow === "5h" ? "quota_5h" : "quota_7d")])));
     if (row.inactive) head.appendChild(badge("muted", translate("inactive")));
@@ -2765,17 +2817,25 @@
     // straight between two breaks, and its value just inside each end
     // decides whether it continues from the previous piece or jumps.
     var times = [g.from, g.to].concat(even.breaks.filter(function (t) { return t > g.from && t < g.to; })).sort(function (a, b) { return a - b; });
-    var paceD = "", paceEnd = null;
-    for (var k = 0; k + 1 < times.length; k++) {
-      var a = times[k], b = times[k + 1], inset = Math.min(1, (b - a) / 4);
-      if (b - a <= 0) continue;
-      var va = even.at(a + inset), vb = even.at(b - inset);
-      if (va == null || vb == null) { paceEnd = null; continue; }
-      if (paceEnd == null || Math.abs(paceEnd - va) > 0.5) paceD += "M" + g.x(a) + " " + y(va);
-      paceD += "L" + g.x(b) + " " + y(vb);
-      paceEnd = vb;
+    function pacePath(at) {
+      var d = "", end = null;
+      for (var k = 0; k + 1 < times.length; k++) {
+        var a = times[k], b = times[k + 1], inset = Math.min(1, (b - a) / 4);
+        if (b - a <= 0) continue;
+        var va = at(a + inset), vb = at(b - inset);
+        if (va == null || vb == null) { end = null; continue; }
+        if (end == null || Math.abs(end - va) > 0.5) d += "M" + g.x(a) + " " + y(va);
+        d += "L" + g.x(b) + " " + y(vb);
+        end = vb;
+      }
+      return d;
     }
+    var paceD = pacePath(even.at), extendedD = pacePath(even.extended);
     if (paceD) plot.appendChild(svg("path", { d: paceD, fill: "none", stroke: cssVar("--text-tertiary"), "stroke-opacity": 0.8, "stroke-width": 1.5, "stroke-dasharray": "6 4" }));
+    // The extension back to the cycle start: dash-dot, apart from the
+    // dashes of the even pace and the dots of the projection.
+    if (extendedD) plot.appendChild(svg("path", { d: extendedD, fill: "none", stroke: cssVar("--text-tertiary"), "stroke-opacity": 0.8, "stroke-width": 1.5, "stroke-dasharray": "8 3 1.5 3" }));
+    $("legend-pace-extended").hidden = !extendedD;
     pieces.forEach(function (piece) {
       if (group) splitAtResets(piece.pts, [3, 4]).parts.forEach(function (part) {
         if (part.length < 2) return;
@@ -2874,9 +2934,11 @@
     });
 
     function paceRow(t) {
-      var value = even.at(t);
+      var value = even.at(t), extended = even.extended(t);
       if (value != null) tip.appendChild(el("div", { class: "row pace" }, [el("span", { class: "key" }),
         el("span", { class: "name", text: translate("pace_reference") }), el("span", { class: "value", text: pct(value) })]));
+      if (extended != null) tip.appendChild(el("div", { class: "row pace extended" }, [el("span", { class: "key" }),
+        el("span", { class: "name", text: translate("pace_extended") }), el("span", { class: "value", text: pct(extended) })]));
     }
 
     hoverListeners.push(function (t) {

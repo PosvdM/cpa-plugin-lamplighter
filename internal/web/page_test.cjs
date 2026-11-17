@@ -885,3 +885,70 @@ test("credential events show the reason, a summary and an appeal link", () => {
   ], false);
   assert.deepEqual(plain(built.rows.map((r) => [r.event.kind, r.pushes.length])), [["credential_invalid", 1], ["credential_restored", 1]]);
 });
+
+// ---- Even pace extended back to the cycle start ----
+
+function extension() {
+  return context(["paceSegments", "paceAt", "pooledPace", "paceExtensions", "extendedPace"], { RESET_DRIFT: 60, RESET_JUMP: 5 });
+}
+
+// Synthetic samples shaped like a 7-day window whose quota came back to
+// 100% at rise and whose scheduled reset moved back to an earlier time at
+// move: [time, remaining].
+function movedReset() {
+  const rise = 6000 * DAY, x1 = rise + WEEK + 4 * 60 + 14, x2 = rise + 6 * DAY - 52 * 60, move = rise + 16.5 * HOUR;
+  const points = [[rise - 2 * HOUR, 22], [rise - HOUR, 21], [rise, 100], [rise + 6 * HOUR, 91], [move - 2 * HOUR, 65], [move, 21], [move + HOUR, 20]];
+  // The history records a change of the reset only beyond 60 s; the
+  // reset wavered between x1 and x1 + 1 meanwhile.
+  const resets = [[rise - 3 * DAY, x2], [rise, rise + WEEK], [rise + 4 * 60, x1], [move, x2]];
+  return { rise, x1, x2, move, points, resets };
+}
+
+test("a reset that moves within its cycle extends the new line back to the cycle start", () => {
+  const ctx = extension();
+  const d = movedReset();
+  const segs = ctx.paceSegments(d.resets, WEEK, d.x2, d.move + 2 * HOUR);
+  const ext = ctx.paceExtensions(segs, d.points, WEEK);
+  assert.deepEqual(plain(ext), [[d.rise, d.move, d.x2]]);
+  // The old line stays: just before the move it follows the reset x1.
+  assert.ok(Math.abs(ctx.paceAt(segs, WEEK, d.move - 1) - 100 * (d.x1 - d.move + 1) / WEEK) < 1e-6);
+  // The extension runs the line of x2 back to the rise.
+  const part = { weight: 1, segments: segs, extensions: ext };
+  assert.ok(Math.abs(ctx.extendedPace([part], WEEK, d.rise) - 100 * (d.x2 - d.rise) / WEEK) < 1e-9);
+  assert.ok(Math.abs(ctx.extendedPace([part], WEEK, d.move) - ctx.paceAt(segs, WEEK, d.move)) < 1e-9);
+  // Outside the extension there is none.
+  assert.equal(ctx.extendedPace([part], WEEK, d.rise - 1), null);
+  assert.equal(ctx.extendedPace([part], WEEK, d.move + 1), null);
+});
+
+test("resets that waver by a second extend nothing", () => {
+  const ctx = extension();
+  const d = movedReset();
+  // The same cycle recorded with every one-second change, as a backend
+  // without the 60 s tolerance would: x1, x1 + 1, x1, x1 + 1.
+  const resets = [[d.rise, d.rise + WEEK], [d.rise + 4 * 60, d.x1], [d.rise + 6 * HOUR, d.x1 + 1], [d.rise + 8 * HOUR, d.x1], [d.rise + 9 * HOUR, d.x1 + 1]];
+  const segs = ctx.paceSegments(resets, WEEK, d.x1, d.rise + 10 * HOUR);
+  assert.deepEqual(plain(ctx.paceExtensions(segs, d.points, WEEK)), []);
+  // The status reset that wavers adds no segment either.
+  assert.equal(ctx.paceSegments(resets, WEEK, d.x1 + 1, d.rise + 10 * HOUR).length, segs.length);
+  // A line that starts with its cycle, or an early reset, extends nothing.
+  const early = d.rise + 2 * DAY;
+  assert.deepEqual(plain(ctx.paceExtensions(ctx.paceSegments([[d.rise, d.x1], [early, early + WEEK]], WEEK, null, early + HOUR),
+    [[d.rise, 100], [early - HOUR, 40], [early, 100]], WEEK)), []);
+  // Without a rise in the samples, the start of the cycle is not known.
+  assert.deepEqual(plain(ctx.paceExtensions(ctx.paceSegments([[d.move, d.x2]], WEEK, null, d.move + HOUR), [[d.move, 21]], WEEK)), []);
+});
+
+test("a total extends where an account does, with the other accounts' lines", () => {
+  const ctx = extension();
+  const d = movedReset();
+  const segsA = ctx.paceSegments(d.resets, WEEK, d.x2, d.move + HOUR);
+  const a = { weight: 1, segments: segsA, extensions: ctx.paceExtensions(segsA, d.points, WEEK) };
+  const xb = d.rise + 3 * DAY;
+  const segsB = ctx.paceSegments([[xb - WEEK, xb]], WEEK, xb, d.move + HOUR);
+  const b = { weight: 3, segments: segsB, extensions: ctx.paceExtensions(segsB, [], WEEK) };
+  const t = d.rise + HOUR;
+  const want = (100 * (d.x2 - t) / WEEK + 3 * 100 * (xb - t) / WEEK) / 4;
+  assert.ok(Math.abs(ctx.extendedPace([a, b], WEEK, t) - want) < 1e-9);
+  assert.equal(ctx.extendedPace([b], WEEK, t), null);
+});
