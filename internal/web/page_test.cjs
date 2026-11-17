@@ -973,3 +973,28 @@ test("the detail heading moves left of the plot only where it fits", () => {
   ctx.placeDetailHead(w, { offsetHeight: 240 }, box, { labelW: 190, width: 1000 });
   assert.ok(!w.classes.has("side"));
 });
+
+test("manual ignition failures show no retry, and credential pauses no end time", () => {
+  const ctx = eventContext();
+  const json = '{"error":{"code":401,"message":"token expired","status":"UNAUTHENTICATED"}}';
+  let view = ctx.eventView(event("ignite_failed", 0, { label: "GPT", params: { manual: "1", error: json, summary: "凭证已失效" } }));
+  assert.equal(view.detail, "凭证已失效");
+  assert.equal(view.tip, json);
+  view = ctx.eventView(event("ignite_failed", 0, { label: "GPT", params: { manual: "1", error: json } }));
+  assert.equal(view.detail, "HTTP 401 · UNAUTHENTICATED · token expired");
+  assert.ok(view.secrets.includes(json));
+  // Automatic failures keep the retry; older manual failures without params
+  // keep their stored text.
+  assert.match(ctx.eventView(event("ignite_failed", 0, { label: "GPT", params: { retry_seconds: "300", error: "x" } })).detail, /^ev_retry\(/);
+  assert.equal(ctx.eventView(event("ignite_failed", 0, { label: "GPT", detail: "点火失败：x" })).detail, "点火失败：x");
+
+  const paused = (params) => ctx.eventView(event("ignite_paused", 0, { level: "error", label: "Gemini", params }));
+  assert.equal(paused({ reason: "auth", error: json, summary: "凭证已失效" }).detail, "ev_paused_auth(凭证已失效)");
+  view = paused({ reason: "suspended", error: json });
+  assert.equal(view.detail, "ev_paused_suspended(HTTP 401 · UNAUTHENTICATED · token expired)");
+  assert.equal(view.tip, "ev_paused_suspended(" + json + ")");
+  assert.equal(paused({ reason: "rate_limited", until: "2026-11-17T00:00:00Z", error: "x", summary: "请求过多" }).detail, "ev_paused(11-17T00:00|请求过多)");
+  assert.equal(paused({ until: "2026-11-17T00:00:00Z", error: "boom" }).detail, "ev_paused(11-17T00:00|boom)");
+  // Without an end time or a known reason, no "until —".
+  assert.equal(paused({ error: "boom" }).detail, "boom");
+});

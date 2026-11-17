@@ -195,6 +195,7 @@
       ev_retry: "{0}后重试：{1}", ev_retry_cooldown: "CPA 冷却结束，{0}后重试：{1}",
       ev_seconds: "{0} 秒", ev_minutes: "{0} 分钟",
       ev_paused: "暂停到 {0}：{1}",
+      ev_paused_auth: "暂停，等待更新凭证：{0}", ev_paused_suspended: "暂停，账号已停用：{0}",
       ev_refused: "{0} 被上游拒绝，改用 {1}，{2} 小时内不再尝试",
       ev_notify_failed_detail: "{0}：{1}",
       ev_cooldown: "额度已恢复，CPA 仍冷却到 {0}",
@@ -362,6 +363,7 @@
       ev_retry: "Retrying in {0}: {1}", ev_retry_cooldown: "Retrying when the CPA cooldown ends, in {0}: {1}",
       ev_seconds: "{0} s", ev_minutes: "{0} min",
       ev_paused: "Paused until {0}: {1}",
+      ev_paused_auth: "Paused until the credential is updated: {0}", ev_paused_suspended: "Paused, account suspended: {0}",
       ev_refused: "{0} was refused upstream; used {1}, not tried again for {2} hours",
       ev_notify_failed_detail: "{0}: {1}",
       ev_cooldown: "Quota is back, but CPA cools down until {0}",
@@ -1537,12 +1539,22 @@
         view.detail = p.reset ? translate("ev_ignited", p.model, time(p.reset)) : p.model || "";
         break;
       case "ignite_failed":
+        // A manual ignition is not retried.
+        if (p.manual === "1") {
+          view.detail = error(p.summary, p.error);
+          view.tip = p.error || view.detail;
+          break;
+        }
         view.detail = translate(p.cooldown ? "ev_retry_cooldown" : "ev_retry", retryText(Number(p.retry_seconds) || 0), error(p.summary, p.error));
         view.tip = translate(p.cooldown ? "ev_retry_cooldown" : "ev_retry", retryText(Number(p.retry_seconds) || 0), p.error || "");
         break;
       case "ignite_paused":
-        view.detail = translate("ev_paused", time(p.until), error(p.summary, p.error));
-        view.tip = translate("ev_paused", time(p.until), p.error || "");
+        // A pause for an invalid credential or a suspended account has no
+        // end; it lasts until the credential changes.
+        var pausedKey = parseTime(p.until) ? "ev_paused" : p.reason === "auth" || p.reason === "suspended" ? "ev_paused_" + p.reason : "";
+        var pausedLine = error(p.summary, p.error);
+        view.detail = !pausedKey ? pausedLine : pausedKey === "ev_paused" ? translate(pausedKey, time(p.until), pausedLine) : translate(pausedKey, pausedLine);
+        view.tip = !pausedKey ? p.error || pausedLine : pausedKey === "ev_paused" ? translate(pausedKey, time(p.until), p.error || "") : translate(pausedKey, p.error || "");
         break;
       case "model_refused":
         view.detail = translate("ev_refused", p.model, p.fallback, p.hours);
