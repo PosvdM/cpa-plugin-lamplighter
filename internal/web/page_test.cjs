@@ -1088,6 +1088,16 @@ test("older failure events without params hide their whole detail when masked", 
   const ok = event("ignite", 0, { group: "claude:k", label: "Claude", detail: "claude-haiku · 下次重置 11/17" });
   assert.equal(ctx.eventView(ok).whole, false);
   assert.equal(plainText(ctx.eventMasked(ok).detail), "claude-haiku · 下次重置 11/17");
+  // An older success without a stored label hides whole too, even when its
+  // group gives a label now: the account may have been renamed since.
+  const ctx2 = eventContext({ status: { accounts: [{ groups: [{ key: "claude:k", label: "Claude Now" }] }] } });
+  const unlabeled = event("ignite", 0, { group: "claude:k", message: "Claude Old 点火成功（claude-haiku），下次重置 11/17" });
+  const view = ctx2.eventView(unlabeled);
+  assert.equal(view.label, "Claude Now");
+  assert.ok(view.whole);
+  const nodes = ctx2.eventMasked(unlabeled, view);
+  assert.equal(plainText(nodes.detail), "");
+  assert.ok(nodes.detail.some((n) => n.text.includes("Claude Old")));
   // Events with params keep the masking by names and error texts.
   assert.equal(ctx.eventView(event("ignite_failed", 0, { label: "Claude", params: { manual: "1", error: "x", summary: "y" } })).whole, false);
 });

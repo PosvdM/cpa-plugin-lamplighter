@@ -1548,9 +1548,11 @@
       detail: "", tip: "", secrets: [], whole: false, link: ""
     };
     // Masked, these details hide whole: errors, and older events without
-    // params whose text is a failure or warning, as it may name accounts
-    // since removed or renamed, or no label to tell the account by.
-    view.whole = ev.kind === "error" || (!ev.params && (!view.label || view.style === "failure" || view.style === "warning"));
+    // params that stored no label or whose text is a failure or warning,
+    // as their text may name accounts since removed or renamed. The label
+    // looked up from the current quota group does not count: it may differ
+    // from the name in the text.
+    view.whole = ev.kind === "error" || (!ev.params && (!ev.label || view.style === "failure" || view.style === "warning"));
     var time = function (value) { return fmtDateTime(parseTime(value)); };
     var error = function (summary, full) {
       var line = summary || errorSummary(full);
