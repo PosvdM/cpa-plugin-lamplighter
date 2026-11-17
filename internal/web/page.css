@@ -208,7 +208,8 @@ header .update path { fill: none; stroke: currentColor; stroke-width: 1.8; strok
    measures it, and in the image, so the two have the same size. */
 .snapshot-frame { padding: 12px; background: var(--bg-secondary); color: var(--text-primary); -webkit-font-smoothing: antialiased; }
 .snapshot-frame, .snapshot-frame *, .snapshot-frame *::before, .snapshot-frame *::after { animation: none !important; transition: none !important; }
-.snapshot-frame .detail-head { margin-top: 0; padding-top: 0; border-top: 0; }
+.snapshot-frame .detail-wrap { margin-top: 0; padding-top: 0; border-top: 0; }
+.snapshot-frame .detail-wrap.side .detail-head { top: 0; }
 .hint.settings-note { margin: 0 0 14px; }
 .settings-section { display: flex; flex-direction: column; gap: 14px; }
 .settings-section > .card-title { margin: 0; }
@@ -363,10 +364,18 @@ td.actions { text-align: right; }
 .chart-box.loading svg { opacity: 0.5; }
 .chart-box svg { display: block; width: 100%; height: auto; overflow: visible; font-family: var(--font-mono); user-select: none; }
 .chart-box svg rect[tabindex]:focus { outline: none; }
-.detail-head {
-  display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; margin-top: 18px; padding-top: 16px;
-  border-top: 1px solid var(--border-color); font-size: 12.5px; color: var(--text-tertiary);
+.detail-wrap { position: relative; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border-color); }
+.detail-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; font-size: 12.5px; color: var(--text-tertiary); }
+/* The heading as a column in the blank left of the plot; page.js sets
+   --detail-side to the width of the blank less the y-axis labels. */
+.detail-wrap.side .detail-head {
+  position: absolute; left: 0; top: 16px; width: var(--detail-side); flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 3px;
 }
+.detail-wrap.side .detail-head > * { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.detail-wrap.side .detail-name { white-space: normal; overflow-wrap: anywhere; line-height: 1.35; margin-bottom: 1px; }
+.detail-wrap.side .detail-head > .badge { align-self: flex-start; }
+.detail-wrap.side .detail-stat { display: flex; justify-content: space-between; gap: 8px; }
+.detail-wrap.side .detail-tools { margin: 4px 0 0; align-self: flex-start; overflow: visible; }
 .detail-name { font-size: 14px; font-weight: 650; color: var(--text-primary); }
 .detail-stat strong { margin-left: 4px; color: var(--text-primary); font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: 600; }
 .detail-stat strong.ahead { color: var(--viz-success); }

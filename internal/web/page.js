@@ -2731,7 +2731,7 @@
     head.appendChild(el("span", { class: "detail-name" }, (row.orphan ? [el("span", { class: SENSITIVE, text: row.name })] : maskedNodes(row.name)).concat([" · " + translate(historyWindow === "5h" ? "quota_5h" : "quota_7d")])));
     if (row.inactive) head.appendChild(badge("muted", translate("inactive")));
     head.appendChild(el("span", { class: "muted" + (group ? "" : " " + SENSITIVE), text: group ? translate("pooled_note", row.children.length) : row.sub }));
-    head.appendChild(el("span", { class: "detail-tools" }, [maskButton(), snapshotButton("snapshot_detail", function () { return [head, box]; })]));
+    head.appendChild(el("span", { class: "detail-tools" }, [maskButton(), snapshotButton("snapshot_detail", function () { return [$("chart-detail-wrap")]; })]));
     if (row.inactive) {
       head.appendChild(el("span", { class: "detail-stat" }, [document.createTextNode(translate("stat_last")),
         el("strong", { text: pct(row.last) + " · " + fmtDateTime(unixDate(row.lastAt)) })]));
@@ -2984,6 +2984,21 @@
     });
   }
 
+  // The detail chart's heading goes, as a column (.side), into the blank
+  // left of the plot that lines the plot up with the overview; the plot
+  // stays where it is. The y-axis labels keep the right SIDE_GAP pixels of
+  // the blank. Where the blank is too narrow, in a chart below 640 pixels
+  // wide (labelW 120), or too short for the heading, such as with a long
+  // name, the heading stays above the chart.
+  var SIDE_GAP = 46;
+  function placeDetailHead(wrap, head, box, g) {
+    wrap.classList.remove("side");
+    if (g.labelW < 190 || g.width !== box.clientWidth) return;
+    wrap.style.setProperty("--detail-side", (g.labelW - SIDE_GAP) + "px");
+    wrap.classList.add("side");
+    if (head.offsetHeight > box.offsetHeight) wrap.classList.remove("side");
+  }
+
   function hoverAt(e, root, rowId, source) {
     var rect = root.getBoundingClientRect();
     var t = chartView.t((e.clientX - rect.left) / rect.width * chartView.width);
@@ -3051,7 +3066,7 @@
     clear($("chart-table"));
     hoverListeners = [];
     snapPoints = [];
-    head.hidden = true;
+    $("chart-detail-wrap").hidden = true;
     if (!history || !status) {
       overview.appendChild(el("div", { class: "empty", text: historyFailed ? translate("history_failed", historyFailed) : translate("loading") }));
       return;
@@ -3064,8 +3079,9 @@
     if (!findRow(rows, chartSelected)) chartSelected = rows[0].id;
     var selected = findRow(rows, chartSelected);
     renderOverview(rows, overview, axisEnd(selected));
-    head.hidden = false;
+    $("chart-detail-wrap").hidden = false;
     renderDetail(selected, head, detail);
+    placeDetailHead($("chart-detail-wrap"), head, detail, chartView);
     renderChartTable(rows);
     $("legend-projection").textContent = translate("legend_projection_" + historyWindow);
   }

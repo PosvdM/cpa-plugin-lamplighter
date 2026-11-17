@@ -952,3 +952,24 @@ test("a total extends where an account does, with the other accounts' lines", ()
   assert.ok(Math.abs(ctx.extendedPace([a, b], WEEK, t) - want) < 1e-9);
   assert.equal(ctx.extendedPace([b], WEEK, t), null);
 });
+
+test("the detail heading moves left of the plot only where it fits", () => {
+  const ctx = context(["placeDetailHead"], { SIDE_GAP: 46 });
+  const wrap = () => {
+    const classes = new Set(), style = {};
+    return { classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c) }, style: { setProperty: (k, v) => { style[k] = v; } }, classes, css: style };
+  };
+  const box = { clientWidth: 1000, offsetHeight: 206 };
+  let w = wrap();
+  ctx.placeDetailHead(w, { offsetHeight: 180 }, box, { labelW: 190, width: 1000 });
+  assert.ok(w.classes.has("side"));
+  assert.equal(w.css["--detail-side"], "144px");
+  // Too narrow: the blank of a chart below 640 pixels.
+  w = wrap();
+  ctx.placeDetailHead(w, { offsetHeight: 100 }, { clientWidth: 600, offsetHeight: 206 }, { labelW: 120, width: 600 });
+  assert.ok(!w.classes.has("side"));
+  // Too tall, such as a long name over several lines.
+  w = wrap();
+  ctx.placeDetailHead(w, { offsetHeight: 240 }, box, { labelW: 190, width: 1000 });
+  assert.ok(!w.classes.has("side"));
+});
