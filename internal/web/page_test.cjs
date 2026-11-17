@@ -1011,7 +1011,7 @@ test("a credential problem shares its row with the ignition pause and the notifi
     event("notify", 1800, { ...g, params: { title: "⏳ Claude 被限流", notify_kind: "rate_limited" } }),
     event("notify_failed", 30, { ...g, level: "warn", params: { title: "⚠️ Claude 点火已暂停", notify_kind: "circuit", error: "Bark: 500" } }),
     event("credential_invalid", 0, { ...g, level: "error", params: { reason: "rate_limited", status: "429", summary: "请求过多", until, source: "ignite" } }),
-    event("ignite_paused", 0, { ...g, level: "error", params: { until, error: "{}", summary: "请求过多" } }),
+    event("ignite_paused", 0, { ...g, level: "error", params: { until, error: '{"error":{"code":429,"message":"Number of requests has exceeded your rate limit"}}', summary: "请求过多" } }),
     // Another group's pause stays its own row.
     event("ignite_paused", 10, { group: "gemini:k", label: "Gemini", level: "error", params: { until, error: "x" } }),
   ];
@@ -1025,7 +1025,8 @@ test("a credential problem shares its row with the ignition pause and the notifi
   const view = ctx.eventView(row.event, row.notifyKind, row.paused);
   assert.equal(view.badge, "ev_credential_rate_limited");
   assert.equal(view.detail, "ev_ignite_paused_until(请求过多|11-16T23:00)");
-  assert.equal(view.tip, "HTTP 429 · 请求过多");
+  // The tooltip adds the full error of the pause on a line of its own.
+  assert.equal(view.tip, 'HTTP 429 · 请求过多\n{"error":{"code":429,"message":"Number of requests has exceeded your rate limit"}}');
   // A pause more than PAUSE_PAIR seconds away is a row of its own.
   assert.equal(ctx.eventRows([events[2], { ...events[3], time: new Date((T0 - 61) * 1000).toISOString() }], false).rows.length, 2);
   // Found by a query, without a pause: the rate limit alone.
@@ -1037,7 +1038,15 @@ test("a credential problem shares its row with the ignition pause and the notifi
     event("ignite_paused", 0, { ...g, params: { reason: "suspended", error: "x", summary: "停用" } }),
   ], false);
   assert.equal(suspended.rows.length, 1);
-  assert.equal(ctx.eventView(suspended.rows[0].event, undefined, suspended.rows[0].paused).detail, "ev_ignite_paused_note(停用)");
+  const merged = ctx.eventView(suspended.rows[0].event, undefined, suspended.rows[0].paused);
+  assert.equal(merged.detail, "ev_ignite_paused_note(停用)");
+  // With an appeal address, the pause's error follows it; a pause without
+  // an error adds nothing.
+  const appeal = { reason: "suspended", status: "403", summary: "停用", appeal_url: "https://appeal.example.com/", source: "ignite" };
+  const withPause = (error) => ctx.eventView(event("credential_invalid", 0, { ...g, params: appeal }), undefined,
+    event("ignite_paused", 0, { ...g, params: error ? { reason: "suspended", error, summary: "停用" } : { reason: "suspended", summary: "停用" } }));
+  assert.equal(withPause("raw").tip, "HTTP 403 · 停用\nhttps://appeal.example.com/\nraw");
+  assert.equal(withPause("").tip, "HTTP 403 · 停用\nhttps://appeal.example.com/");
 });
 
 test("Did Codex Reset notifications join the event recorded after them", () => {
@@ -1055,4 +1064,30 @@ test("Did Codex Reset notifications join the event recorded after them", () => {
   const view = ctx.eventView(built.rows[1].event, built.rows[1].notifyKind);
   assert.equal(view.label, "Did Codex Reset");
   assert.equal(view.detail, "✅ Codex 全局重置已完成");
+});
+
+test("older failure events without params hide their whole detail when masked", () => {
+  const ctx = eventContext();
+  const plainText = (list) => list.filter((n) => n.class !== "account-sensitive").map((n) => n.text || "").join("");
+  // A manual ignition failure from before params, naming an account that
+  // has since been removed: no name list can catch it.
+  const old = [
+    event("ignite_failed", 0, { group: "claude:k", label: "Claude", level: "warn", detail: "手动点火失败：permission denied for gone@example.com" }),
+    event("ignite_paused", 0, { group: "claude:k", label: "Claude", level: "error", detail: "暂停到 11/17：gone@example.com" }),
+    event("notify_failed", 0, { group: "claude:k", label: "Claude", level: "warn", detail: "Bark：gone@example.com" }),
+    event("error", 0, { level: "error", label: "Claude", detail: "额度查询失败：gone@example.com" }),
+  ];
+  for (const ev of old) {
+    const view = ctx.eventView(ev);
+    assert.ok(view.whole, ev.kind);
+    const nodes = ctx.eventMasked(ev, view);
+    assert.equal(plainText(nodes.detail), "", ev.kind);
+    assert.ok(nodes.detail.some((n) => n.text.includes("gone@example.com")), ev.kind);
+  }
+  // An older success keeps its detail, with only the names hidden.
+  const ok = event("ignite", 0, { group: "claude:k", label: "Claude", detail: "claude-haiku · 下次重置 11/17" });
+  assert.equal(ctx.eventView(ok).whole, false);
+  assert.equal(plainText(ctx.eventMasked(ok).detail), "claude-haiku · 下次重置 11/17");
+  // Events with params keep the masking by names and error texts.
+  assert.equal(ctx.eventView(event("ignite_failed", 0, { label: "Claude", params: { manual: "1", error: "x", summary: "y" } })).whole, false);
 });

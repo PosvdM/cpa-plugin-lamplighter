@@ -1545,8 +1545,12 @@
       style: known || (ev.level === "error" ? "failure" : ev.level === "warn" ? "warning" : "muted"),
       badge: known ? translate("ev_" + ev.kind) : ev.kind,
       label: ev.label || (ev.group ? groupLabel(ev.group) : ""),
-      detail: "", tip: "", secrets: [], whole: ev.kind === "error" || (!ev.params && !ev.label), link: ""
+      detail: "", tip: "", secrets: [], whole: false, link: ""
     };
+    // Masked, these details hide whole: errors, and older events without
+    // params whose text is a failure or warning, as it may name accounts
+    // since removed or renamed, or no label to tell the account by.
+    view.whole = ev.kind === "error" || (!ev.params && (!view.label || view.style === "failure" || view.style === "warning"));
     var time = function (value) { return fmtDateTime(parseTime(value)); };
     var error = function (summary, full) {
       var line = summary || errorSummary(full);
@@ -1621,7 +1625,9 @@
         var until = parseTime(p.until) || parseTime(paused && (paused.params || {}).until);
         if (stops) view.detail = until ? translate("ev_ignite_paused_until", line, fmtDateTime(until)) : translate("ev_ignite_paused_note", line);
         else view.detail = p.reason === "rate_limited" && until ? translate("ev_limited_until", line, fmtDateTime(until)) : line;
-        view.tip = [[codes, p.summary].filter(Boolean).join(" · ") || line, p.appeal_url || ""].filter(Boolean).join("\n");
+        // The tooltip adds the full error of the pause in the row.
+        view.tip = [[codes, p.summary].filter(Boolean).join(" · ") || line, p.appeal_url || "", paused && (paused.params || {}).error || ""]
+          .filter(Boolean).join("\n");
         if (/^https?:\/\//i.test(p.appeal_url || "")) view.link = p.appeal_url;
         break;
       case "credential_restored":
