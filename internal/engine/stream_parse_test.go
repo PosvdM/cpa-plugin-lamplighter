@@ -8,6 +8,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/PosvdM/cpa-plugin-lamplighter/internal/failure"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/host"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/ignite"
 )
@@ -331,5 +332,53 @@ func TestStreamCaptureErrors(t *testing.T) {
 	}
 	if err := s.finish(); err != nil || s.reply.String() != "OK" {
 		t.Fatalf("reply=%q err=%v", s.reply.String(), err)
+	}
+}
+
+// A suspension reported in the stream keeps its allowlisted code and appeal
+// form on every error channel, so that it is sorted like the same HTTP
+// error; the provider's message is still dropped.
+func TestStreamErrorKeepsSuspension(t *testing.T) {
+	google := `{"code":403,"message":"SECRET This service has been disabled in this account for violation of Terms of Service.","status":"PERMISSION_DENIED","details":[{"reason":"TOS_VIOLATION","metadata":{"appeal_url":"https://forms.gle/hGzM9MEUv2azZsrb9"}}]}`
+	openai := `{"message":"SECRET Your account has been deactivated.","type":"invalid_request_error","code":"account_deactivated"}`
+	phrase := `{"code":403,"message":"SECRET This service has been disabled in this account."}`
+	for _, tc := range []struct {
+		name, detail, code, appeal string
+	}{
+		{"Google", google, "TOS_VIOLATION", "https://forms.gle/hGzM9MEUv2azZsrb9"},
+		{"OpenAI", openai, "account_deactivated", ""},
+		{"phrase", phrase, "", ""},
+	} {
+		for _, channel := range []string{"host", "host prefix", "error", "response.failed"} {
+			t.Run(tc.name+"/"+channel, func(t *testing.T) {
+				var err error
+				switch channel {
+				case "host":
+					err = streamErrorText(`{"error":` + tc.detail + `}`)
+				case "host prefix":
+					err = streamErrorText(`HTTP 403: {"error":` + tc.detail + `}`)
+				case "error":
+					var s streamCapture
+					err = s.feed([]byte(`data: {"type":"error","error":` + tc.detail + "}\n\n"))
+				case "response.failed":
+					var s streamCapture
+					err = s.feed([]byte(`data: {"type":"response.failed","response":{"error":` + tc.detail + "}}\n\n"))
+				}
+				d := failure.Diagnose(err)
+				if d.Reason != failure.ReasonSuspended || d.Code != tc.code || d.AppealURL != tc.appeal || ignite.Classify(err) != ignite.Hard || ignite.ModelRejected(err) ||
+					strings.Contains(err.Error(), "SECRET") || strings.Contains(d.Summary, "SECRET") {
+					t.Fatalf("err=%v diagnosis=%+v", err, d)
+				}
+			})
+		}
+	}
+	// Other appeal addresses and an ordinary permission error keep nothing.
+	err := streamErrorText(`{"error":{"code":403,"message":"SECRET","details":[{"reason":"TOS_VIOLATION","metadata":{"appeal_url":"https://evil.example/SECRET"}}]}}`)
+	if d := failure.Diagnose(err); d.AppealURL != "" || d.Reason != failure.ReasonSuspended {
+		t.Fatalf("%+v", d)
+	}
+	err = streamErrorText(`{"error":{"code":403,"message":"The caller does not have permission","status":"PERMISSION_DENIED"}}`)
+	if d := failure.Diagnose(err); d.Reason != "" || host.StatusOf(err) != 403 {
+		t.Fatalf("%+v", d)
 	}
 }

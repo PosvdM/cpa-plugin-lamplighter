@@ -116,7 +116,8 @@ After each model call, the CPA server log records the service, model, correlatio
 
 **Failure protection**: the retry and pause rules below apply to scheduled ignition. A failed "Ignite now" request only displays the error and records an event. It does not retry automatically, count toward failure protection, or change the existing automatic schedule. Successful manual ignition is recorded as usual.
 
-- Authentication failures, rate limits (429), unavailable models, or a request that succeeded without starting the window pause ignition for that quota group until 07:00 the next day, with one notification.
+- An invalid credential (such as 401) or a suspended account (such as Google's `TOS_VIOLATION`) stops scheduled ignition for that account without daily retries, with one 🔑 or ⛔ notification (the suspension notice includes the appeal link). Ignition resumes after you log in again or update the credential, or after a successful "Ignite now". Quota queries also report lasting authentication failures (3 in a row over at least 30 minutes) and suspended accounts; ignition and queries report the same problem once, also across plugin restarts. When the problem ends, a ✅ credential notification follows.
+- Rate limits (429), unavailable models, or a request that succeeded without starting the window pause ignition for that quota group until 07:00 the next day, with one notification; for rate limits it is ⏳ rate limited. Notifications carry only the first sentence of the provider's error; the full error is in the event details on the page.
 - Network and server errors are retried after 5 and 15 minutes; a third failure also pauses until the next day.
 - When the quota ran out before the reset, CPA cools the account down until a dozen or so seconds after the reset. An ignition that hits this cooldown retries as soon as it ends and is not counted as a failure.
 - When the account's 7-day quota (or another window other than the 5-hour one) is used up, scheduled ignition for the quota group stops until that window resets and a query shows the quota is back; the page shows "7 天额度已用完". "Ignite now" still works.
@@ -133,7 +134,7 @@ Notifications use the Management Center language from the last time the manageme
 7d: 48% | 03d | 10/07 14:00
 ```
 
-Title icons: 🟡 remaining fell to the first threshold (50% by default), 🔴 to the second threshold (20% by default) or below, ✅ recovered, ⏰ reset reminder, 🎫 plan changed, ⚠️ a problem that needs action, such as ignition paused or a CPA cooldown that outlasts the quota. Each body line shows the window, the remaining quota, the time until reset, and the reset time. The first time the plugin sees a quota window it only records the current level and sends nothing.
+Title icons: 🟡 remaining fell to the first threshold (50% by default), 🔴 to the second threshold (20% by default) or below, ✅ recovered, ⏰ reset reminder, 🎫 plan changed, 🔑 credential invalid, ⛔ account suspended, ⏳ rate limited, ✅ credential works again, ⚠️ a problem that needs action, such as ignition paused or a CPA cooldown that outlasts the quota. Each body line shows the window, the remaining quota, the time until reset, and the reset time. The first time the plugin sees a quota window it only records the current level and sends nothing.
 
 ## Configuration
 
@@ -316,10 +317,10 @@ quotas.example.com {
 
 | Tool | Purpose |
 | --- | --- |
-| `list_quotas(provider?, account?, model?)` | Current windows, account plans and weights, weighted remaining quota, earliest account exhaustion, resets, forecasts, hourly consumption, seven-day even-pace budgets, freshness and source, credential authentication errors and next ignition |
+| `list_quotas(provider?, account?, model?)` | Current windows, account plans and weights, weighted remaining quota, earliest account exhaustion, resets, forecasts, hourly consumption, seven-day even-pace budgets, freshness and source, credential authentication errors, account suspension and next ignition |
 | `get_quota_history(provider?, account?, window?, range?)` | Quota history including retired windows; at most 200 points per series and 2000 points per response |
 | `refresh_quotas(account?)` | Active query, globally limited to once per 60 seconds; returns remaining wait seconds when throttled and waits at most 180 seconds for results |
-| `get_quota_events(since?, limit?)` | Recent reset, exhaustion and ignition success/failure events; `since` is an RFC3339 timestamp with timezone and `limit` an integer from 1 to 100 |
+| `get_quota_events(since?, limit?)` | Recent reset, exhaustion, ignition success/failure, and credential problem (invalid credential, suspended account, rate limit) and recovery events; `since` is an RFC3339 timestamp with timezone and `limit` an integer from 1 to 100 |
 
 Each MCP server instance executes at most four tool calls concurrently, including calls within a batch. Additional calls immediately receive a JSON-RPC `-32000` busy error and may be retried later. Query tools have a 10-second timeout; `refresh_quotas` has a 180-second timeout.
 
@@ -350,9 +351,9 @@ The URL, headers and body can use placeholders:
 | `{{title}}` | Notification title |
 | `{{body}}` | Notification body |
 | `{{text}}` | Title and body, separated by a line break |
-| `{{url}}` | Link; only Did Codex Reset notifications have one, empty otherwise |
-| `{{priority}}` | `high` when quota drops to the third threshold or runs out, the plan changes, ignition pauses or a CPA cooldown is not cleared; `normal` otherwise |
-| `{{kind}}` | Notification type: `quota` quota drop, `recovery` quota recovered, `reminder` reset reminder, `plan` plan changed, `cooldown` CPA cooldown not cleared, `circuit` ignition paused, `codex_reset` Did Codex Reset, `test` test notification |
+| `{{url}}` | Link: the history page for Did Codex Reset notifications, the https appeal link for account suspension notices, empty otherwise |
+| `{{priority}}` | `high` when quota drops to the third threshold or runs out, the plan changes, ignition pauses, a credential is invalid, an account is suspended or rate limited, or a CPA cooldown is not cleared; `normal` otherwise |
+| `{{kind}}` | Notification type: `quota` quota drop, `recovery` quota recovered, `reminder` reset reminder, `plan` plan changed, `cooldown` CPA cooldown not cleared, `circuit` ignition paused, `credential` credential invalid, `suspended` account suspended, `rate_limited` rate limited, `credential_ok` credential works again, `codex_reset` Did Codex Reset, `test` test notification |
 | `{{label}}` | Quota group, such as `GPT#rk` or `GPT#main`; empty for notifications not about a quota group |
 | `{{time}}` | Time sent, in RFC 3339 format and the plugin time zone |
 

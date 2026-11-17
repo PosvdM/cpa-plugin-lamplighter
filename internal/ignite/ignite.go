@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/config"
+	"github.com/PosvdM/cpa-plugin-lamplighter/internal/failure"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/host"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/store"
 )
@@ -257,6 +258,20 @@ func (s Schedule) RecordFailure(ts *store.TargetState, now time.Time, err error)
 	return FailureOutcome{RetryIn: delay}
 }
 
+// RecordCredentialFailure records a failure caused by the credential: the
+// provider rejected it or disabled the account. Retrying cannot help, so no
+// retry time is set; the engine skips the target until the credential
+// changes or a manual ignition succeeds. summary is the error in one
+// sentence, shown as the pause reason.
+func RecordCredentialFailure(ts *store.TargetState, now time.Time, err error, summary string) {
+	ts.ConsecutiveFailures++
+	ts.LastError = truncate(errorText(err), 500)
+	ts.LastFailureEpoch = epoch(now)
+	ts.RetryAtEpoch = 0
+	ts.CircuitOpenUntilEpoch = 0
+	ts.CircuitReason = truncate(summary, 500)
+}
+
 // recentCooldown reports whether the previous failure, shortly before now,
 // was already a CPA cooldown.
 func (s Schedule) recentCooldown(ts *store.TargetState, now time.Time) bool {
@@ -344,6 +359,10 @@ func Classify(err error) Kind {
 // rate limits concern the account and are not model rejections.
 func ModelRejected(err error) bool {
 	if Classify(err) != Hard || errors.Is(err, ErrNotConfirmed) || errors.Is(err, ErrNoModel) {
+		return false
+	}
+	// A disabled account refuses every model, sometimes with HTTP 400.
+	if failure.Diagnose(err).Reason == failure.ReasonSuspended {
 		return false
 	}
 	if status := host.StatusOf(err); status != 0 {

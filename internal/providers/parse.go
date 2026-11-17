@@ -13,22 +13,24 @@ import (
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/quota"
 )
 
-const maxErrorBodyLength = 300
+// maxErrorBodyLength is how much of an error response is kept for
+// failure.Diagnose; quota.HTTPError shows less of it.
+const maxErrorBodyLength = 4096
 
 func send(ctx context.Context, doer quota.Doer, cred Credential, req quota.Request) (map[string]any, error) {
 	resp, err := doer.Do(ctx, cred.ProxyURL, req)
 	if err != nil {
 		return nil, err
 	}
-	if resp.Status == http.StatusUnauthorized {
-		return nil, quota.ErrUnauthorized
-	}
+	// A 401 also keeps its body: it can name a disabled account, such as
+	// OpenAI's account_deactivated. errors.Is(err, quota.ErrUnauthorized)
+	// still holds.
 	if resp.Status < 200 || resp.Status >= 300 {
 		body := strings.TrimSpace(string(resp.Body))
 		if len(body) > maxErrorBodyLength {
 			body = body[:maxErrorBodyLength]
 		}
-		return nil, fmt.Errorf("上游 HTTP %d: %s", resp.Status, body)
+		return nil, &quota.HTTPError{Status: resp.Status, Body: body}
 	}
 	decoder := json.NewDecoder(bytes.NewReader(resp.Body))
 	decoder.UseNumber()

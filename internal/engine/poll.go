@@ -317,6 +317,7 @@ func (e *Engine) shouldSkipActive(cfg config.Config, cred *Cred, slot, now time.
 // belongs to. onlyAuth limits the round to one credential. force disables the
 // passive skip rule, for the manual refresh button.
 func (e *Engine) poll(ctx context.Context, cfg config.Config, slot time.Time, onlyAuth string, force bool) {
+	start := e.now()
 	creds, err := e.loadCreds(cfg)
 	if err != nil {
 		e.mu.Lock()
@@ -355,10 +356,18 @@ func (e *Engine) poll(ctx context.Context, cfg config.Config, slot time.Time, on
 	e.mu.Unlock()
 	e.dirty = true
 	e.checkCooldowns(ctx, cfg)
+	e.flushCredentialNotices(ctx, start)
 }
 
 // refreshCred runs the active query of one credential.
 func (e *Engine) refreshCred(ctx context.Context, cfg config.Config, cred *Cred) error {
+	return e.queryCred(ctx, cfg, cred, true)
+}
+
+// queryCred runs the active query of one credential. Without track, the
+// result does not change the credential state: no new or ended credential
+// problem, event or notification.
+func (e *Engine) queryCred(ctx context.Context, cfg config.Config, cred *Cred, track bool) error {
 	raw, err := e.host.AuthGet(cred.AuthIndex)
 	if err != nil {
 		return fmt.Errorf("读取凭证文件失败：%w", err)
@@ -369,13 +378,23 @@ func (e *Engine) refreshCred(ctx context.Context, cfg config.Config, cred *Cred)
 	}
 	credential := providers.ParseCredential(raw)
 	credential.Provider, credential.ID, credential.Name = cred.HostProvider, cred.ID, cred.Name
+	fingerprint := providers.Fingerprint(raw)
+	if track {
+		e.noteFingerprint(cred, fingerprint)
+	}
 	readAt := e.now()
 	groups, err := providers.Fetch(ctx, p, e.egress, credential, readAt)
 	if err != nil {
+		if track {
+			e.noteQueryFailure(ctx, cred, fingerprint, err)
+		}
 		return err
 	}
 	now := e.now()
 	e.activeAt[cred.AuthIndex] = now
+	if track {
+		e.noteCredentialOK(ctx, cred, sourceQuery)
+	}
 	// The plan comes first, so that a changed plan resets the notification
 	// baselines before the new windows are compared with them.
 	confirmed := e.notePlan(ctx, p, cred, credential, groups, now)
@@ -792,8 +811,8 @@ func (e *Engine) pollResetFeed(ctx context.Context, cfg config.Config) {
 		return
 	}
 	var sender notify.Sender
-	if e.alerts != nil {
-		sender = e.alerts.Sender
+	if e.alerts != nil && e.alerts.Sender != nil {
+		sender = recordingSender{e: e, next: e.alerts.Sender}
 	}
 	sent := notify.ProcessResetRecords(ctx, e.state, records, cfg.CodexResetUpdates.NotifyCurrentPending, sender, cfg.Location(), e.language(), e.now())
 	if sent > 0 {

@@ -177,7 +177,16 @@ func TestListenerReconfigureAndClose(t *testing.T) {
 	if code, _ := post(t, client, "http://"+addr+"/mcp", "POST", body, "first", "", ""); code != 200 {
 		t.Fatal(code)
 	}
+	s.mu.Lock()
+	listener := s.http
+	s.mu.Unlock()
 	s.Configure(true, addr, "second")
+	s.mu.Lock()
+	kept := s.http == listener && s.state.Running
+	s.mu.Unlock()
+	if !kept {
+		t.Fatal("a new key restarted the listener")
+	}
 	if code, _ := post(t, client, "http://"+addr+"/mcp", "POST", body, "first", "", ""); code != 401 {
 		t.Fatal(code)
 	}

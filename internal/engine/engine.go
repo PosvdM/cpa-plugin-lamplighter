@@ -104,16 +104,23 @@ type Engine struct {
 	releaseAt    time.Time
 	// plans is the raw plan per auth index, a copy of state.Plans.
 	plans map[string]string
+	// credProblems is the reason of the credential problem per auth index,
+	// a copy of state.Credentials.
+	credProblems map[string]string
 
 	// Owned by the loop goroutine.
-	state     *store.State
-	stateFile *store.StateFile
-	history   *store.History
-	dirty     bool
-	egress    *egress.Egress
-	lister    *models.Lister
-	alerts    *notify.Alerts
-	passiveAt map[string]time.Time
+	state *store.State
+	// credNoticeTried is when the credential notification of each account
+	// was last sent or tried; flushCredentialNotices skips the ones tried
+	// during the same poll.
+	credNoticeTried map[string]time.Time
+	stateFile       *store.StateFile
+	history         *store.History
+	dirty           bool
+	egress          *egress.Egress
+	lister          *models.Lister
+	alerts          *notify.Alerts
+	passiveAt       map[string]time.Time
 	// fableSeen marks credentials whose passive Fable window was logged.
 	fableSeen map[string]bool
 	activeAt  map[string]time.Time
@@ -384,6 +391,12 @@ func (e *Engine) openStores(cfg config.Config) error {
 	e.mu.Lock()
 	e.dataDir = dir
 	e.lang = notify.NormalizeLang(state.Language)
+	e.credProblems = map[string]string{}
+	for authIndex, st := range state.Credentials {
+		if st != nil && st.Reason != "" {
+			e.credProblems[authIndex] = st.Reason
+		}
+	}
 	e.plans = map[string]string{}
 	for authIndex, plan := range state.Plans {
 		if plan != nil && plan.Plan != "" {

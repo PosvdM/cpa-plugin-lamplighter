@@ -70,14 +70,30 @@ func (s *Server) State() State { s.mu.Lock(); defer s.mu.Unlock(); return s.stat
 
 // Configure closes the old listener before binding the replacement. A failed
 // bind is retried every two seconds, including during hot-reload handover.
+//
+// A new non-empty key for a running listener on the same address replaces
+// the key without closing the listener: reverse proxies and MCP clients reuse
+// keep-alive connections, and a closing listener fails the next request on
+// them. serveHTTP reads the key under mu, so every request after Configure
+// returns is checked against the new key. Requests already admitted with the
+// old key are canceled, as when the listener closes.
 func (s *Server) Configure(enabled bool, listen, key string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.stopped {
 		return
 	}
-	if s.state.Enabled == enabled && s.state.Listen == listen && s.key == key && s.state.Running {
-		return
+	if s.state.Enabled == enabled && s.state.Listen == listen && s.state.Running {
+		if s.key == key {
+			return
+		}
+		if enabled && key != "" {
+			for _, cancel := range s.requests {
+				cancel()
+			}
+			s.key = key
+			return
+		}
 	}
 	s.closeLocked()
 	s.state = State{Enabled: enabled, Listen: listen, Path: "/mcp"}
@@ -476,10 +492,10 @@ func validateArguments(name string, args map[string]string) error {
 }
 func toolDefinitions() []any {
 	descriptions := map[string]string{
-		"list_quotas":       "Read current quota windows grouped by provider and quota pool, weighted remaining totals and earliest account exhaustion. Per-account fields include remaining percent, reset/start state, percentage points consumed per hour, estimated exhaustion and pre-reset risk, seven-day even-pace budget, freshness/source/error/credential state, next ignition, plan and weight. Time objects contain ISO 8601 with timezone and relative time. Null means unknown. Forecasts are estimates. Model filtering returns conservative candidate pools with certain=false because CPA aliases, affinity and live credential selection are unavailable to this plugin. Accounts use the first note line with embedded emails masked, else *** plus the email user name's last two characters (or all characters if shorter; e.g. ***rk), else account-number. Duplicate labels receive unique #n suffixes; full emails are never returned.",
+		"list_quotas":       "Read current quota windows grouped by provider and quota pool, weighted remaining totals and earliest account exhaustion. Per-account fields include remaining percent, reset/start state, percentage points consumed per hour, estimated exhaustion and pre-reset risk, seven-day even-pace budget, freshness/source/error/credential state (credential_invalid, account_suspended), next ignition, plan and weight. Time objects contain ISO 8601 with timezone and relative time. Null means unknown. Forecasts are estimates. Model filtering returns conservative candidate pools with certain=false because CPA aliases, affinity and live credential selection are unavailable to this plugin. Accounts use the first note line with embedded emails masked, else *** plus the email user name's last two characters (or all characters if shorter; e.g. ***rk), else account-number. Duplicate labels receive unique #n suffixes; full emails are never returned.",
 		"get_quota_history": "Read downsampled quota history, including retired windows. At most 2000 points total and 200 per series. provider is a provider ID; account is an exact account label or email. window accepts 5h, 7d or a window ID. range accepts 1h, 3h, 6h, 12h, 24h, 26h, 4d, 8d, 15d, 1mo, 36d (default 24h). Each point has timestamp, relative time, remaining percent and active/passive source.",
 		"refresh_quotas":    "Request an active quota refresh for all accounts or one exact account label or email. Requires a running engine, but does not wait for its first full poll. A non-running engine returns ready=false, state=starting and retry_after_seconds=30; a disabled plugin returns state=disabled. These responses do not consume the refresh limit. Running-engine attempts are globally limited to once per 60 seconds, including refresh failures. Ambiguous account filters are rejected. Returns retry_after_seconds when throttled. Wait is bounded to 180 seconds; timeout does not imply upstream work was canceled. Read list_quotas afterward for per-account freshness and errors.",
-		"get_quota_events":  "Read recent quota reset, exhaustion and ignition success/failure events, newest first. since is an RFC3339 timestamp with timezone; limit is an integer, 1-100 (default 50). In-memory retention is at most 200 events of all kinds. Account filters elsewhere use exact account labels or email, never credential paths.",
+		"get_quota_events":  "Read recent quota reset, exhaustion, ignition success/failure and credential problem events, newest first. credential_invalid events carry reason auth, suspended or rate_limited and source ignite or query; credential events of an account without quota groups yet have an empty group. since is an RFC3339 timestamp with timezone; limit is an integer, 1-100 (default 50). In-memory retention is at most 200 events of all kinds. Account filters elsewhere use exact account labels or email, never credential paths.",
 	}
 	var out []any
 	for _, name := range []string{"list_quotas", "get_quota_history", "refresh_quotas", "get_quota_events"} {

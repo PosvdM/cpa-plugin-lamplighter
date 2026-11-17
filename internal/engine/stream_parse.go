@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
 
+	"github.com/PosvdM/cpa-plugin-lamplighter/internal/failure"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/host"
 )
 
@@ -28,6 +30,10 @@ var streamErrorCodes = map[string]int{
 	"overloaded_error": 529, "server_error": 500, "api_error": 500, "internal_server_error": 500,
 	"auth_not_found": 0, "auth_unavailable": 0,
 }
+
+// streamAppealURL allowlists the appeal forms of suspended accounts kept from
+// a stream error, such as Google's https://forms.gle/... link.
+var streamAppealURL = regexp.MustCompile(`^https://(?:forms\.gle/[A-Za-z0-9]{1,64}|support\.google\.com/[A-Za-z0-9/_-]{1,128})$`)
 
 var streamErrorStatusPrefix = regexp.MustCompile(`(?i)^(?:http(?: status)?|status(?: code)?)[: ]+([0-9]{3})\b`)
 
@@ -61,6 +67,12 @@ func streamErrorText(raw string) error {
 		return streamError(v)
 	}
 	if match := streamErrorStatusPrefix.FindStringSubmatch(strings.TrimSpace(raw)); match != nil {
+		// "HTTP 403: {...}" also carries the error object.
+		rest := strings.TrimSpace(raw)[len(match[0]):]
+		if start := strings.IndexByte(rest, '{'); start >= 0 && json.Unmarshal([]byte(rest[start:]), &v) == nil && v != nil {
+			v["status_code"] = match[1]
+			return streamError(v)
+		}
 		return streamError(map[string]any{"status": match[1]})
 	}
 	return streamError(nil)
@@ -83,12 +95,50 @@ func streamError(v map[string]any) error {
 			}
 		}
 	}
+	explicit := status
 	for _, key := range []string{"code", "type"} {
 		if status == 0 {
 			status = streamErrorCodes[str(detail[key])]
 		}
 	}
+	// A disabled account keeps its allowlisted code, the matching constant
+	// of failure.SuspendedPhrase and an allowlisted appeal form, so that
+	// failure.Diagnose sorts it like the same HTTP error. The provider's
+	// message itself is still dropped.
 	var identifiers []string
+	addSuspended := func(value string) {
+		if failure.SuspendedCode(value) && !slices.Contains(identifiers, value) {
+			identifiers = append(identifiers, value)
+		}
+	}
+	appeal := ""
+	for _, key := range []string{"code", "type", "status", "reason"} {
+		addSuspended(str(detail[key]))
+	}
+	details, _ := detail["details"].([]any)
+	for _, item := range details {
+		addSuspended(str(object(item)["reason"]))
+		if url := str(object(object(item)["metadata"])["appeal_url"]); appeal == "" && streamAppealURL.MatchString(url) {
+			appeal = url
+		}
+	}
+	message := "ignition provider stream error"
+	phrase := failure.SuspendedPhrase(str(detail["message"]))
+	if phrase != "" && (explicit == 0 || explicit == 400 || explicit == 401 || explicit == 403) {
+		message += ": " + phrase
+	} else {
+		phrase = ""
+	}
+	switch {
+	case len(identifiers) == 0 && phrase == "":
+		appeal = ""
+	case explicit == 0:
+		// Without an explicit status, a suspension is sorted like
+		// Google's 403 rather than by its type: OpenAI sends
+		// account_deactivated as invalid_request_error, which would read
+		// as a rejected model.
+		status = 403
+	}
 	for _, key := range []string{"code", "type"} {
 		value := str(detail[key])
 		// CPA also uses auth_unavailable for normalized upstream authentication
@@ -104,7 +154,7 @@ func streamError(v map[string]any) error {
 	if len(identifiers) > 0 {
 		code = strings.Join(identifiers, "/")
 	}
-	return &host.Error{Method: "host.model.stream_read", Code: code, Status: status, Message: "ignition provider stream error"}
+	return &host.Error{Method: "host.model.stream_read", Code: code, Status: status, Message: message, AppealURL: appeal}
 }
 
 // streamCapture parses CPA's translated chunks without retaining raw responses or

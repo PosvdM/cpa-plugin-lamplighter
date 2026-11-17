@@ -30,6 +30,11 @@ const (
 	KindPlan       = "plan"
 	KindCodexReset = "codex_reset"
 	KindTest       = "test"
+	// Credential problems and their end; see CredentialMessage.
+	KindCredential   = "credential"
+	KindSuspended    = "suspended"
+	KindRateLimited  = "rate_limited"
+	KindCredentialOK = "credential_ok"
 )
 
 // Message is one notification.
@@ -42,6 +47,10 @@ type Message struct {
 	// Label is the quota group the message is about, for the event log and
 	// the webhook. It is not sent to Bark.
 	Label string
+	// Group is the key of the quota group the message is about, and Windows
+	// the IDs of the windows of a recovery, for the event log only.
+	Group   string
+	Windows []string
 }
 
 // Sender delivers a message and reports whether the channel accepted it.

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/config"
+	"github.com/PosvdM/cpa-plugin-lamplighter/internal/failure"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/host"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/ignite"
 	"github.com/PosvdM/cpa-plugin-lamplighter/internal/notify"
@@ -109,6 +110,9 @@ func (e *Engine) nextDue(cfg config.Config) time.Time {
 	now := e.now()
 	var next time.Time
 	for _, t := range e.collectTargets(cfg) {
+		if e.credentialBlocked(t.cred.AuthIndex) {
+			continue
+		}
 		due := schedule.DueAt(e.state.Target(t.group.Key), t.reset, now)
 		if w, blocked := exhaustedWindow(t.group, now); blocked {
 			// Wake at the reset; the next poll shows whether the quota is back.
@@ -155,7 +159,7 @@ func (e *Engine) refreshTargets(cfg config.Config) {
 		if w, blocked := exhaustedWindow(t.group, now); blocked {
 			view.BlockedWindow = quota.ShortLabel(w.Label)
 			view.BlockedUntil = w.Reset
-		} else if cfg.Ignition.Enabled {
+		} else if cfg.Ignition.Enabled && !e.credentialBlocked(t.cred.AuthIndex) {
 			view.NextDue = schedule.DueAt(ts, t.reset, now)
 		}
 		views = append(views, view)
@@ -184,6 +188,11 @@ func (e *Engine) performDue(ctx context.Context, cfg config.Config) bool {
 		// A used-up window, such as the 7-day quota, rejects every request
 		// until it resets; scheduled ignition skips the target until then.
 		if _, blocked := exhaustedWindow(t.group, now); blocked {
+			continue
+		}
+		// A rejected credential or a disabled account waits for a new
+		// credential; see credentialBlocked.
+		if e.credentialBlocked(t.cred.AuthIndex) {
 			continue
 		}
 		due := schedule.DueAt(e.state.Target(t.group.Key), t.reset, now)
@@ -215,30 +224,63 @@ func (e *Engine) igniteTarget(ctx context.Context, cfg config.Config, t target, 
 	start := e.now()
 	ts.LastAttemptEpoch = float64(start.UnixNano()) / 1e9
 	e.dirty = true
+	// The fingerprint of the credential the request goes out with; a
+	// rejection waits for another one. When it cannot be read, a rejection
+	// keeps it unknown: the file read after the request may already hold a
+	// new login the request did not use. See noteFingerprint.
+	fingerprint := ""
+	if !manual {
+		fingerprint = e.credentialFingerprint(t.cred)
+	}
 
 	model, resp, err := e.execute(ctx, cfg, t)
 	if err == nil {
-		err = e.confirm(ctx, cfg, t, start, resp)
+		err = e.confirm(ctx, cfg, t, start, resp, manual)
 	}
 	now := e.now()
 	if err != nil {
+		d := failure.Diagnose(err)
 		if manual {
-			// Keep the automatic retry and circuit state unchanged. Without
-			// retry params the page displays the stored failure detail.
+			// Keep the automatic retry, circuit and credential state
+			// unchanged. manual=1 without retry_seconds tells the page that
+			// no retry follows.
 			e.addEventDetail("warn", "ignite_failed", t.group.Key, t.group.Label,
-				err.Error(), fmt.Sprintf("%s 手动点火失败：%v", t.group.Label, err), nil)
+				err.Error(), fmt.Sprintf("%s 手动点火失败：%v", t.group.Label, err),
+				map[string]string{"manual": "1", "error": err.Error(), "summary": d.Summary})
+			return err
+		}
+		if d.Reason == failure.ReasonAuth || d.Reason == failure.ReasonSuspended {
+			// Retrying cannot help: ignition waits for a new credential or a
+			// successful manual ignition.
+			ignite.RecordCredentialFailure(ts, now, err, d.Summary)
+			e.dirty = true
+			wait := map[string]string{failure.ReasonAuth: "等待更新凭证", failure.ReasonSuspended: "账号已停用"}[d.Reason]
+			e.addEventDetail("error", "ignite_paused", t.group.Key, t.group.Label,
+				fmt.Sprintf("暂停，%s：%s", wait, d.Summary),
+				fmt.Sprintf("%s 点火失败，暂停，%s：%v", t.group.Label, wait, err),
+				map[string]string{"error": err.Error(), "summary": d.Summary, "reason": d.Reason})
+			e.noteCredentialProblem(ctx, t.cred, t.group.Key, d, sourceIgnite, fingerprint)
 			return err
 		}
 		outcome := schedule.RecordFailure(ts, now, err)
 		e.dirty = true
 		if outcome.CircuitOpened {
 			until := outcome.Until.In(cfg.Location()).Format("01/02 15:04")
+			params := map[string]string{"until": eventTime(outcome.Until), "error": err.Error(), "summary": d.Summary}
+			if d.Reason != "" {
+				params["reason"] = d.Reason
+			}
 			e.addEventDetail("error", "ignite_paused", t.group.Key, t.group.Label,
-				fmt.Sprintf("暂停到 %s：%v", until, err),
-				fmt.Sprintf("%s 点火失败，暂停到 %s：%v", t.group.Label, until, err),
-				map[string]string{"until": eventTime(outcome.Until), "error": err.Error()})
+				fmt.Sprintf("暂停到 %s：%s", until, d.Summary),
+				fmt.Sprintf("%s 点火失败，暂停到 %s：%v", t.group.Label, until, err), params)
+			if d.Reason == failure.ReasonRateLimited && outcome.NotifyCircuit {
+				e.credentialEvent(t.cred, t.group.Key, d, sourceIgnite, outcome.Until)
+			}
 			if outcome.NotifyCircuit && e.alerts != nil && e.alerts.Sender != nil {
-				msg := notify.CircuitMessage(e.language(), t.group.Label, outcome.Until, err.Error(), cfg.Location())
+				msg := notify.CircuitMessage(e.language(), t.group.Label, outcome.Until, d.Summary, cfg.Location())
+				if d.Reason == failure.ReasonRateLimited {
+					msg = rateLimitedNotice(e.language(), t.group.Label, d, outcome.Until, cfg.Location())
+				}
 				switch sendErr := e.alerts.Sender.Send(ctx, msg); {
 				case errors.Is(sendErr, notify.ErrNotConfigured):
 					// Notifications are off.
@@ -253,7 +295,7 @@ func (e *Engine) igniteTarget(ctx context.Context, cfg config.Config, t target, 
 			if outcome.Cooldown {
 				retry = "CPA 冷却结束，" + retry
 			}
-			params := map[string]string{"retry_seconds": strconv.Itoa(int(outcome.RetryIn.Round(time.Second).Seconds())), "error": err.Error()}
+			params := map[string]string{"retry_seconds": strconv.Itoa(int(outcome.RetryIn.Round(time.Second).Seconds())), "error": err.Error(), "summary": d.Summary}
 			if outcome.Cooldown {
 				params["cooldown"] = "1"
 			}
@@ -265,6 +307,7 @@ func (e *Engine) igniteTarget(ctx context.Context, cfg config.Config, t target, 
 	}
 	ignite.RecordSuccess(ts, model, now)
 	e.dirty = true
+	e.noteCredentialOK(ctx, t.cred, sourceIgnite)
 	resetText := "未知"
 	params := map[string]string{"model": model}
 	if group, ok := e.group(t.group.Key); ok {
@@ -500,8 +543,9 @@ func (e *Engine) confirmed(key string, start, now time.Time) bool {
 // confirm checks that the ignition started a window. Claude responses carry
 // the new reset in their headers; Codex reports it through the usage record
 // of the same request. When neither arrives, and for providers without quota
-// in their headers, the credential is queried actively.
-func (e *Engine) confirm(ctx context.Context, cfg config.Config, t target, start time.Time, resp pluginapi.HostModelExecutionResponse) error {
+// in their headers, the credential is queried actively. The queries of a
+// manual ignition leave the credential state alone, like its failure.
+func (e *Engine) confirm(ctx context.Context, cfg config.Config, t target, start time.Time, resp pluginapi.HostModelExecutionResponse, manual bool) error {
 	var groups []quota.RawGroup
 	if spec := providers.Lookup(t.group.Provider); spec != nil && spec.Headers != nil {
 		groups = spec.Headers(resp.Headers, e.now())
@@ -522,7 +566,7 @@ func (e *Engine) confirm(ctx context.Context, cfg config.Config, t target, start
 		if e.confirmed(t.group.Key, start, e.now()) {
 			return nil
 		}
-		if err := e.refreshCred(ctx, cfg, t.cred); err != nil {
+		if err := e.queryCred(ctx, cfg, t.cred, !manual); err != nil {
 			e.logf("warn", "点火确认时刷新额度失败：%s：%v", t.group.Label, err)
 		}
 		if e.confirmed(t.group.Key, start, e.now()) {

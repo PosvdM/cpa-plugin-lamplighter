@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -529,5 +530,33 @@ func TestParseXAIBillingKeepsOneIDForOtherPeriods(t *testing.T) {
 		if Lookup(name) != xai {
 			t.Errorf("%s is not Grok", name)
 		}
+	}
+}
+
+type statusDoer struct {
+	status int
+	body   string
+}
+
+func (d statusDoer) Do(context.Context, string, quota.Request) (quota.Response, error) {
+	return quota.Response{Status: d.status, Body: []byte(d.body)}, nil
+}
+
+// A 401 keeps its response, which can name a disabled account, and still
+// matches quota.ErrUnauthorized.
+func TestUnauthorizedKeepsTheResponse(t *testing.T) {
+	body := `{"error":{"message":"Your OpenAI account has been deactivated.","type":"invalid_request_error","code":"account_deactivated"}}`
+	_, err := Fetch(context.Background(), Lookup("claude"), statusDoer{401, body}, Credential{AccessToken: "tok"}, time.Now())
+	var httpErr *quota.HTTPError
+	if !errors.Is(err, quota.ErrUnauthorized) || !errors.As(err, &httpErr) || httpErr.Status != 401 || httpErr.Body != body {
+		t.Fatalf("err %v", err)
+	}
+	long := strings.Repeat("x", 2*maxErrorBodyLength)
+	_, err = Fetch(context.Background(), Lookup("claude"), statusDoer{401, long}, Credential{AccessToken: "tok"}, time.Now())
+	if !errors.As(err, &httpErr) || len(httpErr.Body) != maxErrorBodyLength {
+		t.Fatalf("body of %d bytes", len(httpErr.Body))
+	}
+	if _, err = Fetch(context.Background(), Lookup("claude"), statusDoer{403, body}, Credential{AccessToken: "tok"}, time.Now()); errors.Is(err, quota.ErrUnauthorized) {
+		t.Fatal("403 matched ErrUnauthorized")
 	}
 }
