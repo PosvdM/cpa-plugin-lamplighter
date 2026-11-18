@@ -243,6 +243,7 @@
       save_waiting: "已保存，等待生效", save_applied: "已生效", save_unconfirmed: "未确认生效",
       save_applied_verified: "已生效，验证通过", save_applied_unverified: "已生效，未能验证：{0}", network_error: "网络错误",
       mask_on: "打码账号", mask_off: "显示账号", account_n: "账号 {0}",
+      weekdays: "周日,周一,周二,周三,周四,周五,周六",
       snapshot_card: "复制这张卡片的截图", snapshot_cards: "复制所有卡片的截图", snapshot_detail: "复制曲线详情图的截图",
       snapshot_copied: "已复制截图", snapshot_failed: "截图复制失败：{0}", snapshot_unsupported: "当前浏览器不支持复制图片",
       mcp_hint: "AI 客户端（如 Claude Code）可以通过 MCP 查询额度、历史和事件，并刷新额度。",
@@ -411,6 +412,7 @@
       save_waiting: "Saved; waiting to take effect", save_applied: "In effect", save_unconfirmed: "Not confirmed in effect",
       save_applied_verified: "In effect; CPA accepts the key", save_applied_unverified: "In effect, but could not verify: {0}", network_error: "network error",
       mask_on: "Blur accounts", mask_off: "Show accounts", account_n: "Account {0}",
+      weekdays: "Sun,Mon,Tue,Wed,Thu,Fri,Sat",
       snapshot_card: "Copy a screenshot of this card", snapshot_cards: "Copy a screenshot of all cards", snapshot_detail: "Copy a screenshot of the detail chart",
       snapshot_copied: "Screenshot copied", snapshot_failed: "Could not copy the screenshot: {0}", snapshot_unsupported: "This browser cannot copy images",
       mcp_hint: "AI clients such as Claude Code can read quota, history and events and refresh quota over MCP.",
@@ -594,6 +596,14 @@
     return pad(s.getUTCMonth() + 1) + "/" + pad(s.getUTCDate()) + " " + pad(s.getUTCHours()) + ":" + pad(s.getUTCMinutes());
   }
 
+  // A time ahead with its weekday, for resets and the next ignition.
+  function fmtDateTimeDay(t) {
+    if (!t) return "—";
+    var s = shifted(t);
+    return pad(s.getUTCMonth() + 1) + "/" + pad(s.getUTCDate()) + " " + translate("weekdays").split(",")[s.getUTCDay()] + " " +
+      pad(s.getUTCHours()) + ":" + pad(s.getUTCMinutes());
+  }
+
   function fmtClock(t) {
     var s = shifted(t);
     return pad(s.getUTCHours()) + ":" + pad(s.getUTCMinutes());
@@ -688,13 +698,17 @@
   // ---- Account masking ----
 
   // The eye button in the header blurs every text that names an account,
-  // for screenshots to share. The page shows accounts again when reloaded.
+  // for screenshots to share. The choice is kept in this browser, so each
+  // computer keeps its own, and applies before the first render.
   // Text that names accounts carries SENSITIVE, which .mask-accounts
   // blurs; chart text in SVG gets the mask-blur filter instead. Masked,
   // title tooltips that name accounts are left out and labels for screen
   // readers number the accounts. Confirmations keep the names.
   var SENSITIVE = "account-sensitive";
+  var MASK_STORE = "lamplighter-mask-accounts";
   var masked = false;
+  try { masked = localStorage.getItem(MASK_STORE) === "1"; } catch (err) {}
+  document.documentElement.classList.toggle("mask-accounts", masked);
 
   function accountAlias(index) { return translate("account_n", index + 1); }
 
@@ -795,6 +809,7 @@
   function toggleMask() {
     var detailFocus = document.activeElement === $("chart-detail-head").querySelector(".mask-toggle");
     masked = !masked;
+    try { localStorage.setItem(MASK_STORE, masked ? "1" : "0"); } catch (err) {}
     document.documentElement.classList.toggle("mask-accounts", masked);
     renderMaskButton();
     if (!status) return;
@@ -964,7 +979,7 @@
     var meta = [el("span", { class: "quota-percent" + (level === "empty" ? " percent-empty" : ""), text: Math.round(remaining) + "%" })];
     if (reset) {
       var left = reset.getTime() - Date.now();
-      meta.push(el("span", { class: "quota-reset", text: fmtDateTime(reset) }));
+      meta.push(el("span", { class: "quota-reset", text: fmtDateTimeDay(reset) }));
       meta.push(el("span", { class: "quota-countdown" + (left > 0 && left <= 3600000 ? " soon" : ""), text: fmtCountdown(left) }));
     }
     return el("div", { class: "quota-row" }, [
@@ -1317,8 +1332,8 @@
       if (st.title) statusCell.appendChild(el("div", { class: "cell-note" }, maskedNodes(st.title)));
       body.appendChild(el("tr", {}, [
         el("td", { class: "strong" }, maskedNodes(t.label)),
-        el("td", { class: "mono", text: next ? fmtDateTime(next) : "—" }),
-        el("td", { class: "mono", text: reset ? fmtDateTime(reset) : "—" }),
+        el("td", { class: "mono", text: next ? fmtDateTimeDay(next) : "—" }),
+        el("td", { class: "mono", text: reset ? fmtDateTimeDay(reset) : "—" }),
         el("td", { class: "mono", text: last ? fmtDateTime(last) : "—" }),
         el("td", { class: "mono", text: t.last_model || "—" }),
         statusCell,
