@@ -1175,3 +1175,113 @@ test("estimated stretches of a line are split off and share their ends", () => {
     [[true, [1, 2, 3, 4]], [false, [4, 5]]]);
   assert.deepEqual(plain(ctx.estimatedRuns([[1, 50, 0]]).map((r) => [r.estimated, r.pts.length])), [[false, 1]]);
 });
+
+// A localStorage with only the calls the page makes.
+function fakeStorage(items = {}) {
+  return {
+    items,
+    getItem: (k) => (Object.prototype.hasOwnProperty.call(items, k) ? items[k] : null),
+    setItem: (k, v) => { items[k] = String(v); },
+    removeItem: (k) => { delete items[k]; },
+  };
+}
+
+test("expanded groups are kept in this browser while their switch is on", () => {
+  const STORE = "lamplighter-chart-expanded";
+  const elements = { remember_chart_expanded: { name: "remember_chart_expanded", checked: true }, remember_chart_filters: { name: "remember_chart_filters", checked: false } };
+  const storage = fakeStorage({ [STORE]: JSON.stringify(["claude|Claude", "codex|gone", 3, ""]), "lamplighter-chart-filters": "{}" });
+  const ctx = context(["rememberChart", "rememberExpanded", "expandedGroups", "saveChartExpanded", "restoreChartExpanded", "changeChartSwitch"], {
+    $: () => ({ elements }), localStorage: storage, chartExpanded: {}, JSON,
+    CHART_STORE: "lamplighter-chart-filters", CHART_EXPANDED_STORE: STORE, saveChartFilters: () => {},
+  });
+  // Restoring expands the saved groups; names that are not strings are dropped.
+  ctx.restoreChartExpanded();
+  assert.deepEqual(Object.keys(ctx.chartExpanded), ["group:claude|Claude", "group:codex|gone"]);
+  // A group without a row stays in the list when another group changes.
+  ctx.chartExpanded["group:kimi|Kimi"] = true;
+  ctx.chartExpanded["group:claude|Claude"] = false;
+  ctx.chartExpanded["codex|one"] = true;
+  ctx.saveChartExpanded();
+  assert.deepEqual(JSON.parse(storage.items[STORE]), ["codex|gone", "kimi|Kimi"]);
+  // No expanded group deletes the record.
+  ctx.chartExpanded = { "group:codex|gone": false, "group:kimi|Kimi": false };
+  ctx.saveChartExpanded();
+  assert.equal(STORE in storage.items, false);
+  // A damaged record is ignored.
+  storage.items[STORE] = "{not json";
+  ctx.chartExpanded = {};
+  ctx.restoreChartExpanded();
+  assert.deepEqual(ctx.chartExpanded, {});
+  storage.items[STORE] = JSON.stringify({ "claude|Claude": true });
+  ctx.restoreChartExpanded();
+  assert.deepEqual(ctx.chartExpanded, {});
+
+  // Turning the switch off deletes the record and stops saving; turning it
+  // on saves the groups expanded now.
+  storage.items[STORE] = JSON.stringify(["claude|Claude"]);
+  elements.remember_chart_expanded.checked = false;
+  ctx.changeChartSwitch(elements.remember_chart_expanded);
+  assert.equal(STORE in storage.items, false);
+  assert.equal(storage.items["lamplighter-chart-filters"], "{}", "the other switch keeps its record");
+  ctx.chartExpanded = { "group:claude|Claude": true };
+  ctx.saveChartExpanded();
+  ctx.restoreChartExpanded();
+  assert.equal(STORE in storage.items, false);
+  elements.remember_chart_expanded.checked = true;
+  ctx.changeChartSwitch(elements.remember_chart_expanded);
+  assert.deepEqual(JSON.parse(storage.items[STORE]), ["claude|Claude"]);
+  elements.remember_chart_filters.checked = false;
+  ctx.changeChartSwitch(elements.remember_chart_filters);
+  assert.equal("lamplighter-chart-filters" in storage.items, false);
+  assert.equal(STORE in storage.items, true);
+
+  // Totals use "group:" and the provider and label as their row id, a click
+  // that expands or collapses one saves the list, and opening the page restores it.
+  assert.match(source, /id: "group:" \+ id,/);
+  assert.match(source, /chartExpanded\[r\.id\] = !chartExpanded\[r\.id\];\s*saveChartExpanded\(\);/);
+  assert.match(source, /function restoreChartFilters\(\) \{\s*restoreChartExpanded\(\);/);
+  const html = fs.readFileSync(path.join(__dirname, "page.html"), "utf8");
+  assert.match(html, /name="remember_chart_filters"[^]*name="remember_chart_expanded"/);
+});
+
+test("the public MCP address accepts only http and https addresses", () => {
+  const url = context(["publicUrl"]);
+  for (const name of ["PUBLIC_URL_TRIM", "PUBLIC_URL_FORM"]) vm.runInContext(pageVar(name), url);
+  const cases = JSON.parse(fs.readFileSync(path.join(__dirname, "testdata", "public_urls.json"), "utf8"));
+  assert.ok(cases.length > 30);
+  for (const [value, want] of cases) assert.equal(url.publicUrl(value), want, JSON.stringify(value));
+
+  const field = { value: "mcp.example.com/mcp/" };
+  const base = context(["publicUrl", "mcpBaseUrl"], {
+    $: (id) => (id === "mcp-public-url" ? field : { elements: { mcp_listen: { value: "0.0.0.0:8318" } } }),
+    status: null, MCP_LISTEN: "127.0.0.1:8318", location: { hostname: "nas" },
+  });
+  for (const name of ["PUBLIC_URL_TRIM", "PUBLIC_URL_FORM"]) vm.runInContext(pageVar(name), base);
+  assert.equal(base.mcpBaseUrl(), "https://mcp.example.com");
+  field.value = "";
+  assert.equal(base.mcpBaseUrl(), "http://nas:8318");
+  field.value = "ftp://x.com";
+  assert.equal(base.mcpBaseUrl(), "http://nas:8318", "an invalid address falls back to the listen address");
+  // /mcp comes off the path only, never off a host named mcp.
+  for (const [value, want] of [["mcp", "https://mcp"], ["mcp/", "https://mcp"], ["mcp/mcp", "https://mcp"], ["http://mcp:8318/mcp/", "http://mcp:8318"],
+    ["https://x.com/a/mcp//", "https://x.com/a"], ["https://x.com/mcpx", "https://x.com/mcpx"], ["https://x.com/a/", "https://x.com/a"]]) {
+    field.value = value;
+    assert.equal(base.mcpBaseUrl(), want, value);
+  }
+  // An invalid address is pointed out next to the field.
+  assert.match(source, /\$\("mcp-public-url-error"\)\.hidden = !invalid;/);
+  assert.match(fs.readFileSync(path.join(__dirname, "page.html"), "utf8"), /id="mcp-public-url-error"[^>]*data-i18n="mcp_public_url_invalid"[^>]*hidden/);
+});
+
+test("the client commands quote the address and the key for the shell, and the JSON is built by JSON.stringify", () => {
+  const { execFileSync } = require("node:child_process");
+  const ctx = context(["mcpSnippets", "shellQuote"]);
+  const url = "https://x.com/'$(touch /tmp/pwned)'`id`/mcp", secret = "k'ey \"$HOME\"";
+  const snippets = Object.fromEntries(ctx.mcpSnippets(url, secret));
+  assert.equal(ctx.shellQuote("a'b"), "'a'\\''b'");
+  // The shell reads each command back as the words it was built from.
+  const words = (command) => execFileSync("sh", ["-c", "for w in " + command.replace(/^\S+ /, "") + "; do printf '%s\\n' \"$w\"; done"], { encoding: "utf8" }).trim().split("\n");
+  assert.deepEqual(words(snippets.mcp_claude), ["mcp", "add", "--transport", "http", "lamplighter", url, "--header", "Authorization: Bearer " + secret]);
+  assert.deepEqual(words(snippets.mcp_stdio), ["mcp-remote", url, "--header", "Authorization: Bearer " + secret]);
+  assert.deepEqual(JSON.parse(snippets.mcp_json), { mcpServers: { lamplighter: { type: "http", url, headers: { Authorization: "Bearer " + secret } } } });
+});

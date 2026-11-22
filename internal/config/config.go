@@ -149,9 +149,12 @@ type Config struct {
 	HistoryRetentionDays int    `yaml:"history_retention_days" json:"history_retention_days"`
 	DataDir              string `yaml:"data_dir" json:"data_dir"`
 
-	// RememberChartFilters makes the page keep the chart filters in the
-	// browser and restore them when it opens.
+	// RememberChartFilters makes the page keep the chart's window, range
+	// and order in the browser and restore them when it opens.
 	RememberChartFilters bool `yaml:"remember_chart_filters" json:"remember_chart_filters"`
+	// RememberChartExpanded makes the page keep the expanded multi-account
+	// groups of the chart in the browser and restore them when it opens.
+	RememberChartExpanded bool `yaml:"remember_chart_expanded" json:"remember_chart_expanded"`
 
 	// AccountWeights maps a credential file name to the weight of the account
 	// in the total of several accounts on the page. Accounts without one use

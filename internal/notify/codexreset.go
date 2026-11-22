@@ -21,8 +21,10 @@ const DidCodexResetURL = "https://didcodexreset.com/openapi/v1/records?kind=all&
 
 const maxSeenKeys = 100
 
-// timeLayout is how reset times are shown in notifications.
-const timeLayout = "01/02 15:04"
+// contentLayout formats the times of eventContent. It has no weekday, as
+// the contents saved for schedules already sent do not, so that a later
+// post repeating a sent schedule is not taken for a change.
+const contentLayout = "01/02 15:04"
 
 // ResetRecord is one Did Codex Reset record.
 type ResetRecord map[string]any
@@ -192,20 +194,20 @@ func superseded(r ResetRecord, records []ResetRecord, now time.Time) bool {
 	return false
 }
 
-// scheduleText formats when a scheduled reset is expected, in loc. A
+// scheduleText formats when a scheduled reset is expected with format. A
 // date-level window is shown as its start and end; a deadline shows only its
 // end.
-func scheduleText(r ResetRecord, loc *time.Location, lang string) string {
+func scheduleText(r ResetRecord, format func(time.Time) string, lang string) string {
 	start, end := scheduleWindow(r)
 	switch {
 	case start.IsZero():
 		return ""
 	case !end.After(start):
-		return start.In(loc).Format(timeLayout)
+		return format(start)
 	case strings.ToLower(r.str("scheduleConstraint")) == "deadline":
-		return T(lang, "schedule_before", end.In(loc).Format(timeLayout))
+		return T(lang, "schedule_before", format(end))
 	}
-	return T(lang, "schedule_range", start.In(loc).Format(timeLayout), end.In(loc).Format(timeLayout))
+	return T(lang, "schedule_range", format(start), format(end))
 }
 
 func resetTypeLabel(value, lang string) string {
@@ -242,8 +244,15 @@ func scopeLabel(scope any, lang string) string {
 	return strings.Join(out, " · ")
 }
 
-// ResetMessage builds the notification for one record.
+// ResetMessage builds the notification for one record, with its times in
+// loc (FormatTime).
 func ResetMessage(r ResetRecord, loc *time.Location, lang string) Message {
+	return resetMessage(r, func(t time.Time) string { return FormatTime(t, loc, lang) }, lang)
+}
+
+// resetMessage builds the notification for one record, with its times
+// formatted by format.
+func resetMessage(r ResetRecord, format func(time.Time) string, lang string) Message {
 	resetType := resetTypeLabel(r.str("resetType"), lang)
 	confidence := ""
 	if value, ok := r["confidence"].(float64); ok {
@@ -252,7 +261,7 @@ func ResetMessage(r ResetRecord, loc *time.Location, lang string) Message {
 	formatTime := func(values ...string) string {
 		for _, value := range values {
 			if t := quota.ParseTime(value); !t.IsZero() {
-				return t.In(loc).Format(timeLayout)
+				return format(t)
 			}
 		}
 		return ""
@@ -261,7 +270,7 @@ func ResetMessage(r ResetRecord, loc *time.Location, lang string) Message {
 	var lines []string
 	if isSchedule(r) {
 		title = T(lang, "reset_scheduled", resetType)
-		if text := scheduleText(r, loc, lang); text != "" {
+		if text := scheduleText(r, format, lang); text != "" {
 			lines = append(lines, T(lang, "line_expected", text))
 		}
 	} else {
@@ -294,7 +303,7 @@ func ResetMessage(r ResetRecord, loc *time.Location, lang string) Message {
 // eventContent is what a schedule notification says, independent of the
 // plugin time zone and language.
 func eventContent(r ResetRecord) string {
-	return ResetMessage(r, time.UTC, LangEN).Body
+	return resetMessage(r, func(t time.Time) string { return t.UTC().Format(contentLayout) }, LangEN).Body
 }
 
 // isUpdate reports whether r changes a schedule that was already sent: it is

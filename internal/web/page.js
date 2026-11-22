@@ -153,8 +153,10 @@
       ignite_groups: "{0} 点火额度组", no_ignition: "不支持点火", list_or: " 或 ",
       codex_reset_enabled: "转发 Did Codex Reset 发布的 Codex 重置信号",
       codex_reset_pending: "首次开启时推送当前待生效的排期",
-      chart_prefs: "额度图表", remember_chart_filters: "记住筛选条件",
-      remember_chart_filters_hint: "在当前浏览器中记住上次选择的额度窗口、时间范围和排序；关闭后每次打开页面都使用默认选择。",
+      chart_prefs: "额度图表", remember_chart_filters: "记住额度窗口、时间范围和排序",
+      remember_chart_filters_hint: "在当前浏览器中记住“额度变化”上次选择的额度窗口、时间范围和排序；关闭后每次打开页面都使用默认选择。",
+      remember_chart_expanded: "记住展开的分组",
+      remember_chart_expanded_hint: "在当前浏览器中记住“额度变化”中展开的多账号分组，5 小时和 7 天额度共用一套；关闭后每次打开页面分组都是收起的。",
       save_hint: "修改后自动保存到 CPA 的 config.yaml，插件几秒内应用。文本和数字在离开输入框或按回车时保存，保存结果显示在区块标题旁，高级设置按分组显示。",
       language_note: "通知语言跟随最近打开此页面时管理中心的语言，当前为{0}。",
       lang_zh: "中文", lang_en: "English",
@@ -253,6 +255,7 @@
       mcp_generate: "生成新密钥", mcp_regenerate_confirm: "生成新密钥？旧密钥会立即失效，使用它的客户端需要换成新密钥。",
       mcp_status: "状态", mcp_unknown: "未知", mcp_running: "运行中", mcp_stopped: "未启动",
       mcp_public_url: "对外地址（可选）",
+      mcp_public_url_invalid: "对外地址须为 http 或 https 地址，不能含空格、? 或 #；下面的配置暂用监听地址。",
       mcp_public_hint: "对外开放时请使用反向代理并配置 HTTPS，然后在这里填写对外地址，下面的配置随之更新。这个地址只保存在当前浏览器。",
       mcp_snippets: "客户端配置", mcp_claude: "Claude Code", mcp_json: "通用 JSON", mcp_stdio: "只支持 stdio 的客户端（mcp-remote）",
       mcp_no_key: "先生成密钥，配置中的 <key> 会换成实际的密钥。", mcp_error: "MCP 接口未启动：{0}"
@@ -323,8 +326,10 @@
       ignite_groups: "{0} ignition groups", no_ignition: "No ignition", list_or: " or ",
       codex_reset_enabled: "Forward Codex reset signals published by Did Codex Reset",
       codex_reset_pending: "When first turned on, send the pending schedule",
-      chart_prefs: "Quota chart", remember_chart_filters: "Remember the filters",
-      remember_chart_filters_hint: "This browser remembers the last quota window, time range and order. When off, the page opens with the default choices.",
+      chart_prefs: "Quota chart", remember_chart_filters: "Remember the window, range and order",
+      remember_chart_filters_hint: "This browser remembers the quota window, time range and order last chosen in the quota history. When off, the page opens with the default choices.",
+      remember_chart_expanded: "Remember expanded groups",
+      remember_chart_expanded_hint: "This browser remembers the multi-account groups expanded in the quota history, one set for the 5-hour and 7-day quotas. When off, the page opens with the groups collapsed.",
       save_hint: "Changes save to CPA's config.yaml automatically, and the plugin applies them within a few seconds. Text and numbers save when you leave the field or press Enter. Save results appear beside section headings or advanced group legends.",
       language_note: "Notifications use the Management Center language from the last time this page was opened, now {0}.",
       lang_zh: "中文", lang_en: "English",
@@ -423,6 +428,7 @@
       mcp_generate: "Generate new key", mcp_regenerate_confirm: "Generate a new key? The old key stops working at once, and clients using it need the new one.",
       mcp_status: "Status", mcp_unknown: "Unknown", mcp_running: "Running", mcp_stopped: "Not running",
       mcp_public_url: "Public address (optional)",
+      mcp_public_url_invalid: "The public address must be an http or https address without spaces, ? or #. The configs below use the listen address.",
       mcp_public_hint: "To open it to other machines, put a reverse proxy with HTTPS in front and enter its address here; the configs below follow it. The address is kept in this browser only.",
       mcp_snippets: "Client configuration", mcp_claude: "Claude Code", mcp_json: "Generic JSON", mcp_stdio: "stdio-only clients (mcp-remote)",
       mcp_no_key: "Generate a key first; it replaces <key> in the configs.", mcp_error: "The MCP endpoint is not running: {0}"
@@ -2453,7 +2459,10 @@
         "↻" + fmtCountdown(r.reset * 1000 - Date.now())));
       var hit = svg("rect", { x: 0, y: y0 - 3, width: g.width, height: LANE + 6, fill: "transparent", style: "cursor:pointer" });
       hit.addEventListener("click", function () {
-        if (r.children && chartSelected === r.id) chartExpanded[r.id] = !chartExpanded[r.id];
+        if (r.children && chartSelected === r.id) {
+          chartExpanded[r.id] = !chartExpanded[r.id];
+          saveChartExpanded();
+        }
         chartSelected = r.id;
         renderChart();
       });
@@ -3273,11 +3282,52 @@
   // browser's localStorage as {window, sort, ranges: {"5h": ..., "7d": ...}}
   // and restored when the page opens. Each window keeps its own range because
   // the two windows offer different ranges.
+  // With remember_chart_expanded on, CHART_EXPANDED_STORE lists the
+  // expanded totals by the id of their row without "group:", the provider
+  // and the label, as in "claude|Claude"; one list serves both windows.
+  // The switches read the settings form, so a change applies before it is
+  // saved.
   var CHART_STORE = "lamplighter-chart-filters";
+  var CHART_EXPANDED_STORE = "lamplighter-chart-expanded";
 
   function rememberChart() {
     var input = $("settings").elements["remember_chart_filters"];
     return !!(input && input.checked);
+  }
+
+  function rememberExpanded() {
+    var input = $("settings").elements["remember_chart_expanded"];
+    return !!(input && input.checked);
+  }
+
+  // The expanded groups. Groups the chart does not show, such as those of
+  // the other window or of an account that is gone, stay in the list.
+  function expandedGroups() {
+    return Object.keys(chartExpanded).filter(function (id) {
+      return chartExpanded[id] && id.indexOf("group:") === 0;
+    }).map(function (id) { return id.slice(6); });
+  }
+
+  // Saves the expanded groups, or deletes the record when none is expanded.
+  function saveChartExpanded() {
+    if (!rememberExpanded()) return;
+    var names = expandedGroups();
+    try {
+      if (names.length) localStorage.setItem(CHART_EXPANDED_STORE, JSON.stringify(names));
+      else localStorage.removeItem(CHART_EXPANDED_STORE);
+    } catch (err) {}
+  }
+
+  // Expands the saved groups. Names without a row stay expanded in
+  // chartExpanded, and so in the list, until the user collapses the group.
+  function restoreChartExpanded() {
+    if (!rememberExpanded()) return;
+    var saved = null;
+    try { saved = JSON.parse(localStorage.getItem(CHART_EXPANDED_STORE) || "null"); } catch (err) {}
+    if (!Array.isArray(saved)) return;
+    saved.forEach(function (name) {
+      if (typeof name === "string" && name) chartExpanded["group:" + name] = true;
+    });
   }
 
   function storedChartFilters() {
@@ -3298,6 +3348,18 @@
     } catch (err) {}
   }
 
+  // Turning a chart switch on keeps the current state; turning it off
+  // forgets it.
+  function changeChartSwitch(input) {
+    var expanded = input.name === "remember_chart_expanded";
+    if (input.checked) {
+      if (expanded) saveChartExpanded();
+      else saveChartFilters();
+    } else {
+      try { localStorage.removeItem(expanded ? CHART_EXPANDED_STORE : CHART_STORE); } catch (err) {}
+    }
+  }
+
   // The remembered range of a window, or its default when nothing valid is saved.
   function rangeFor(kind) {
     var ranges = rememberChart() ? storedChartFilters().ranges : null;
@@ -3306,6 +3368,7 @@
   }
 
   function restoreChartFilters() {
+    restoreChartExpanded();
     if (!rememberChart()) return;
     var saved = storedChartFilters();
     if (windowKinds().indexOf(saved.window) >= 0) chartWindow = saved.window;
@@ -4165,14 +4228,35 @@
 
   function maskedKey(value) { return value ? value.slice(0, 6) + "••••••••••••" + value.slice(-4) : ""; }
 
-  // The address clients use: the public address entered in this browser, or
-  // http:// and the listen address. A listen address without a host or on
-  // all interfaces is reached through the host of this page.
+  // The public address as clients use it: https:// in front of an address
+  // without a scheme. "" when value is empty, null when it is not an http or
+  // https address. The host is ASCII letters, digits and "-" in parts joined
+  // by ".", without bracketed IPv6 addresses; the path is printable ASCII
+  // without "#", "?" and "\", and the port at most 65535. The ends are
+  // trimmed of Unicode white space. internal/web/testdata/public_urls.json
+  // lists the cases.
+  var PUBLIC_URL_TRIM = /^[\t\n\v\f\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+|[\t\n\v\f\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+$/g;
+  var PUBLIC_URL_FORM = /^[Hh][Tt][Tt][Pp][Ss]?:\/\/[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*(?::([0-9]{1,5}))?(\/[\x21\x22\x24-\x3e\x40-\x5b\x5d-\x7e]*)?$/;
+  function publicUrl(value) {
+    var text = String(value || "").replace(PUBLIC_URL_TRIM, "");
+    if (!text) return "";
+    var full = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(text) ? text : "https://" + text;
+    var m = PUBLIC_URL_FORM.exec(full);
+    return m && !(m[1] && Number(m[1]) > 65535) ? full : null;
+  }
+
+  // The address clients use, without the path /mcp: the public address in
+  // the field, kept in this browser, while it is valid, with /mcp and
+  // trailing slashes taken off its path, or http:// and the listen address.
+  // A listen address without a host or on all interfaces is reached through
+  // the host of this page.
   function mcpBaseUrl() {
-    var stored = "";
-    try { stored = localStorage.getItem(MCP_URL_STORE) || ""; } catch (err) {}
-    stored = stored.trim().replace(/\/+$/, "").replace(/\/mcp$/, "");
-    if (stored) return /^[a-z][a-z0-9+.-]*:\/\//i.test(stored) ? stored : "https://" + stored;
+    var field = $("mcp-public-url");
+    var stored = publicUrl(field && field.value);
+    if (stored) {
+      var path = PUBLIC_URL_FORM.exec(stored)[2] || "";
+      return stored.slice(0, stored.length - path.length) + path.replace(/\/+$/, "").replace(/\/mcp$/, "");
+    }
     var input = $("settings").elements["mcp_listen"];
     var listen = (input && input.value.trim()) || (status && status.mcp && status.mcp.listen) || MCP_LISTEN;
     var at = listen.lastIndexOf(":");
@@ -4181,12 +4265,19 @@
     return "http://" + host + port;
   }
 
+  // A POSIX shell word for text: single quotes, with ' written as '\''.
+  function shellQuote(text) {
+    return "'" + String(text).replace(/'/g, "'\\''") + "'";
+  }
+
+  // The commands quote the address and the header for the shell; the JSON
+  // is built by JSON.stringify.
   function mcpSnippets(url, secret) {
-    var auth = "Authorization: Bearer " + secret;
+    var auth = shellQuote("Authorization: Bearer " + secret);
     return [
-      ["mcp_claude", "claude mcp add --transport http lamplighter " + url + " --header \"" + auth + "\""],
+      ["mcp_claude", "claude mcp add --transport http lamplighter " + shellQuote(url) + " --header " + auth],
       ["mcp_json", JSON.stringify({ mcpServers: { lamplighter: { type: "http", url: url, headers: { Authorization: "Bearer " + secret } } } }, null, 2)],
-      ["mcp_stdio", "npx mcp-remote " + url + " --header \"" + auth + "\""]
+      ["mcp_stdio", "npx mcp-remote " + shellQuote(url) + " --header " + auth]
     ];
   }
 
@@ -4214,6 +4305,11 @@
       if (mcp.error) box.appendChild(el("span", { class: "error-text", text: mcp.error }));
     }
 
+    var publicField = $("mcp-public-url");
+    var invalid = publicUrl(publicField.value) === null;
+    $("mcp-public-url-error").hidden = !invalid;
+    if (invalid) publicField.setAttribute("aria-invalid", "true");
+    else publicField.removeAttribute("aria-invalid");
     var url = mcpBaseUrl() + "/mcp";
     var snippets = $("mcp-snippets");
     clear(snippets);
@@ -4408,11 +4504,8 @@
     var button = e.target.closest(".seg");
     if (button && button.getAttribute("aria-pressed") !== "true") showView(button.getAttribute("data-value"), true);
   });
-  // Turning remembering on keeps the current filters; turning it off forgets them.
-  $("settings").elements["remember_chart_filters"].addEventListener("change", function (e) {
-    if (e.target.checked) saveChartFilters();
-    else try { localStorage.removeItem(CHART_STORE); } catch (err) {}
-  });
+  $("settings").elements["remember_chart_filters"].addEventListener("change", function (e) { changeChartSwitch(e.target); });
+  $("settings").elements["remember_chart_expanded"].addEventListener("change", function (e) { changeChartSwitch(e.target); });
   $("settings").addEventListener("submit", function (e) { e.preventDefault(); });
   // Enter commits a text or number field; leaving it fires the change that saves it.
   $("settings").addEventListener("keydown", function (e) {

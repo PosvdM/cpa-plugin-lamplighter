@@ -17,18 +17,18 @@ func TestParseEmptyUsesDefaults(t *testing.T) {
 	if !cfg.Provider("codex").Ignite || cfg.Provider("antigravity").Ignite {
 		t.Fatal("codex ignites by default, antigravity does not")
 	}
-	if cfg.RememberChartFilters {
-		t.Fatal("chart filters are not remembered by default")
+	if cfg.RememberChartFilters || cfg.RememberChartExpanded {
+		t.Fatal("the chart state is not remembered by default")
 	}
 }
 
 func TestParseRememberChartFilters(t *testing.T) {
-	cfg, err := Parse([]byte("remember_chart_filters: true\n"))
+	cfg, err := Parse([]byte("remember_chart_filters: true\nremember_chart_expanded: true\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.RememberChartFilters {
-		t.Fatal("remember_chart_filters not read")
+	if !cfg.RememberChartFilters || !cfg.RememberChartExpanded {
+		t.Fatalf("remember switches not read: %+v", cfg)
 	}
 }
 

@@ -266,7 +266,7 @@ func TestRateLimitedIgnitionNotifiesWithPauseEnd(t *testing.T) {
 	e.performDue(ctx, cfg)
 	limited := messagesOf(sender, notify.KindRateLimited)
 	if len(h.executed) != 1 || len(sender.sent) != 1 || len(limited) != 1 || limited[0].Title != "⏳ Claude 被限流" ||
-		!strings.Contains(limited[0].Body, "11/17 07:00") || !strings.Contains(limited[0].Body, "Number of requests has exceeded your rate limit.") {
+		!strings.Contains(limited[0].Body, "11/17 周二 07:00") || !strings.Contains(limited[0].Body, "Number of requests has exceeded your rate limit.") {
 		t.Fatalf("rate limit notification %+v", sender.sent)
 	}
 	ev := eventsOf(e, "credential_invalid")
