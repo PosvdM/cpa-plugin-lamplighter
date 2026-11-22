@@ -3,6 +3,7 @@ package notify
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 // Notification languages. The management page reports the language of the
@@ -22,6 +23,26 @@ func NormalizeLang(value string) string {
 		return LangZH
 	}
 	return LangEN
+}
+
+// weekdays holds the short weekday names per language, Sunday first, as
+// the page shows them.
+var weekdays = map[string][7]string{
+	LangZH: {"周日", "周一", "周二", "周三", "周四", "周五", "周六"},
+	LangEN: {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"},
+}
+
+// FormatTime formats t in loc as every notification shows a date and
+// time: month/day, weekday and time, such as "11/23 周一 03:00" or
+// "11/23 Mon 03:00", the way the page shows them. A language without
+// weekday names uses Chinese, like T.
+func FormatTime(t time.Time, loc *time.Location, lang string) string {
+	names, ok := weekdays[lang]
+	if !ok {
+		names = weekdays[LangZH]
+	}
+	local := t.In(loc)
+	return local.Format("01/02") + " " + names[local.Weekday()] + " " + local.Format("15:04")
 }
 
 // texts holds every notification text per language. A new language adds a

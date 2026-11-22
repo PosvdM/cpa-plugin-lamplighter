@@ -264,9 +264,13 @@
         <fieldset>
           <legend><span data-i18n="chart_prefs">额度图表</span></legend>
           <div class="checks">
-            <label class="inline"><input name="remember_chart_filters" type="checkbox"><span data-i18n="remember_chart_filters">记住筛选条件</span></label>
+            <label class="inline"><input name="remember_chart_filters" type="checkbox"><span data-i18n="remember_chart_filters">记住额度窗口、时间范围和排序</span></label>
           </div>
-          <p class="hint" data-i18n="remember_chart_filters_hint">在当前浏览器中记住上次选择的额度窗口、时间范围和排序；关闭后每次打开页面都使用默认选择。</p>
+          <p class="hint" data-i18n="remember_chart_filters_hint">在当前浏览器中记住“额度变化”上次选择的额度窗口、时间范围和排序；关闭后每次打开页面都使用默认选择。</p>
+          <div class="checks">
+            <label class="inline"><input name="remember_chart_expanded" type="checkbox"><span data-i18n="remember_chart_expanded">记住展开的分组</span></label>
+          </div>
+          <p class="hint" data-i18n="remember_chart_expanded_hint">在当前浏览器中记住“额度变化”中展开的多账号分组，5 小时和 7 天额度共用一套；关闭后每次打开页面分组都是收起的。</p>
         </fieldset>
         <fieldset class="mcp">
           <legend><span>MCP</span></legend>
@@ -290,7 +294,7 @@
             <span class="field-label" data-i18n="mcp_status">状态</span>
             <div id="mcp-status" class="mcp-status"></div>
           </div>
-          <label><span data-i18n="mcp_public_url">对外地址（可选）</span><input id="mcp-public-url" type="text" spellcheck="false" autocomplete="off" placeholder="https://mcp.example.com"><span class="hint" data-i18n="mcp_public_hint">对外开放时请使用反向代理并配置 HTTPS，然后在这里填写对外地址，下面的配置随之更新。这个地址只保存在当前浏览器。</span></label>
+          <label><span data-i18n="mcp_public_url">对外地址（可选）</span><input id="mcp-public-url" type="text" spellcheck="false" autocomplete="off" placeholder="https://mcp.example.com"><span id="mcp-public-url-error" class="error-text" data-i18n="mcp_public_url_invalid" hidden>对外地址须为 http 或 https 地址，不能含空格、? 或 #；下面的配置暂用监听地址。</span><span class="hint" data-i18n="mcp_public_hint">对外开放时请使用反向代理并配置 HTTPS，然后在这里填写对外地址，下面的配置随之更新。这个地址只保存在当前浏览器。</span></label>
           <div class="field">
             <span class="field-label" data-i18n="mcp_snippets">客户端配置</span>
             <div id="mcp-snippets" class="snippets"></div>

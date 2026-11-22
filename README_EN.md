@@ -130,11 +130,11 @@ Notifications use the Management Center language from the last time the manageme
 ```text
 🟡 Claude · 7d 48% | 03d
 
-5h: 96% | 04h | 10/04 13:50
-7d: 48% | 03d | 10/07 14:00
+5h: 96% | 04h | 10/04 Sun 13:50
+7d: 48% | 03d | 10/07 Wed 14:00
 ```
 
-Title icons: 🟡 remaining fell to the first threshold (50% by default), 🔴 to the second threshold (20% by default) or below, ✅ recovered, ⏰ reset reminder, 🎫 plan changed, 🔑 credential invalid, ⛔ account suspended, ⏳ rate limited, ✅ credential works again, ⚠️ a problem that needs action, such as ignition paused or a CPA cooldown that outlasts the quota. Each body line shows the window, the remaining quota, the time until reset, and the reset time. The first time the plugin sees a quota window it only records the current level and sends nothing.
+Title icons: 🟡 remaining fell to the first threshold (50% by default), 🔴 to the second threshold (20% by default) or below, ✅ recovered, ⏰ reset reminder, 🎫 plan changed, 🔑 credential invalid, ⛔ account suspended, ⏳ rate limited, ✅ credential works again, ⚠️ a problem that needs action, such as ignition paused or a CPA cooldown that outlasts the quota. Each body line shows the window, the remaining quota, the time until reset, and the reset time. Dates and times in notifications read "month/day weekday hour:minute", such as `10/04 Sun 13:50`, or `10/04 周日 13:50` in Chinese. The first time the plugin sees a quota window it only records the current level and sends nothing.
 
 ## Configuration
 
@@ -162,7 +162,8 @@ With no failures, the heading shows the most recent save's progress. A failed sa
 | `models_api_key` | empty | CPA API key for reading the model list; without it ignition cannot pick a model. The management key does not work here; the page does not save the management key or a key CPA does not accept, and says why |
 | `cpa_base_url` | `http://127.0.0.1:8317` | Address the plugin uses to reach CPA; change it when CPA uses another port or TLS |
 | `history_retention_days` | `40` | Days of quota history to keep |
-| `remember_chart_filters` | `false` | The management page remembers, in the current browser, the quota window, time range and order last chosen in the quota chart; when off, the page opens with the defaults |
+| `remember_chart_filters` | `false` | "Remember the window, range and order" on the page: the management page remembers, in the current browser, the quota window, time range and order last chosen in the quota chart; when off, the page opens with the defaults |
+| `remember_chart_expanded` | `false` | "Remember expanded groups" on the page: the management page remembers, in the current browser, the multi-account groups expanded in the quota chart, one set for the 5-hour and 7-day quotas; when off, the page opens with the groups collapsed |
 | `account_weights` | empty | The weight of each account in the total of several accounts, keyed by credential file name, a number above 0; accounts without one use the default of their plan, see above |
 | `account_order` | empty | Account order by credential file name; unlisted accounts follow in default order and missing entries are ignored |
 | `mcp_enabled` | `false` | Enable the independent MCP server, see [MCP](#mcp) |
@@ -254,6 +255,8 @@ Use a cryptographic random generator for the key, for example 32 random bytes en
 ### Client connections
 
 The default URL within the same network namespace is `http://127.0.0.1:8318/mcp`. Replace it with an HTTPS URL for remote access. `<key>` below is the dedicated MCP key.
+
+The MCP section of the Settings view builds client configs for Claude Code, generic JSON and mcp-remote from the listen address, ready to copy. When clients go through a reverse proxy, enter its address under "Public address (optional)" and the configs follow it; the address is kept in the current browser only. The public address must be an http or https address, and `https://` is assumed when no scheme is given. The host may contain only ASCII letters, digits, `.` and `-`, without bracketed IPv6 addresses, and the whole address only printable ASCII, without spaces, `?`, `#` or `\`. An invalid address is pointed out on the page, and the configs keep the listen address.
 
 Claude Code:
 
@@ -362,7 +365,7 @@ Placeholders are escaped for where they appear: URL-encoded in the URL; JSON-str
 Without `body`, the webhook receives this JSON:
 
 ```json
-{"source":"lamplighter","kind":"quota","title":"🔴 GPT#rk · 5h 8% | 03h","body":"5h: 8% | 03h | 10/10 19:00\n7d: 60% | 04d | 10/14 09:00","text":"…","url":"","priority":"high","label":"GPT#rk","time":"2026-10-10T16:00:00+08:00"}
+{"source":"lamplighter","kind":"quota","title":"🔴 GPT#rk · 5h 8% | 03h","body":"5h: 8% | 03h | 10/10 Sat 19:00\n7d: 60% | 04d | 10/14 Wed 09:00","text":"…","url":"","priority":"high","label":"GPT#rk","time":"2026-10-10T16:00:00+08:00"}
 ```
 
 Settings for common services follow. They are format examples based on each service's documentation and have not all been tested.
@@ -403,9 +406,9 @@ Use the "Quota | Settings" switch at the top to change views. The browser rememb
 - five color levels shared by quota bars and charts: full at a raw remaining value of 100%, empty at 0%, and high, medium and low between them, split by the first two alert thresholds; 99.6% does not use the full color even when rounded to 100% for display;
 - the next ignition and current reset (both with the weekday), last result and failure protection state of each quota group, with an "ignite now" button; hidden while ignition is off;
 - a quota chart:
-  - It shows either the 5-hour quota, over 1, 3, 6, 12, 24 or 26 hours (6 by default), or the 7-day quota, over 1, 4, 8 or 15 days, one month (from this date last month) or 36 days (8 days by default). Window kinds and chart rows include current windows and windows with samples in the selected history range. A current window without new samples in the range keeps its row, with missing intervals marked as no data. Windows of other lengths only show on the account cards. With `remember_chart_filters` on, the page keeps the last choices.
+  - It shows either the 5-hour quota, over 1, 3, 6, 12, 24 or 26 hours (6 by default), or the 7-day quota, over 1, 4, 8 or 15 days, one month (from this date last month) or 36 days (8 days by default). Window kinds and chart rows include current windows and windows with samples in the selected history range. A current window without new samples in the range keeps its row, with missing intervals marked as no data. Windows of other lengths only show on the account cards. With `remember_chart_filters` ("Remember the window, range and order") on, the page keeps the last choices in the current browser.
   - 1 and 3 hours and 1 and 4 days end now. Longer ranges end at the reset of the selected row's current window; 6 hours, for example, shows the current 5-hour window and the last hour of the previous one, with the time after now hatched. When the selected row has no reset, or its reset has passed (a 5-hour window no request has opened yet), these ranges also end now.
-  - The top part has one colored band per service, colored like the quota bars by the lowest reading so far in each cycle. The default order follows the account cards: each service takes the position of its first account, and groups within the same account keep their group order. You can also sort by lowest remaining. A service with several accounts shows their weighted total and expands into one row per account. While one account is missing data, the total estimates that account from its readings and its scheduled reset, and the detail chart draws that stretch dashed; while the latest total is estimated, no projection is drawn.
+  - The top part has one colored band per service, colored like the quota bars by the lowest reading so far in each cycle. The default order follows the account cards: each service takes the position of its first account, and groups within the same account keep their group order. You can also sort by lowest remaining. A service with several accounts shows their weighted total; clicking the selected total expands it into one row per account. With `remember_chart_expanded` ("Remember expanded groups") on, the page keeps the expanded groups in the current browser, one set for the 5-hour and 7-day quotas. While one account is missing data, the total estimates that account from its readings and its scheduled reset, and the detail chart draws that stretch dashed; while the latest total is estimated, no projection is drawn.
   - A window the account no longer reports is marked "Inactive" until its last sample leaves the selected range. It gets a separate row and is excluded from totals and lowest-first ordering. Its curve ends at the last reading, without an even-pace line or projection.
   - The bottom part plots the selected row with its resets and ignition results. Its even-pace line uses the scheduled reset recorded at each time and a fixed 5-hour or 7-day length, falling linearly from 100% to 0% at that reset. An early reset cuts the old reference where the new reset is first observed and starts a reference for the new schedule. No reference is drawn while the reset is unknown. If the current window loses its reset time, the reference stops at the chart’s current-time boundary instead of extending toward the previous reset. The reference value is null at that boundary, and the single-account and total headers show “—” for both even pace and difference. A curve above the reference is using quota slower than an even pace. A total shows the weighted mean reference only while every account has a reference value. Its header shows the current remaining, the even-pace value now and the difference between them, green above the pace and red below. When the chart ends now, these three values also appear right of the plot, at the ends of the curve and the even-pace line. When the scheduled reset moves within a cycle, the new reference is extended back as a dash-dot line to the start of the cycle, where the quota rose back. When the chart is wide enough, its heading sits as a column in the blank left of the plot.
   - When the chart ends at a reset, a projection starts now: if the quota runs out first, the time (and the date for the 7-day quota) is marked on the time axis; if the reset comes first, what will be left is marked right of the plot.
