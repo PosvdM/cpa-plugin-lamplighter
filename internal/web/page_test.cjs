@@ -1101,3 +1101,77 @@ test("older failure events without params hide their whole detail when masked", 
   // Events with params keep the masking by names and error texts.
   assert.equal(ctx.eventView(event("ignite_failed", 0, { label: "Claude", params: { manual: "1", error: "x", summary: "y" } })).whole, false);
 });
+
+function pooledContext() {
+  return context(["valueAt", "pooled", "resetAsOf", "gapValue", "estimatedRuns"], { RESET_JUMP: 5 });
+}
+
+test("a pooled total estimates an account missing data rather than leaving it out", () => {
+  const ctx = pooledContext();
+  const now = Math.floor(Date.now() / 1000), H = 3600, limit = 900;
+  const t0 = now - 4 * H;
+  const every = (from, to, value) => { const out = []; for (let t = from; t <= to; t += 300) out.push([t, value, 0]); return out; };
+  // a stays full; b reads 51% until a two-hour gap, then a passive 52%
+  // (a header reads a point above the usage API) and 51% again.
+  const a = { weight: 1, resets: [[t0, now + 5 * 86400]], points: every(t0, now, 100) };
+  const b = { weight: 1, resets: [[t0, now + 2 * 86400]],
+    points: every(t0, t0 + H, 51).concat([[t0 + 3 * H, 52, 1]], every(t0 + 3 * H + 300, now, 51)) };
+  a.floor = a.points; b.floor = b.points;
+  const out = ctx.pooled([a, b], limit, "points");
+  const gap = out.filter((p) => p[0] > t0 + H + limit && p[0] < t0 + 3 * H);
+  assert.ok(gap.length > 10);
+  // Never the 100% of a alone; b holds 51% and the total stays at 75.5%.
+  gap.forEach((p) => { assert.equal(p[1], 75.5); assert.equal(p[5], 1); });
+  const measured = out.filter((p) => p[0] <= t0 + H + limit || p[0] >= t0 + 3 * H);
+  measured.forEach((p) => assert.equal(p[5], 0));
+  // With no account fresh there is no point: a gap of the total.
+  const both = ctx.pooled([{ weight: 1, resets: [], points: [[t0, 50, 0], [t0 + 2 * H, 40, 0]] },
+    { weight: 1, resets: [], points: [[t0, 70, 0], [t0 + 2 * H, 60, 0]] }], limit, "points");
+  assert.deepEqual(JSON.parse(JSON.stringify(both.map((p) => p[0]))), [t0, t0 + 2 * H]);
+
+  // A reset within the gap shows at the next sample of a fresh account;
+  // the total gets no point of its own there, so a stretch without any
+  // fresh account stays a gap.
+  const resetB = { weight: 1, resets: [[t0, t0 + H + 1800]], points: [[t0, 20, 0], [t0 + 3 * H, 100, 0]] };
+  const fresh = { weight: 1, resets: [], points: every(t0, t0 + 3 * H, 50) };
+  const total = ctx.pooled([resetB, fresh], limit, "points");
+  assert.deepEqual(JSON.parse(JSON.stringify(total.filter((p) => p[0] === t0 + H + 1800).map((p) => p[1]))), [75]);
+  assert.deepEqual(JSON.parse(JSON.stringify(total.filter((p) => p[0] === t0 + H + 1500).map((p) => p[1]))), [35]);
+  const lone = ctx.pooled([resetB, { weight: 1, resets: [], points: [[t0, 50, 0], [t0 + 3 * H, 50, 0]] }], limit, "points");
+  assert.deepEqual(JSON.parse(JSON.stringify(lone.map((p) => p[0]))), [t0, t0 + 3 * H]);
+});
+
+test("an estimate falls between the samples around a gap and returns to full at a reset", () => {
+  const ctx = pooledContext();
+  const limit = 900, t0 = 1000000;
+  const plain = (v) => JSON.parse(JSON.stringify(v));
+  // The same cycle: straight from one sample to the next, never above the first.
+  const falling = [[t0, 60, 0], [t0 + 4000, 40, 0]];
+  assert.deepEqual(plain(ctx.gapValue(falling, [[t0, t0 + 9000]], t0 + 2000, limit)), { value: 50, estimated: true });
+  const rising = [[t0, 51, 0], [t0 + 4000, 53, 1]];
+  assert.equal(ctx.gapValue(rising, [[t0, t0 + 9000]], t0 + 2000, limit).value, 51);
+  // A recent sample is measured.
+  assert.deepEqual(plain(ctx.gapValue(falling, [], t0 + 600, limit)), { value: 60, estimated: false });
+  assert.equal(ctx.gapValue(falling, [], t0 - 1, limit), null);
+  // A reset within the gap: the last value until the reset, then from 100%
+  // to the next sample.
+  const across = [[t0, 10, 0], [t0 + 4000, 80, 0]];
+  const resets = [[t0, t0 + 2000], [t0 + 4000, t0 + 20000]];
+  assert.equal(ctx.gapValue(across, resets, t0 + 1999, limit).value, 10);
+  assert.equal(ctx.gapValue(across, resets, t0 + 2000, limit).value, 100);
+  assert.equal(ctx.gapValue(across, resets, t0 + 3000, limit).value, 90);
+  // A rise by a reset of unknown time holds the last value.
+  assert.equal(ctx.gapValue(across, [], t0 + 3000, limit).value, 10);
+  // After the last sample: the last value until the reset, then 100%.
+  assert.equal(ctx.gapValue([[t0, 30, 0]], [[t0, t0 + 2000]], t0 + 1500, limit).value, 30);
+  assert.equal(ctx.gapValue([[t0, 30, 0]], [[t0, t0 + 2000]], t0 + 2500, limit).value, 100);
+});
+
+test("estimated stretches of a line are split off and share their ends", () => {
+  const ctx = pooledContext();
+  const plain = (v) => JSON.parse(JSON.stringify(v));
+  const pts = [[1, 80, 0, 0, 0, 0], [2, 79, 0, 0, 0, 1], [3, 78, 0, 0, 0, 1], [4, 77, 0, 0, 0, 0], [5, 76, 0, 0, 0, 0]];
+  assert.deepEqual(plain(ctx.estimatedRuns(pts).map((r) => [r.estimated, r.pts.map((p) => p[0])])),
+    [[true, [1, 2, 3, 4]], [false, [4, 5]]]);
+  assert.deepEqual(plain(ctx.estimatedRuns([[1, 50, 0]]).map((r) => [r.estimated, r.pts.length])), [[false, 1]]);
+});

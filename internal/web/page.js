@@ -110,6 +110,7 @@
       pace_extended: "匀速参考（往回延长）",
       legend_pace_extended: "匀速参考往回延长到本周期起点（周期中途预定重置变了）",
       legend_pooled: "多账号的服务显示合计额度，点击行查看详情，再点一次展开各账号",
+      legend_estimated: "合计中有账号缺数据，按它前后的读数估算",
       data_table: "数据表",
       col_quota: "额度", col_account: "账号", col_latest: "最新", col_min: "最低", col_max: "最高", col_samples: "样本", col_to_reset: "距重置",
       events: "事件",
@@ -210,7 +211,7 @@
       range_h: "{0} 小时", range_d: "{0} 天", range_mo: "{0} 个月",
       overview_aria: "各额度剩余百分比总览",
       ignition_lane: "点火", lane_ok: "{0} 成功", lane_failed: " · {0} 失败",
-      total: "合计", total_suffix: " 合计", more_accounts: "　… 另 {0} 个账号",
+      total: "合计", total_suffix: " 合计", estimated_suffix: "（估算）", more_accounts: "　… 另 {0} 个账号",
       pooled_note: "{0} 个账号合计，阴影为账号间的最低到最高",
       stat_total: "合计", stat_current: "当前", stat_pace: "匀速", stat_diff: "差值", stat_to_reset: "距重置",
       projected_5h: "按当前速度", projected_7d: "按本周期日均",
@@ -279,6 +280,7 @@
       pace_extended: "Even pace (extended back)",
       legend_pace_extended: "Even pace extended back to the cycle start (the reset moved within the cycle)",
       legend_pooled: "Services with several accounts show their total; click a row for details, click again to list the accounts",
+      legend_estimated: "An account of the total is missing data; estimated from its readings before and after",
       data_table: "Data table",
       col_quota: "Quota", col_account: "Account", col_latest: "Latest", col_min: "Lowest", col_max: "Highest", col_samples: "Samples", col_to_reset: "Until reset",
       events: "Events",
@@ -379,7 +381,7 @@
       range_h: "{0}h", range_d: "{0}d", range_mo: "{0} month",
       overview_aria: "Remaining quota overview",
       ignition_lane: "Ignition", lane_ok: "{0} succeeded", lane_failed: " · {0} failed",
-      total: "Total", total_suffix: " total", more_accounts: "　… {0} more accounts",
+      total: "Total", total_suffix: " total", estimated_suffix: " (estimated)", more_accounts: "　… {0} more accounts",
       pooled_note: "Total of {0} accounts; the shade spans the lowest to the highest account",
       stat_total: "Total", stat_current: "Now", stat_pace: "Even pace", stat_diff: "Difference", stat_to_reset: "Until reset",
       projected_5h: "At the current rate", projected_7d: "At this cycle's daily average",
@@ -2062,8 +2064,15 @@
   // Pooled remaining of several accounts: the mean percentage weighted by
   // the accounts' weights, which is the share of the total quota left when
   // the weights match the sizes of the plans. Each point also carries the
-  // lowest and highest account for the range band. key is "points" or
-  // "floor".
+  // lowest and highest account for the range band, and 1 when an account's
+  // share is estimated (gapValue). key is "points" or "floor".
+  //
+  // An account without a recent sample keeps its share as estimated, or the
+  // total would jump to the mean of the others, such as to 100% for a pair
+  // whose other account is full. Only accounts with no sample yet are left
+  // out. The total has points only at the samples of its accounts, so it
+  // covers only the times some account has data for; a reset within an
+  // account's gap shows at the next sample of another account.
   function pooled(rows, limit, key) {
     var times = [];
     rows.forEach(function (r) { r[key].forEach(function (p) { times.push(p[0]); }); });
@@ -2071,16 +2080,60 @@
     var out = [];
     times.forEach(function (t, i) {
       if (i && t === times[i - 1]) return;
-      var sum = 0, total = 0, lo = 101, hi = -1;
+      var sum = 0, total = 0, lo = 101, hi = -1, estimated = 0, fresh = false;
       rows.forEach(function (r) {
-        var p = valueAt(r[key], t);
-        if (!p || t - p[0] > limit) return;
-        sum += r.weight * p[1]; total += r.weight; lo = Math.min(lo, p[1]); hi = Math.max(hi, p[1]);
+        var v = gapValue(r[key], r.resets, t, limit);
+        if (!v) return;
+        if (v.estimated) estimated = 1;
+        else fresh = true;
+        sum += r.weight * v.value; total += r.weight; lo = Math.min(lo, v.value); hi = Math.max(hi, v.value);
       });
-      if (total) out.push([t, sum / total, 0, lo, hi]);
+      // With every account estimated there is no data at all: a gap.
+      if (fresh) out.push([t, sum / total, 0, lo, hi, estimated]);
     });
     return out;
   }
+
+  // The reset an account's window was due at as of time t, from the resets
+  // of its history ([sample time, reset]); 0 when unknown.
+  function resetAsOf(resets, t) {
+    var at = 0;
+    (resets || []).forEach(function (r) { if (r[0] <= t) at = r[1]; });
+    return at;
+  }
+
+  // The value of one account at time t for a pooled total: its last sample
+  // when recent, otherwise an estimate { value, estimated: true }; null
+  // before its first sample.
+  //
+  // Within one cycle the remaining only falls, so across a gap between two
+  // samples it lies between them: the estimate runs straight from one to
+  // the other, never above the first. A response header reads a point above
+  // the usage API, which is not a rise. A gap that spans the window's reset
+  // keeps the last value until the reset, then runs from 100% to the next
+  // sample. After the last sample the last value holds until the reset,
+  // then 100%.
+  function gapValue(points, resets, t, limit) {
+    var p = valueAt(points, t);
+    if (!p) return null;
+    if (t - p[0] <= limit) return { value: p[1], estimated: false };
+    var next = null;
+    for (var i = 0; i < points.length; i++) {
+      if (points[i][0] > t) { next = points[i]; break; }
+    }
+    var reset = resetAsOf(resets, p[0]);
+    var resetIn = reset > p[0] && (!next || reset <= next[0]);
+    var value;
+    if (next && !resetIn && next[1] - p[1] < RESET_JUMP) {
+      value = Math.min(p[1], p[1] + (next[1] - p[1]) * (t - p[0]) / (next[0] - p[0]));
+    } else if (resetIn && t >= reset) {
+      value = next ? 100 + (next[1] - 100) * (t - reset) / Math.max(1, next[0] - reset) : 100;
+    } else {
+      value = p[1];
+    }
+    return { value: value, estimated: true };
+  }
+
 
   // The lowest remaining so far in each cycle. Response headers report a
   // point more than active queries (51 against 50), which near a threshold
@@ -2446,14 +2499,17 @@
       if (hoverSource !== "overview" || t > g.now) { tip.hidden = true; return; }
       clear(tip);
       tip.appendChild(el("div", { class: "time", text: fmtDateTime(unixDate(t)) }));
-      function at(row) {
+      function sample(row) {
         var p = valueAt(row.points, t);
-        return p && t - p[0] <= limit && !(row.inactive && t > row.lastAt) ? p[1] : null;
+        return p && t - p[0] <= limit && !(row.inactive && t > row.lastAt) ? p : null;
       }
+      function at(row) { var p = sample(row); return p ? p[1] : null; }
       flat.forEach(function (f) {
         var r = f.row;
         if (f.depth) { tipRow(tip, "　" + r.sub, at(r), r.id === rowId); return; }
-        tipRow(tip, r.name + (r.children ? translate("total_suffix") : r.inactive ? translate("inactive_suffix") : ""), at(r), r.id === rowId);
+        var p = sample(r);
+        var suffix = r.children ? translate("total_suffix") + (p && p[5] ? translate("estimated_suffix") : "") : r.inactive ? translate("inactive_suffix") : "";
+        tipRow(tip, r.name + suffix, p ? p[1] : null, r.id === rowId);
         if (r.children && !chartExpanded[r.id]) {
           r.children.slice(0, 5).forEach(function (c) { tipRow(tip, "　" + c.sub, at(c), false); });
           if (r.children.length > 5) tip.appendChild(el("div", { class: "row muted", text: translate("more_accounts", r.children.length - 5) }));
@@ -2527,6 +2583,19 @@
       if (i === 0 || i === pts.length - 1 || p[key] !== pts[i - 1][key]) return true;
       return Math.abs(pts[i + 1][key] - p[key]) > QUANTUM;
     });
+  }
+
+  // Split a line into runs of measured and estimated stretches (index 5 of
+  // a pooled point, see pooled). A stretch is estimated where either end is,
+  // and neighbouring runs share their end point, so the line stays joined.
+  function estimatedRuns(pts) {
+    var runs = [];
+    for (var i = 0; i + 1 < pts.length; i++) {
+      var estimated = !!(pts[i][5] || pts[i + 1][5]), run = runs[runs.length - 1];
+      if (run && run.estimated === estimated) run.pts.push(pts[i + 1]);
+      else runs.push({ estimated: estimated, pts: [pts[i], pts[i + 1]] });
+    }
+    return runs.length ? runs : [{ estimated: !!(pts[0] && pts[0][5]), pts: pts }];
   }
 
   // Split samples where any of the keys rises by a reset. Resets one sample
@@ -2753,10 +2822,12 @@
   // ends, now; for a 5-hour window whose rate does not yet hold the latest
   // value until now, at the latest sample, so the line does not level off
   // before a projection that still falls. Null without a reset ahead on the
-  // axis, without current data, with nothing left or without a rate.
+  // axis, without current data, with nothing left, without a rate, or for
+  // a total whose latest value is estimated.
   function projection(row, g, lastRun, limit) {
     var last = row.points[row.points.length - 1];
     if (g.to <= g.now || !lastRun || lastRun.end < g.now - limit || !(last[1] > 0)) return null;
+    if (last[5]) return null;
     var rate, t0 = lastRun.end;
     if (historyWindow === "7d") rate = cycleRate(row, g.now);
     else {
@@ -2905,6 +2976,7 @@
     // dashes of the even pace and the dots of the projection.
     if (extendedD) plot.appendChild(svg("path", { d: extendedD, fill: "none", stroke: cssVar("--text-tertiary"), "stroke-opacity": 0.8, "stroke-width": 1.5, "stroke-dasharray": "8 3 1.5 3" }));
     $("legend-pace-extended").hidden = !extendedD;
+    var estimatedShown = false;
     pieces.forEach(function (piece) {
       if (group) splitAtResets(piece.pts, [3, 4]).parts.forEach(function (part) {
         if (part.length < 2) return;
@@ -2914,14 +2986,22 @@
       });
       // Each piece starts at its reset sample, so the return to full is a
       // break in the line rather than a slope that never happened.
+      // A total with an account's share estimated (pooled) is dashed there.
       piece.split.parts.forEach(function (part) {
-        var xy = curvePoints(declining(part, 1), 1).map(function (p) { return [g.x(p[0]), y(p[1])]; });
-        if (xy.length === 1) xy.push([xy[0][0] + 1, xy[0][1]]);
-        var d = monotonePath(xy);
-        if (!group) plot.appendChild(svg("path", { d: d + "L" + xy[xy.length - 1][0] + " " + y(0) + "L" + xy[0][0] + " " + y(0) + "Z", fill: "url(#chart-fade)" }));
-        plot.appendChild(svg("path", { d: d, fill: "none", stroke: cssVar("--text-primary"), "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }));
+        estimatedRuns(declining(part, 1)).forEach(function (run) {
+          var xy = curvePoints(run.pts, 1).map(function (p) { return [g.x(p[0]), y(p[1])]; });
+          if (xy.length === 1) xy.push([xy[0][0] + 1, xy[0][1]]);
+          var d = monotonePath(xy);
+          if (!group) plot.appendChild(svg("path", { d: d + "L" + xy[xy.length - 1][0] + " " + y(0) + "L" + xy[0][0] + " " + y(0) + "Z", fill: "url(#chart-fade)" }));
+          var line = { d: d, fill: "none", stroke: cssVar("--text-primary"), "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" };
+          if (run.estimated) { line["stroke-dasharray"] = "5 4"; line["stroke-opacity"] = 0.7; }
+          plot.appendChild(svg("path", line));
+          if (run.estimated) estimatedShown = true;
+        });
       });
     });
+    // Like the extension's, the legend explains the dashes only when drawn.
+    $("legend-estimated").hidden = !estimatedShown;
     var lastLabel = -99;
     resets.forEach(function (t) {
       if (t < g.from) return;
@@ -3036,7 +3116,7 @@
       clear(tip);
       tip.appendChild(el("div", { class: "time", text: fmtDateTime(unixDate(t)) }));
       if (group) {
-        tipRow(tip, translate("total"), p ? p[1] : null, true);
+        tipRow(tip, translate("total") + (p && p[5] ? translate("estimated_suffix") : ""), p ? p[1] : null, true);
         row.children.slice(0, 6).forEach(function (c) {
           var q = valueAt(c.points, t);
           tipRow(tip, "　" + c.sub, q && t - q[0] <= limit ? q[1] : null, false);
@@ -3123,13 +3203,27 @@
     $("legend-empty").textContent = translate("level_empty") + " 0%";
   }
 
+  // The chart is cleared and drawn again, and drawing it measures its width,
+  // which lays the page out while the chart is empty. The card keeps its
+  // height meanwhile, or the shorter page would pull the scroll position up.
   function renderChart() {
-    var overview = $("chart"), head = $("chart-detail-head"), detail = $("chart-detail");
     renderLegend();
     // The chart measures its width, so a hidden chart is drawn when its view
     // shows.
     if ($("view-quota").hidden) return;
+    var card = $("chart").parentNode;
+    card.style.minHeight = card.offsetHeight + "px";
+    try {
+      drawChart();
+    } finally {
+      card.style.minHeight = "";
+    }
+  }
+
+  function drawChart() {
+    var overview = $("chart"), head = $("chart-detail-head"), detail = $("chart-detail");
     chartBehind = false;
+    $("legend-estimated").hidden = true;
     overview.classList.toggle("loading", historyLoading !== "" && historyLoading !== historyKey(historyWindow, historyRange));
     clear(overview); clear(head); clear(detail);
     clear($("chart-table"));
