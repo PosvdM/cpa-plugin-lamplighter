@@ -2461,7 +2461,7 @@
       hit.addEventListener("click", function () {
         if (r.children && chartSelected === r.id) {
           chartExpanded[r.id] = !chartExpanded[r.id];
-          saveChartExpanded();
+          saveGroupExpanded(r.id);
         }
         chartSelected = r.id;
         renderChart();
@@ -3308,26 +3308,51 @@
     }).map(function (id) { return id.slice(6); });
   }
 
-  // Saves the expanded groups, or deletes the record when none is expanded.
-  function saveChartExpanded() {
-    if (!rememberExpanded()) return;
-    var names = expandedGroups();
+  // The saved groups; a record that is not a list of names counts as none.
+  function storedExpanded() {
+    var saved = null;
+    try { saved = JSON.parse(localStorage.getItem(CHART_EXPANDED_STORE) || "null"); } catch (err) {}
+    if (!Array.isArray(saved)) return [];
+    return saved.filter(function (name) { return typeof name === "string" && name; });
+  }
+
+  // Writes the saved groups, or deletes the record when there is none.
+  function writeExpanded(names) {
     try {
       if (names.length) localStorage.setItem(CHART_EXPANDED_STORE, JSON.stringify(names));
       else localStorage.removeItem(CHART_EXPANDED_STORE);
     } catch (err) {}
   }
 
-  // Expands the saved groups. Names without a row stay expanded in
-  // chartExpanded, and so in the list, until the user collapses the group.
-  function restoreChartExpanded() {
+  // Adds or removes the group of row id in the saved list as the chart now
+  // shows it. The list is read again first, so that the groups another tab
+  // of this browser expanded or collapsed meanwhile are kept.
+  function saveGroupExpanded(id) {
+    if (!rememberExpanded() || id.indexOf("group:") !== 0) return;
+    var name = id.slice(6);
+    var names = storedExpanded().filter(function (n) { return n !== name; });
+    if (chartExpanded[id]) names.push(name);
+    writeExpanded(names);
+  }
+
+  // Adds the groups expanded now to the saved list, when the switch turns on.
+  function saveChartExpanded() {
     if (!rememberExpanded()) return;
-    var saved = null;
-    try { saved = JSON.parse(localStorage.getItem(CHART_EXPANDED_STORE) || "null"); } catch (err) {}
-    if (!Array.isArray(saved)) return;
-    saved.forEach(function (name) {
-      if (typeof name === "string" && name) chartExpanded["group:" + name] = true;
-    });
+    var names = storedExpanded();
+    expandedGroups().forEach(function (name) { if (names.indexOf(name) < 0) names.push(name); });
+    writeExpanded(names);
+  }
+
+  // Expands the saved groups. Names without a row stay in the list until
+  // the user collapses the group. With the switch off, as when it was
+  // turned off in config.yaml or another browser, the record is deleted,
+  // so that turning it on again does not bring back old groups.
+  function restoreChartExpanded() {
+    if (!rememberExpanded()) {
+      writeExpanded([]);
+      return;
+    }
+    storedExpanded().forEach(function (name) { chartExpanded["group:" + name] = true; });
   }
 
   function storedChartFilters() {
@@ -3367,9 +3392,14 @@
     return RANGES[kind].some(function (r) { return r[0] === saved; }) ? saved : DEFAULT_RANGE[kind];
   }
 
+  // Restores the chart state when the page opens. A switch that is off
+  // deletes its record, as turning it off on this page would.
   function restoreChartFilters() {
     restoreChartExpanded();
-    if (!rememberChart()) return;
+    if (!rememberChart()) {
+      try { localStorage.removeItem(CHART_STORE); } catch (err) {}
+      return;
+    }
     var saved = storedChartFilters();
     if (windowKinds().indexOf(saved.window) >= 0) chartWindow = saved.window;
     if (saved.sort === "default" || saved.sort === "low") chartSort = saved.sort;
@@ -4245,14 +4275,40 @@
     return m && !(m[1] && Number(m[1]) > 65535) ? full : null;
   }
 
-  // The address clients use, without the path /mcp: the public address in
-  // the field, kept in this browser, while it is valid, with /mcp and
-  // trailing slashes taken off its path, or http:// and the listen address.
-  // A listen address without a host or on all interfaces is reached through
-  // the host of this page.
-  function mcpBaseUrl() {
+  // The public address kept in this browser, trimmed as publicUrl trims
+  // it. Another tab may have changed it since this one filled its field, so
+  // the configs read it here; the field serves only where localStorage is
+  // not available.
+  function storedPublicUrl() {
+    try { return localStorage.getItem(MCP_URL_STORE) || ""; } catch (err) {}
     var field = $("mcp-public-url");
-    var stored = publicUrl(field && field.value);
+    return field ? field.value.replace(PUBLIC_URL_TRIM, "") : "";
+  }
+
+  // Shows the public address another tab saved (a storage event with key,
+  // null when the storage was cleared) in the field and the configs.
+  function syncPublicUrl(key) {
+    if (key !== MCP_URL_STORE && key !== null) return;
+    $("mcp-public-url").value = storedPublicUrl();
+    renderMcp();
+  }
+
+  // Keeps the public address typed in the field, or deletes it when empty.
+  function savePublicUrl(value) {
+    var text = String(value || "").replace(PUBLIC_URL_TRIM, "");
+    try {
+      if (text) localStorage.setItem(MCP_URL_STORE, text);
+      else localStorage.removeItem(MCP_URL_STORE);
+    } catch (err) {}
+  }
+
+  // The address clients use, without the path /mcp: the public address
+  // kept in this browser while it is valid, with /mcp and trailing slashes
+  // taken off its path, or http:// and the listen address. A listen address
+  // without a host or on all interfaces is reached through the host of this
+  // page.
+  function mcpBaseUrl() {
+    var stored = publicUrl(storedPublicUrl());
     if (stored) {
       var path = PUBLIC_URL_FORM.exec(stored)[2] || "";
       return stored.slice(0, stored.length - path.length) + path.replace(/\/+$/, "").replace(/\/mcp$/, "");
@@ -4306,7 +4362,7 @@
     }
 
     var publicField = $("mcp-public-url");
-    var invalid = publicUrl(publicField.value) === null;
+    var invalid = publicUrl(storedPublicUrl()) === null;
     $("mcp-public-url-error").hidden = !invalid;
     if (invalid) publicField.setAttribute("aria-invalid", "true");
     else publicField.removeAttribute("aria-invalid");
@@ -4478,12 +4534,10 @@
   $("mcp-key-new").addEventListener("click", generateMcpKey);
   $("mcp-key-show").addEventListener("click", function () { mcpKeyShown = !mcpKeyShown; renderMcp(); });
   $("mcp-key-copy").addEventListener("click", function (e) { copyText(mcpKey(), e.currentTarget); });
-  // The public address stays in this browser; the configs follow it.
+  // The public address stays in this browser; the configs follow it, also
+  // when another tab changes it.
   $("mcp-public-url").addEventListener("input", function (e) {
-    try {
-      if (e.target.value.trim()) localStorage.setItem(MCP_URL_STORE, e.target.value.trim());
-      else localStorage.removeItem(MCP_URL_STORE);
-    } catch (err) {}
+    savePublicUrl(e.target.value);
     renderMcp();
   });
   try { $("mcp-public-url").value = localStorage.getItem(MCP_URL_STORE) || ""; } catch (err) {}
@@ -4573,6 +4627,7 @@
   window.addEventListener("storage", function (e) {
     if (e.key === "cli-proxy-theme") { applyTheme(); renderChart(); }
     if (e.key === "cli-proxy-language") applyLanguage();
+    syncPublicUrl(e.key);
   });
   if (window.matchMedia) {
     var media = window.matchMedia("(prefers-color-scheme: dark)");

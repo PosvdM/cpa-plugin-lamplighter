@@ -1187,58 +1187,81 @@ function fakeStorage(items = {}) {
 }
 
 test("expanded groups are kept in this browser while their switch is on", () => {
-  const STORE = "lamplighter-chart-expanded";
+  const STORE = "lamplighter-chart-expanded", FILTERS = "lamplighter-chart-filters";
   const elements = { remember_chart_expanded: { name: "remember_chart_expanded", checked: true }, remember_chart_filters: { name: "remember_chart_filters", checked: false } };
-  const storage = fakeStorage({ [STORE]: JSON.stringify(["claude|Claude", "codex|gone", 3, ""]), "lamplighter-chart-filters": "{}" });
-  const ctx = context(["rememberChart", "rememberExpanded", "expandedGroups", "saveChartExpanded", "restoreChartExpanded", "changeChartSwitch"], {
+  const storage = fakeStorage({ [STORE]: JSON.stringify(["claude|Claude", "codex|gone", 3, ""]), [FILTERS]: "{}" });
+  const ctx = context(["rememberChart", "rememberExpanded", "expandedGroups", "storedExpanded", "writeExpanded", "saveGroupExpanded",
+    "saveChartExpanded", "restoreChartExpanded", "changeChartSwitch"], {
     $: () => ({ elements }), localStorage: storage, chartExpanded: {}, JSON,
-    CHART_STORE: "lamplighter-chart-filters", CHART_EXPANDED_STORE: STORE, saveChartFilters: () => {},
+    CHART_STORE: FILTERS, CHART_EXPANDED_STORE: STORE, saveChartFilters: () => {},
   });
+  const saved = () => (STORE in storage.items ? JSON.parse(storage.items[STORE]) : null);
   // Restoring expands the saved groups; names that are not strings are dropped.
   ctx.restoreChartExpanded();
   assert.deepEqual(Object.keys(ctx.chartExpanded), ["group:claude|Claude", "group:codex|gone"]);
-  // A group without a row stays in the list when another group changes.
-  ctx.chartExpanded["group:kimi|Kimi"] = true;
+  // Expanding or collapsing a group changes only its name in the saved
+  // list, read again first: what another tab saved meanwhile stays, a group
+  // without a row stays, and a group this tab still shows expanded but
+  // another tab collapsed is not written back.
+  storage.items[STORE] = JSON.stringify(["claude|Claude", "kimi|Kimi"]);
+  ctx.chartExpanded["group:xai|Grok"] = true;
+  ctx.saveGroupExpanded("group:xai|Grok");
+  assert.deepEqual(saved(), ["claude|Claude", "kimi|Kimi", "xai|Grok"]);
   ctx.chartExpanded["group:claude|Claude"] = false;
-  ctx.chartExpanded["codex|one"] = true;
-  ctx.saveChartExpanded();
-  assert.deepEqual(JSON.parse(storage.items[STORE]), ["codex|gone", "kimi|Kimi"]);
-  // No expanded group deletes the record.
-  ctx.chartExpanded = { "group:codex|gone": false, "group:kimi|Kimi": false };
-  ctx.saveChartExpanded();
-  assert.equal(STORE in storage.items, false);
+  ctx.saveGroupExpanded("group:claude|Claude");
+  assert.deepEqual(saved(), ["kimi|Kimi", "xai|Grok"]);
+  ctx.saveGroupExpanded("codex|one");
+  assert.deepEqual(saved(), ["kimi|Kimi", "xai|Grok"], "only totals are kept");
+  // Collapsing the last group deletes the record.
+  storage.items[STORE] = JSON.stringify(["xai|Grok"]);
+  ctx.chartExpanded["group:xai|Grok"] = false;
+  ctx.saveGroupExpanded("group:xai|Grok");
+  assert.equal(saved(), null);
   // A damaged record is ignored.
-  storage.items[STORE] = "{not json";
   ctx.chartExpanded = {};
-  ctx.restoreChartExpanded();
-  assert.deepEqual(ctx.chartExpanded, {});
-  storage.items[STORE] = JSON.stringify({ "claude|Claude": true });
-  ctx.restoreChartExpanded();
-  assert.deepEqual(ctx.chartExpanded, {});
+  for (const bad of ["{not json", JSON.stringify({ "claude|Claude": true })]) {
+    storage.items[STORE] = bad;
+    ctx.restoreChartExpanded();
+    assert.deepEqual(ctx.chartExpanded, {});
+  }
 
   // Turning the switch off deletes the record and stops saving; turning it
-  // on saves the groups expanded now.
+  // on adds the groups expanded now to what is saved.
   storage.items[STORE] = JSON.stringify(["claude|Claude"]);
   elements.remember_chart_expanded.checked = false;
   ctx.changeChartSwitch(elements.remember_chart_expanded);
-  assert.equal(STORE in storage.items, false);
-  assert.equal(storage.items["lamplighter-chart-filters"], "{}", "the other switch keeps its record");
+  assert.equal(saved(), null);
+  assert.equal(storage.items[FILTERS], "{}", "the other switch keeps its record");
   ctx.chartExpanded = { "group:claude|Claude": true };
+  ctx.saveGroupExpanded("group:claude|Claude");
   ctx.saveChartExpanded();
-  ctx.restoreChartExpanded();
-  assert.equal(STORE in storage.items, false);
+  assert.equal(saved(), null);
+  storage.items[STORE] = JSON.stringify(["kimi|Kimi"]);
   elements.remember_chart_expanded.checked = true;
   ctx.changeChartSwitch(elements.remember_chart_expanded);
-  assert.deepEqual(JSON.parse(storage.items[STORE]), ["claude|Claude"]);
+  assert.deepEqual(saved(), ["kimi|Kimi", "claude|Claude"]);
   elements.remember_chart_filters.checked = false;
   ctx.changeChartSwitch(elements.remember_chart_filters);
-  assert.equal("lamplighter-chart-filters" in storage.items, false);
-  assert.equal(STORE in storage.items, true);
+  assert.equal(FILTERS in storage.items, false);
+  assert.notEqual(saved(), null);
+  // A page that opens with the switch off, turned off in config.yaml or in
+  // another browser, deletes the record and expands nothing.
+  elements.remember_chart_expanded.checked = false;
+  ctx.chartExpanded = {};
+  ctx.restoreChartExpanded();
+  assert.equal(saved(), null);
+  assert.deepEqual(ctx.chartExpanded, {});
 
   // Totals use "group:" and the provider and label as their row id, a click
-  // that expands or collapses one saves the list, and opening the page restores it.
+  // that expands or collapses one saves it, and opening the page restores
+  // both records or deletes those whose switch is off.
   assert.match(source, /id: "group:" \+ id,/);
-  assert.match(source, /chartExpanded\[r\.id\] = !chartExpanded\[r\.id\];\s*saveChartExpanded\(\);/);
+  assert.match(source, /chartExpanded\[r\.id\] = !chartExpanded\[r\.id\];\s*saveGroupExpanded\(r\.id\);/);
+  const restore = context(["restoreChartFilters"], {
+    restoreChartExpanded: () => {}, rememberChart: () => false, localStorage: fakeStorage({ [FILTERS]: "{}" }), CHART_STORE: FILTERS,
+  });
+  restore.restoreChartFilters();
+  assert.equal(FILTERS in restore.localStorage.items, false);
   assert.match(source, /function restoreChartFilters\(\) \{\s*restoreChartExpanded\(\);/);
   const html = fs.readFileSync(path.join(__dirname, "page.html"), "utf8");
   assert.match(html, /name="remember_chart_filters"[^]*name="remember_chart_expanded"/);
@@ -1251,23 +1274,59 @@ test("the public MCP address accepts only http and https addresses", () => {
   assert.ok(cases.length > 30);
   for (const [value, want] of cases) assert.equal(url.publicUrl(value), want, JSON.stringify(value));
 
-  const field = { value: "mcp.example.com/mcp/" };
-  const base = context(["publicUrl", "mcpBaseUrl"], {
+  const STORE = "lamplighter-mcp-url";
+  const storage = fakeStorage();
+  const field = { value: "" };
+  let renders = 0;
+  const base = context(["publicUrl", "storedPublicUrl", "savePublicUrl", "syncPublicUrl", "mcpBaseUrl"], {
     $: (id) => (id === "mcp-public-url" ? field : { elements: { mcp_listen: { value: "0.0.0.0:8318" } } }),
-    status: null, MCP_LISTEN: "127.0.0.1:8318", location: { hostname: "nas" },
+    status: null, MCP_LISTEN: "127.0.0.1:8318", MCP_URL_STORE: STORE, location: { hostname: "nas" },
+    localStorage: storage, renderMcp: () => { renders++; },
   });
   for (const name of ["PUBLIC_URL_TRIM", "PUBLIC_URL_FORM"]) vm.runInContext(pageVar(name), base);
+  base.savePublicUrl("mcp.example.com/mcp/");
   assert.equal(base.mcpBaseUrl(), "https://mcp.example.com");
-  field.value = "";
+  base.savePublicUrl("  ");
+  assert.equal(STORE in storage.items, false, "an empty address is deleted");
   assert.equal(base.mcpBaseUrl(), "http://nas:8318");
-  field.value = "ftp://x.com";
+  base.savePublicUrl("ftp://x.com");
   assert.equal(base.mcpBaseUrl(), "http://nas:8318", "an invalid address falls back to the listen address");
   // /mcp comes off the path only, never off a host named mcp.
   for (const [value, want] of [["mcp", "https://mcp"], ["mcp/", "https://mcp"], ["mcp/mcp", "https://mcp"], ["http://mcp:8318/mcp/", "http://mcp:8318"],
     ["https://x.com/a/mcp//", "https://x.com/a"], ["https://x.com/mcpx", "https://x.com/mcpx"], ["https://x.com/a/", "https://x.com/a"]]) {
-    field.value = value;
+    base.savePublicUrl(value);
     assert.equal(base.mcpBaseUrl(), want, value);
   }
+  // Saving trims what the check trims, so an address keeps its verdict
+  // when the page opens again: U+FEFF is not white space here.
+  for (const [value, want] of cases) {
+    base.savePublicUrl(value);
+    assert.equal(base.publicUrl(base.storedPublicUrl()), want, JSON.stringify(value));
+  }
+  base.savePublicUrl("\u3000https://x.com\u0085");
+  assert.equal(storage.items[STORE], "https://x.com");
+
+  // The configs follow the saved address, not this tab's field, and a change
+  // made in another tab updates the field and the configs.
+  base.savePublicUrl("https://new.example.com");
+  field.value = "https://old.example.com";
+  assert.equal(base.mcpBaseUrl(), "https://new.example.com");
+  base.syncPublicUrl("lamplighter-view");
+  assert.equal(field.value, "https://old.example.com");
+  assert.equal(renders, 0);
+  base.syncPublicUrl(STORE);
+  assert.equal(field.value, "https://new.example.com");
+  delete storage.items[STORE];
+  base.syncPublicUrl(null);
+  assert.equal(field.value, "");
+  assert.equal(base.mcpBaseUrl(), "http://nas:8318");
+  assert.equal(renders, 2);
+  assert.match(source.match(/window\.addEventListener\("storage", function \(e\) \{[^]*?\n  \}\);/)[0], /syncPublicUrl\(e\.key\);/);
+  // Without localStorage the field is used.
+  base.localStorage = { getItem: () => { throw new Error("denied"); } };
+  field.value = " mcp.example.com ";
+  assert.equal(base.mcpBaseUrl(), "https://mcp.example.com");
+
   // An invalid address is pointed out next to the field.
   assert.match(source, /\$\("mcp-public-url-error"\)\.hidden = !invalid;/);
   assert.match(fs.readFileSync(path.join(__dirname, "page.html"), "utf8"), /id="mcp-public-url-error"[^>]*data-i18n="mcp_public_url_invalid"[^>]*hidden/);
