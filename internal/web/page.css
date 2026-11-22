@@ -394,6 +394,7 @@ td.actions { text-align: right; }
   width: 16px; height: 1.5px; border-radius: 0; vertical-align: 3px;
   background: linear-gradient(90deg, var(--text-tertiary) 0 8px, transparent 8px 11px, var(--text-tertiary) 11px 12.5px, transparent 12.5px);
 }
+.legend .swatch.estimated { width: 14px; height: 0; border-radius: 0; border-top: 2px dashed var(--text-primary); opacity: 0.7; vertical-align: 3px; }
 .legend .swatch.projection { width: 14px; height: 0; border-radius: 0; border-top: 2px dotted var(--text-primary); vertical-align: 3px; }
 .legend .muted { color: var(--text-tertiary); }
 .tooltip {
